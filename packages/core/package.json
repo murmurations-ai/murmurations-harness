@@ -1,0 +1,55 @@
+{
+  "name": "@murmuration/core",
+  "version": "0.0.0",
+  "description": "Core runtime for the Murmuration Harness — scheduler, signal aggregator, plugin registry, and executor interface.",
+  "license": "MIT",
+  "author": "Emergent Praxis murmuration",
+  "homepage": "https://github.com/murmurations-ai/murmurations-harness/tree/main/packages/core",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/murmurations-ai/murmurations-harness.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/murmurations-ai/murmurations-harness/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./execution": {
+      "types": "./dist/execution/index.d.ts",
+      "import": "./dist/execution/index.js"
+    },
+    "./governance": {
+      "types": "./dist/governance/index.d.ts",
+      "import": "./dist/governance/index.js"
+    },
+    "./scheduler": {
+      "types": "./dist/scheduler/index.d.ts",
+      "import": "./dist/scheduler/index.js"
+    },
+    "./signals": {
+      "types": "./dist/signals/index.d.ts",
+      "import": "./dist/signals/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "rm -rf dist .tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'tests not yet configured (pending Engineering Circle test framework ADR — TypeScript #24 consulted)'"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
