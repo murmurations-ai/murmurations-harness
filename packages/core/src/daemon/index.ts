@@ -42,6 +42,7 @@ import {
   type ScheduledWakeEvent,
   type WakeTrigger,
 } from "../scheduler/index.js";
+import type { SignalAggregator } from "../signals/index.js";
 
 // ---------------------------------------------------------------------------
 // Agent registry (Phase 1A: hardcoded inline; Phase 1B: loaded from disk)
@@ -165,6 +166,15 @@ export interface DaemonConfig {
     readonly provider: SecretsProvider;
     readonly declaration: SecretDeclaration;
   };
+  /**
+   * Optional signal aggregator. If absent, the daemon emits an empty
+   * SignalBundle (Phase 1A behavior). If present, the daemon calls
+   * `aggregator.aggregate(...)` before each wake's `executor.spawn()`
+   * and threads the result into the spawn context.
+   *
+   * Added in Phase 1B step B4 (Architecture Agent #23).
+   */
+  readonly signalAggregator?: SignalAggregator;
 }
 
 export interface DaemonLogger {
@@ -189,6 +199,7 @@ export class Daemon {
   readonly #secrets:
     | { readonly provider: SecretsProvider; readonly declaration: SecretDeclaration }
     | undefined;
+  readonly #signalAggregator: SignalAggregator | undefined;
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
 
@@ -199,6 +210,7 @@ export class Daemon {
     this.#logger = config.logger ?? defaultLogger();
     this.#heartbeatMs = config.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
     this.#secrets = config.secrets;
+    this.#signalAggregator = config.signalAggregator;
   }
 
   /**
@@ -304,11 +316,13 @@ export class Daemon {
   }
 
   async #runWake(agent: RegisteredAgent, event: ScheduledWakeEvent): Promise<void> {
-    const context = buildSpawnContext(agent, event);
+    const context = await buildSpawnContext(agent, event, this.#signalAggregator, this.#logger);
     this.#logger.info("daemon.wake.fire", {
       agentId: agent.agentId,
       wakeId: event.wakeId.value,
       wakeReason: event.wakeReason,
+      signalCount: context.signals.signals.length,
+      signalWarnings: context.signals.warnings.length,
     });
 
     try {
@@ -401,10 +415,12 @@ export class Daemon {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const buildSpawnContext = (
+const buildSpawnContext = async (
   agent: RegisteredAgent,
   event: ScheduledWakeEvent,
-): AgentSpawnContext => {
+  aggregator: SignalAggregator | undefined,
+  logger: DaemonLogger,
+): Promise<AgentSpawnContext> => {
   const agentId = makeAgentId(agent.agentId);
   const circleIds: CircleId[] = agent.circleMemberships.map((c) => makeCircleId(c));
 
@@ -460,12 +476,46 @@ const buildSpawnContext = (
     ],
   };
 
-  const signals: SignalBundle = {
-    wakeId: event.wakeId,
-    assembledAt: new Date(),
-    signals: [],
-    warnings: [],
-  };
+  let signals: SignalBundle;
+  if (aggregator) {
+    const result = await aggregator.aggregate({
+      wakeId: event.wakeId,
+      agentId,
+      agentDir: agent.agentId,
+      frontmatter: {
+        agentId,
+        name: agent.displayName,
+        modelTier: agent.modelTier,
+        circleMemberships: circleIds,
+      },
+      circleMemberships: circleIds,
+      wakeReason: event.wakeReason,
+      now: new Date(),
+    });
+    if (result.ok) {
+      signals = result.bundle;
+    } else {
+      logger.warn("daemon.wake.aggregator.error", {
+        wakeId: event.wakeId.value,
+        agentId: agent.agentId,
+        code: result.error.code,
+        message: result.error.message,
+      });
+      signals = {
+        wakeId: event.wakeId,
+        assembledAt: new Date(),
+        signals: [],
+        warnings: [`signal aggregator error: ${result.error.code}`],
+      };
+    }
+  } else {
+    signals = {
+      wakeId: event.wakeId,
+      assembledAt: new Date(),
+      signals: [],
+      warnings: [],
+    };
+  }
 
   return {
     wakeId: event.wakeId,

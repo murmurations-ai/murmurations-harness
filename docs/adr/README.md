@@ -63,3 +63,5 @@ per the Engineering Lead #22 gate review ([issue #6](https://github.com/murmurat
 | [ADR-0009](./0009-lint-format.md)                | Lint + format: ESLint flat config + Prettier                                                 | Accepted |
 | [ADR-0010](./0010-secrets-provider-interface.md) | SecretsProvider interface and dotenv default provider                                        | Accepted |
 | [ADR-0011](./0011-cost-record-schema.md)         | WakeCostRecord schema and cost instrumentation plumbing                                      | Accepted |
+| [ADR-0012](./0012-github-client.md)              | @murmuration/github — native fetch, SecretValue auth, per-call cost hook                     | Accepted |
+| [ADR-0013](./0013-signal-aggregator.md)          | SignalAggregator v0.1 with interim trust taxonomy (pending harness#4)                        | Accepted |

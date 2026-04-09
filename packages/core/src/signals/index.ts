@@ -1,30 +1,100 @@
 /**
- * Signal Aggregator — builds the signal bundle for an agent wake.
+ * Signal Aggregator — interface only.
  *
- * STUB: Phase 1 scaffold only. The signal aggregator will read GitHub
- * (issues, projects, comments, labels), pipeline state, agent inbox,
- * private notes, and cost budget remaining, then compose a structured
- * signal bundle the agent reasons over during its wake (per spec §7.1
- * wake loop step 2).
+ * The {@link SignalAggregator} interface lives in `@murmuration/core` so
+ * the daemon can reference it without depending on any concrete source
+ * package. The default implementation lives in `@murmuration/signals`
+ * (which depends on `@murmuration/github`) to avoid a package cycle.
  *
- * Not pluggable — core component per spec §4.1.
+ * Phase 1B step B4. Designed by Architecture Agent #23 with an interim
+ * trust taxonomy pending Security #25's harness#4 ratification.
  *
- * Note (Security #25, carry-forward #4): signal bundle content must
- * eventually be tagged with trust_level ("trusted" for harness-generated
- * content, "untrusted" for GitHub-sourced content) before Phase 7 ship
- * to mitigate prompt injection via agent context.
+ * ## Content/metadata trust separation (prompt-injection seam)
  *
- * The canonical `SignalBundle` and `Signal` data shapes live in the
- * sibling `execution` module (closed under carry-forward #3 by the
- * TypeScript / Runtime Agent #24) because the Agent Executor is the
- * primary consumer. This module owns the *aggregator* interface — the
- * thing that *builds* a bundle — and will import the data types from
- * `../execution/index.js` once the concrete implementation lands.
+ * Every {@link Signal} has a top-level `trust` field that describes
+ * the trust level of its **metadata** (number, title, labels, url,
+ * timestamps). Free-form user content fields (`excerpt` on
+ * `github-issue` / `inbox-message`, `summary` on `private-note`)
+ * must be treated **one step lower** than the metadata trust:
+ *
+ *   - `trusted`      → body is `semi-trusted`
+ *   - `semi-trusted` → body is `untrusted`
+ *   - `untrusted`    → body is `untrusted`
+ *   - `unknown`      → body is `unknown`
+ *
+ * This is an **interim** convention pending Security #25's harness#4
+ * trust-taxonomy ratification.
  */
 
-export interface SignalAggregator {
-  readonly name: string;
-  // TODO: build(agent, wakeReason) → SignalBundle (imported from ../execution)
+import type {
+  AgentId,
+  AgentRoleFrontmatter,
+  CircleId,
+  SignalBundle,
+  WakeId,
+  WakeReason,
+} from "../execution/index.js";
+
+// ---------------------------------------------------------------------------
+// Public interface
+// ---------------------------------------------------------------------------
+
+export type SignalSourceId =
+  | "github-issue"
+  | "private-note"
+  | "inbox-message"
+  | "pipeline-item"
+  | "governance-round"
+  | "stall-alert";
+
+export interface SignalAggregationContext {
+  readonly wakeId: WakeId;
+  readonly agentId: AgentId;
+  readonly agentDir: string;
+  readonly frontmatter: AgentRoleFrontmatter;
+  readonly circleMemberships: readonly CircleId[];
+  readonly wakeReason: WakeReason;
+  readonly now: Date;
 }
 
-export const SIGNALS_STUB_VERSION = "0.0.0-stub" as const;
+export type SignalAggregationResult =
+  | { readonly ok: true; readonly bundle: SignalBundle }
+  | { readonly ok: false; readonly error: SignalAggregatorError };
+
+export type SignalAggregatorErrorCode = "configuration-invalid" | "internal";
+
+export class SignalAggregatorError extends Error {
+  public readonly code: SignalAggregatorErrorCode;
+  public readonly wakeId: WakeId | undefined;
+  public override readonly cause: unknown;
+  public constructor(
+    message: string,
+    options: {
+      readonly code: SignalAggregatorErrorCode;
+      readonly wakeId?: WakeId;
+      readonly cause?: unknown;
+    },
+  ) {
+    super(message);
+    this.name = new.target.name;
+    this.code = options.code;
+    this.wakeId = options.wakeId;
+    this.cause = options.cause;
+  }
+}
+
+export interface SignalAggregatorCapabilities {
+  readonly id: string;
+  readonly displayName: string;
+  readonly version: string;
+  readonly activeSources: readonly SignalSourceId[];
+  readonly totalCap: number;
+}
+
+export interface SignalAggregator {
+  aggregate(context: SignalAggregationContext): Promise<SignalAggregationResult>;
+  capabilities(): SignalAggregatorCapabilities;
+}
+
+// Legacy re-export for backwards compatibility with the Phase 1A stub.
+export const SIGNALS_STUB_VERSION = "0.0.0-phase1b-d" as const;

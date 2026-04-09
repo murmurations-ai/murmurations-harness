@@ -1,0 +1,45 @@
+{
+  "name": "@murmuration/github",
+  "version": "0.0.0",
+  "description": "Typed GitHub REST client for the Murmuration Harness — rate-limited, cache-aware, secret-safe.",
+  "license": "MIT",
+  "author": "Emergent Praxis murmuration",
+  "homepage": "https://github.com/murmurations-ai/murmurations-harness/tree/main/packages/github",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/murmurations-ai/murmurations-harness.git",
+    "directory": "packages/github"
+  },
+  "bugs": {
+    "url": "https://github.com/murmurations-ai/murmurations-harness/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist .tsbuildinfo .tsbuildinfo.build",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@murmuration/core": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "undici": "^6.19.8"
+  }
+}
