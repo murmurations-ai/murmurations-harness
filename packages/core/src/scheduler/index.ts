@@ -128,6 +128,10 @@ export class TimerScheduler implements Scheduler {
     }
   }
 
+  // The interface declares stop() async to keep the door open for
+  // future schedulers that need to drain queued work. TimerScheduler
+  // does its cleanup synchronously.
+  // eslint-disable-next-line @typescript-eslint/require-await
   public async stop(): Promise<void> {
     this.#running = false;
     for (const entry of this.#entries.values()) {
@@ -157,14 +161,13 @@ export class TimerScheduler implements Scheduler {
         entry.timerHandle = setInterval(() => {
           void this.#fire(entry, {
             kind: "scheduled",
-            cronExpression: `@interval ${intervalMs}ms`,
+            cronExpression: `@interval ${String(intervalMs)}ms`,
           });
         }, intervalMs);
         break;
       }
       case "cron": {
         // TODO(B3): real cron parser. For Phase 1A, log and skip.
-        // eslint-disable-next-line no-console
         console.warn(
           `[scheduler] cron triggers not yet supported (agent=${entry.agentId.value}, expr=${entry.trigger.expression})`,
         );
@@ -172,7 +175,6 @@ export class TimerScheduler implements Scheduler {
       }
       case "event": {
         // TODO(B3): event bus wiring. Phase 1A has no event source.
-        // eslint-disable-next-line no-console
         console.warn(
           `[scheduler] event triggers not yet supported (agent=${entry.agentId.value}, eventType=${entry.trigger.eventType})`,
         );
@@ -193,11 +195,7 @@ export class TimerScheduler implements Scheduler {
       try {
         await listener(event);
       } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error(
-          `[scheduler] listener threw for agent ${entry.agentId.value}:`,
-          error,
-        );
+        console.error(`[scheduler] listener threw for agent ${entry.agentId.value}:`, error);
       }
     }
   }

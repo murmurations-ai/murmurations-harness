@@ -71,13 +71,13 @@ The circle operates under **Sociocracy 3.0 consent governance**. Architectural d
 
 ### Active open design tensions
 
-| # | Title | Owner | Blocks |
-|---|---|---|---|
-| [#1](https://github.com/murmurations-ai/murmurations-harness/issues/1) | Multi-circle routing validation | Architecture (#23) | Phase 3/4 |
-| [#2](https://github.com/murmurations-ai/murmurations-harness/issues/2) | GovernancePlugin interface hardening | TypeScript (#24) | Phase 3 |
-| [#3](https://github.com/murmurations-ai/murmurations-harness/issues/3) | AgentExecutor interface explicit | TypeScript (#24) | Phase 2 end |
-| [#4](https://github.com/murmurations-ai/murmurations-harness/issues/4) | Plugin trust + prompt injection | Security (#25) | Phase 3 + Phase 7 |
-| [#5](https://github.com/murmurations-ai/murmurations-harness/issues/5) | Cost instrumentation gates | Performance (#27) | Phase 4 |
+| #                                                                      | Title                                | Owner              | Blocks            |
+| ---------------------------------------------------------------------- | ------------------------------------ | ------------------ | ----------------- |
+| [#1](https://github.com/murmurations-ai/murmurations-harness/issues/1) | Multi-circle routing validation      | Architecture (#23) | Phase 3/4         |
+| [#2](https://github.com/murmurations-ai/murmurations-harness/issues/2) | GovernancePlugin interface hardening | TypeScript (#24)   | Phase 3           |
+| [#3](https://github.com/murmurations-ai/murmurations-harness/issues/3) | AgentExecutor interface explicit     | TypeScript (#24)   | Phase 2 end       |
+| [#4](https://github.com/murmurations-ai/murmurations-harness/issues/4) | Plugin trust + prompt injection      | Security (#25)     | Phase 3 + Phase 7 |
+| [#5](https://github.com/murmurations-ai/murmurations-harness/issues/5) | Cost instrumentation gates           | Performance (#27)  | Phase 4           |
 
 ## License
 

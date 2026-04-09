@@ -31,11 +31,10 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc --build",
-    "clean": "rm -rf dist .tsbuildinfo",
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist .tsbuildinfo .tsbuildinfo.build",
     "typecheck": "tsc --noEmit",
-    "start": "node dist/bin.js start",
-    "test": "echo 'tests not yet configured (pending Engineering Circle test framework ADR)'"
+    "start": "node dist/bin.js start"
   },
   "dependencies": {
     "@murmuration/core": "workspace:*"

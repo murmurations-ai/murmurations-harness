@@ -52,10 +52,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc --build",
-    "clean": "rm -rf dist .tsbuildinfo",
-    "typecheck": "tsc --noEmit",
-    "test": "echo 'tests not yet configured (pending Engineering Circle test framework ADR — TypeScript #24 consulted)'"
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist .tsbuildinfo .tsbuildinfo.build",
+    "typecheck": "tsc --noEmit"
   },
   "engines": {
     "node": ">=20.0.0"

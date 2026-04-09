@@ -30,8 +30,7 @@ const HELLO_WORLD_AGENT: RegisteredAgent = {
       "[phase-1a placeholder] The murmuration is a test instance. The one agent in it is hello-world, and its only job is to prove the wake loop works.",
     agentSoul:
       "[phase-1a placeholder] I am the hello-world agent. I have no purpose beyond proving the daemon can spawn me and reap my result.",
-    agentRole:
-      "[phase-1a placeholder] My role is to print a wake summary and exit cleanly.",
+    agentRole: "[phase-1a placeholder] My role is to print a wake summary and exit cleanly.",
     circleContexts: [
       {
         circleId: "engineering",
@@ -52,9 +51,7 @@ export const bootHelloWorldDaemon = async (): Promise<void> => {
     resolveCommand: (context): SubprocessCommand => {
       if (context.agentId.value !== "hello-world") {
         // Phase 1A has exactly one agent. Anything else is a bug.
-        throw new Error(
-          `resolveCommand: unknown agent ${context.agentId.value}`,
-        );
+        throw new Error(`resolveCommand: unknown agent ${context.agentId.value}`);
       }
       return {
         command: process.execPath,

@@ -196,10 +196,7 @@ export class Daemon {
     await p;
   }
 
-  async #runWake(
-    agent: RegisteredAgent,
-    event: ScheduledWakeEvent,
-  ): Promise<void> {
+  async #runWake(agent: RegisteredAgent, event: ScheduledWakeEvent): Promise<void> {
     const context = buildSpawnContext(agent, event);
     this.#logger.info("daemon.wake.fire", {
       agentId: agent.agentId,

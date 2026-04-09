@@ -6,12 +6,12 @@ Command-line interface for the Murmuration Harness daemon.
 
 ## Commands
 
-| Command | Description | Status |
-|---|---|---|
-| `murmuration start` | Boot the daemon, register agents from the Phase 1A hardcoded registry, fire hello-world wake, wait for SIGINT | ✅ Phase 1A |
-| `murmuration status` | Print status of a running daemon | ⏳ Phase 1B |
-| `murmuration stop` | Send SIGTERM to a running daemon | ⏳ Phase 1B |
-| `murmuration init` | Run `/init-murmuration` interview skill | ⏳ Phase 6 |
+| Command              | Description                                                                                                   | Status      |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- | ----------- |
+| `murmuration start`  | Boot the daemon, register agents from the Phase 1A hardcoded registry, fire hello-world wake, wait for SIGINT | ✅ Phase 1A |
+| `murmuration status` | Print status of a running daemon                                                                              | ⏳ Phase 1B |
+| `murmuration stop`   | Send SIGTERM to a running daemon                                                                              | ⏳ Phase 1B |
+| `murmuration init`   | Run `/init-murmuration` interview skill                                                                       | ⏳ Phase 6  |
 
 ## Phase 1A usage
 

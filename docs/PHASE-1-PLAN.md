@@ -10,6 +10,7 @@
 ## Phase 1 Definition (from spec §15)
 
 > **Phase 1 — Harness core scaffold** (starts after spec ratified)
+>
 > - Monorepo set up, pnpm workspaces, TS strict ✅ (commit `644ef63`)
 > - `@murmuration/core`: scheduler, signal aggregator, executor interface (stub) 🟡 (skeleton only)
 > - `@murmuration/github`: typed GitHub client with rate limiting and caching ⏳
@@ -27,15 +28,15 @@ The Phase 1 deliverable list is large. Splitting into two stages lets us hit the
 
 The minimum code needed to prove the wake loop structurally works end-to-end, even without real agents or GitHub integration.
 
-| Step | Deliverable | Owner | Blocks |
-|---|---|---|---|
-| A1 | **Close carry-forward #3** — `AgentExecutor` interface explicit in `@murmuration/core/execution` | TypeScript #24 (review + author) | All downstream |
-| A2 | Minimal `Scheduler` implementation in `@murmuration/core/scheduler` — in-memory timer-based trigger | Architecture #23 (topology), TypeScript #24 (types) | A4 |
-| A3 | `SubprocessExecutor` implementation of `AgentExecutor` — spawns a child process, captures stdout/stderr, returns result | Architecture #23 + Security #25 review | A4 |
-| A4 | `@murmuration/cli` package — `murmuration start` command that boots the daemon and holds | DevOps #26 | A5 |
-| A5 | Minimal daemon loop — instantiates scheduler + executor, registers a hello-world agent, enters run loop | Engineering Lead #22 integration | A6 |
-| A6 | `examples/hello-world-agent/` — shell script or tiny Node script that prints "hello from agent" and exits 0 | DevOps #26 | A7 |
-| A7 | **Gate test:** `pnpm --filter @murmuration/cli run start` → hello-world wake fires within 10 seconds → logs capture the wake → daemon shuts down cleanly on SIGINT | Engineering Lead #22 gates | Phase 1B |
+| Step | Deliverable                                                                                                                                                        | Owner                                               | Blocks         |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- | -------------- |
+| A1   | **Close carry-forward #3** — `AgentExecutor` interface explicit in `@murmuration/core/execution`                                                                   | TypeScript #24 (review + author)                    | All downstream |
+| A2   | Minimal `Scheduler` implementation in `@murmuration/core/scheduler` — in-memory timer-based trigger                                                                | Architecture #23 (topology), TypeScript #24 (types) | A4             |
+| A3   | `SubprocessExecutor` implementation of `AgentExecutor` — spawns a child process, captures stdout/stderr, returns result                                            | Architecture #23 + Security #25 review              | A4             |
+| A4   | `@murmuration/cli` package — `murmuration start` command that boots the daemon and holds                                                                           | DevOps #26                                          | A5             |
+| A5   | Minimal daemon loop — instantiates scheduler + executor, registers a hello-world agent, enters run loop                                                            | Engineering Lead #22 integration                    | A6             |
+| A6   | `examples/hello-world-agent/` — shell script or tiny Node script that prints "hello from agent" and exits 0                                                        | DevOps #26                                          | A7             |
+| A7   | **Gate test:** `pnpm --filter @murmuration/cli run start` → hello-world wake fires within 10 seconds → logs capture the wake → daemon shuts down cleanly on SIGINT | Engineering Lead #22 gates                          | Phase 1B       |
 
 **A1 is load-bearing.** Everything downstream depends on the AgentExecutor interface being real and stable. TypeScript Agent #24 is accountable for closing carry-forward #3 before A2 starts.
 
@@ -43,18 +44,18 @@ The minimum code needed to prove the wake loop structurally works end-to-end, ev
 
 Everything needed to declare Phase 1 "done" per the spec's Phase 1 deliverable list.
 
-| Step | Deliverable | Owner |
-|---|---|---|
-| B1 | `@murmuration/secrets-dotenv` — default secrets provider, pluggable interface | Security #25 (policy) + DevOps #26 (implementation) |
-| B2 | `@murmuration/github` — typed GitHub client with rate limiting, caching, retry/backoff | TypeScript #24 (types) + DevOps #26 (implementation) |
-| B3 | `Scheduler` extension — real cron triggers + event triggers (not just timer) | Architecture #23 + TypeScript #24 |
-| B4 | `SignalAggregator` implementation — reads GitHub + private notes + inbox | Architecture #23 + Security #25 (trust tagging per carry-forward #4) |
-| B5 | **Cost instrumentation plumbing** (Performance #27 carry-forward #5) — per-wake cost record schema, structured log format, GitHub API call counter | Performance #27 (defines), DevOps #26 (plumbs) |
-| B6 | Test framework ADR (per #241 carry-forward, TypeScript #24 must be consulted) | Engineering Lead #22 facilitates, TypeScript #24 consulted |
-| B7 | Lint/format ADR + setup (eslint, prettier) | DevOps #26 |
-| B8 | First real tests on core + github + cli | Whoever wrote the package |
-| B9 | CI setup (GitHub Actions: typecheck, lint, test, build) | DevOps #26 |
-| B10 | Phase 1 retro — Engineering Lead facilitates, circle-wide review of what shipped | Engineering Lead #22 |
+| Step | Deliverable                                                                                                                                        | Owner                                                                |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| B1   | `@murmuration/secrets-dotenv` — default secrets provider, pluggable interface                                                                      | Security #25 (policy) + DevOps #26 (implementation)                  |
+| B2   | `@murmuration/github` — typed GitHub client with rate limiting, caching, retry/backoff                                                             | TypeScript #24 (types) + DevOps #26 (implementation)                 |
+| B3   | `Scheduler` extension — real cron triggers + event triggers (not just timer)                                                                       | Architecture #23 + TypeScript #24                                    |
+| B4   | `SignalAggregator` implementation — reads GitHub + private notes + inbox                                                                           | Architecture #23 + Security #25 (trust tagging per carry-forward #4) |
+| B5   | **Cost instrumentation plumbing** (Performance #27 carry-forward #5) — per-wake cost record schema, structured log format, GitHub API call counter | Performance #27 (defines), DevOps #26 (plumbs)                       |
+| B6   | Test framework ADR (per #241 carry-forward, TypeScript #24 must be consulted)                                                                      | Engineering Lead #22 facilitates, TypeScript #24 consulted           |
+| B7   | Lint/format ADR + setup (eslint, prettier)                                                                                                         | DevOps #26                                                           |
+| B8   | First real tests on core + github + cli                                                                                                            | Whoever wrote the package                                            |
+| B9   | CI setup (GitHub Actions: typecheck, lint, test, build)                                                                                            | DevOps #26                                                           |
+| B10  | Phase 1 retro — Engineering Lead facilitates, circle-wide review of what shipped                                                                   | Engineering Lead #22                                                 |
 
 ### Phase 1 exit criteria (both A and B complete)
 
@@ -137,6 +138,7 @@ Each deliverable lists the specialist(s) that must be consulted or must gate it.
 ### Engineering Lead gate reviews
 
 Engineering Lead #22 gates two transitions:
+
 1. **Phase 1A → Phase 1B** — after A7 gate test passes
 2. **Phase 1B → Phase 2** — after all Phase 1 exit criteria are met
 
@@ -166,18 +168,23 @@ Starting immediately after committing this plan:
 ## Risks & tensions flagged ahead of time
 
 ### Risk 1 — Pi framework integration is deferred
+
 The spec says the harness is built on `pi-mono`. We are not integrating Pi in Phase 1A — we are using Node subprocess + standard library only. Pi integration lands in Phase 2 (one-agent proof) per the spec's intent. **If Pi integration turns out to be load-bearing for the wake loop, Phase 2 will surface the gap and we re-open Phase 1.** Architecture Agent #23 should note this as a Phase 1A → Phase 2 risk.
 
 ### Risk 2 — The hello-world agent is not a real agent
+
 The hello-world agent does not read an identity doc, does not reason over signals, does not call an LLM. It just prints "hello from agent." The wake loop is proven structurally but not semantically. **This is intentional for the gate.** The first real agent wake happens in Phase 2.
 
 ### Risk 3 — No test framework yet
+
 Phase 1A has no tests. The test framework ADR is deferred to Phase 1B per the #241 carry-forward (TypeScript #24 must be consulted on selection). This means Phase 1A gate-testing is by hand + logs. **This is an accepted risk for velocity.** Phase 1B must land tests before Phase 2.
 
 ### Risk 4 — No CI yet
+
 Same reasoning. CI is DevOps #26's Phase 1B deliverable. Phase 1A gate verification is manual.
 
 ### Risk 5 — Logging format is not yet decided
+
 Performance #27 must define the cost accounting schema (carry-forward #5) before B5. For Phase 1A, we use minimal structured logs (JSON lines with timestamp, agent, wake_id, phase). This can be refactored when Performance #27 lands the real schema.
 
 ---
@@ -197,4 +204,4 @@ When all five of those are true, this session ends with a commit, a push, and a 
 
 ---
 
-*This plan is a living document. Updates commit directly to this file. If the plan changes significantly, Engineering Lead #22 notes the change in the next retro.*
+_This plan is a living document. Updates commit directly to this file. If the plan changes significantly, Engineering Lead #22 notes the change in the next retro._

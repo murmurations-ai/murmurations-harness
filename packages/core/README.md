@@ -8,13 +8,13 @@ Core runtime for the Murmuration Harness.
 
 Per [spec §4.1](https://github.com/xeeban/emergent-praxis/blob/main/docs/MURMURATION-HARNESS-SPEC.md), the core package owns:
 
-| Component | Purpose | Pluggable? |
-|---|---|---|
-| **Scheduler** | Fires agent wakes on cron + events | No (core) |
-| **Signal Aggregator** | On wake, builds the signal bundle for the agent | No (core) |
-| **Agent Executor** (interface) | Pluggable boundary for how agent sessions are spawned | **Yes** — default: subprocess |
-| **Governance Plugin Runtime** | Loads the governance plugin and routes lifecycle events | **Yes** — default: S3 |
-| **Plugin Registry** | Loads plugins, enforces capability declarations | No (core) |
+| Component                      | Purpose                                                 | Pluggable?                    |
+| ------------------------------ | ------------------------------------------------------- | ----------------------------- |
+| **Scheduler**                  | Fires agent wakes on cron + events                      | No (core)                     |
+| **Signal Aggregator**          | On wake, builds the signal bundle for the agent         | No (core)                     |
+| **Agent Executor** (interface) | Pluggable boundary for how agent sessions are spawned   | **Yes** — default: subprocess |
+| **Governance Plugin Runtime**  | Loads the governance plugin and routes lifecycle events | **Yes** — default: S3         |
+| **Plugin Registry**            | Loads plugins, enforces capability declarations         | No (core)                     |
 
 ## Open design tensions owned by this package
 

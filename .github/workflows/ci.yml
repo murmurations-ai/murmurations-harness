@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: build / typecheck / lint / format / test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Test
+        run: pnpm test
+
+      - name: Gate test (Phase 1A wake loop)
+        shell: bash
+        run: |
+          set -e
+          node packages/cli/dist/bin.js start > /tmp/gate.log 2>&1 &
+          PID=$!
+          sleep 4
+          kill -INT $PID || true
+          wait $PID 2>/dev/null || true
+          echo "--- gate log ---"
+          cat /tmp/gate.log
+          grep -q '"event":"daemon.wake.completed"' /tmp/gate.log
+          grep -q '"outcome":"completed"' /tmp/gate.log
+          grep -q '"event":"daemon.shutdown.complete"' /tmp/gate.log
+          echo "--- gate PASS ---"

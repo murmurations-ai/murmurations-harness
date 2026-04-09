@@ -11,7 +11,8 @@ import { bootHelloWorldDaemon } from "./boot.js";
 const argv = process.argv.slice(2);
 const command = argv[0];
 
-const usage = (): string => `
+const usage = (): string =>
+  `
 murmuration — Murmuration Harness CLI
 
 Usage:
@@ -45,9 +46,7 @@ const main = async (): Promise<void> => {
     case "status":
     case "stop":
     case "init": {
-      process.stderr.write(
-        `murmuration: \`${command}\` is not yet implemented in Phase 1A.\n`,
-      );
+      process.stderr.write(`murmuration: \`${command}\` is not yet implemented in Phase 1A.\n`);
       process.stderr.write(usage());
       process.exit(2);
       break;

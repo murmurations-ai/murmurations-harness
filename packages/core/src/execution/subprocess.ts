@@ -56,9 +56,7 @@ export interface SubprocessCommand {
  * on every `spawn()`. Must not throw — return a `SubprocessCommand`
  * describing an executable the daemon owner has authorized to run.
  */
-export type SubprocessCommandResolver = (
-  context: AgentSpawnContext,
-) => SubprocessCommand;
+export type SubprocessCommandResolver = (context: AgentSpawnContext) => SubprocessCommand;
 
 /** Constructor options for {@link SubprocessExecutor}. */
 export interface SubprocessExecutorOptions {
@@ -133,6 +131,12 @@ export class SubprocessExecutor implements AgentExecutor {
     };
   }
 
+  // The `async` keyword is intentional — `spawn` is declared async on the
+  // interface to reserve the right to do async work (e.g. pre-flight capability
+  // checks, authentication, resource reservation) in alternative executor
+  // implementations. The subprocess variant does all its work synchronously,
+  // but we honor the interface contract.
+  // eslint-disable-next-line @typescript-eslint/require-await
   public async spawn(context: AgentSpawnContext): Promise<AgentSpawnHandle> {
     const resolved = (() => {
       try {
@@ -169,10 +173,10 @@ export class SubprocessExecutor implements AgentExecutor {
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (cause) {
-      throw new SpawnError(
-        `failed to fork subprocess for agent ${context.agentId.value}`,
-        { wakeId: context.wakeId, cause },
-      );
+      throw new SpawnError(`failed to fork subprocess for agent ${context.agentId.value}`, {
+        wakeId: context.wakeId,
+        cause,
+      });
     }
 
     const record: WakeRecord = {
@@ -268,10 +272,10 @@ export class SubprocessExecutor implements AgentExecutor {
             finishedAt,
           };
         }
-        const failureMessage =
-          `agent exited with code ${terminal.code ?? "null"}` +
-          (terminal.signal ? ` (signal ${terminal.signal})` : "") +
-          (stderr ? `\nstderr:\n${stderr}` : "");
+        const codeStr = terminal.code === null ? "null" : String(terminal.code);
+        const signalSuffix = terminal.signal ? ` (signal ${terminal.signal})` : "";
+        const stderrSuffix = stderr ? `\nstderr:\n${stderr}` : "";
+        const failureMessage = `agent exited with code ${codeStr}${signalSuffix}${stderrSuffix}`;
         return {
           wakeId: record.context.wakeId,
           agentId: record.context.agentId,
@@ -340,6 +344,9 @@ export class SubprocessExecutor implements AgentExecutor {
     }
   }
 
+  // Same rationale as spawn: interface-level async contract held even
+  // though the subprocess variant does not actually await anything.
+  // eslint-disable-next-line @typescript-eslint/require-await
   public async kill(handle: AgentSpawnHandle, reason: string): Promise<void> {
     let record: WakeRecord;
     try {
@@ -375,10 +382,9 @@ export class SubprocessExecutor implements AgentExecutor {
     const key = getHandleKey(handle);
     const record = this.#wakes.get(key);
     if (!record) {
-      throw new HandleUnknownError(
-        `no in-flight wake for ${handle.wakeId.value}`,
-        { wakeId: handle.wakeId },
-      );
+      throw new HandleUnknownError(`no in-flight wake for ${handle.wakeId.value}`, {
+        wakeId: handle.wakeId,
+      });
     }
     return record;
   }
@@ -428,6 +434,9 @@ const zeroCost = (startedAt: Date, finishedAt: Date): CostActuals => ({
  * This is a minimal protocol for the hello-world gate. Phase 2 replaces
  * it with a real structured output contract.
  */
+const WAKE_SUMMARY_RE = /^::wake-summary:: ?(.*)$/;
+const GOVERNANCE_RE = /^::governance::([a-z-]+):: ?(.*)$/;
+
 const parseChildOutput = (
   stdout: string,
 ): { wakeSummary: string | undefined; governanceEvents: readonly EmittedGovernanceEvent[] } => {
@@ -435,12 +444,12 @@ const parseChildOutput = (
   const summaryLines: string[] = [];
   const governanceEvents: EmittedGovernanceEvent[] = [];
   for (const line of lines) {
-    const summaryMatch = line.match(/^::wake-summary:: ?(.*)$/);
+    const summaryMatch = WAKE_SUMMARY_RE.exec(line);
     if (summaryMatch) {
       summaryLines.push(summaryMatch[1] ?? "");
       continue;
     }
-    const governanceMatch = line.match(/^::governance::([a-z-]+):: ?(.*)$/);
+    const governanceMatch = GOVERNANCE_RE.exec(line);
     if (governanceMatch) {
       const kindRaw = governanceMatch[1];
       const payloadRaw = governanceMatch[2] ?? "";
@@ -494,9 +503,7 @@ const serializeContext = (context: AgentSpawnContext): string => {
         agentId: context.identity.frontmatter.agentId.value,
         name: context.identity.frontmatter.name,
         modelTier: context.identity.frontmatter.modelTier,
-        circleMemberships: context.identity.frontmatter.circleMemberships.map(
-          (c) => c.value,
-        ),
+        circleMemberships: context.identity.frontmatter.circleMemberships.map((c) => c.value),
       },
       layerKinds: context.identity.layers.map((l) => l.kind),
     },

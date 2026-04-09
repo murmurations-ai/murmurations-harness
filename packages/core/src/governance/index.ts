@@ -17,12 +17,7 @@
  * must be defined, pinned, and exported before Phase 3.
  */
 
-export type EventType =
-  | "tension"
-  | "proposal-opened"
-  | "notify"
-  | "autonomous-action"
-  | "held";
+export type EventType = "tension" | "proposal-opened" | "notify" | "autonomous-action" | "held";
 // TODO(#2): expand; add discriminated unions per event type per kind.
 
 /**
