@@ -25,6 +25,10 @@
       "types": "./dist/execution/index.d.ts",
       "import": "./dist/execution/index.js"
     },
+    "./execution/subprocess": {
+      "types": "./dist/execution/subprocess.d.ts",
+      "import": "./dist/execution/subprocess.js"
+    },
     "./governance": {
       "types": "./dist/governance/index.d.ts",
       "import": "./dist/governance/index.js"
@@ -36,6 +40,10 @@
     "./signals": {
       "types": "./dist/signals/index.d.ts",
       "import": "./dist/signals/index.js"
+    },
+    "./daemon": {
+      "types": "./dist/daemon/index.d.ts",
+      "import": "./dist/daemon/index.js"
     }
   },
   "files": [
