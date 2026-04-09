@@ -13,19 +13,18 @@
  * eventually be tagged with trust_level ("trusted" for harness-generated
  * content, "untrusted" for GitHub-sourced content) before Phase 7 ship
  * to mitigate prompt injection via agent context.
+ *
+ * The canonical `SignalBundle` and `Signal` data shapes live in the
+ * sibling `execution` module (closed under carry-forward #3 by the
+ * TypeScript / Runtime Agent #24) because the Agent Executor is the
+ * primary consumer. This module owns the *aggregator* interface — the
+ * thing that *builds* a bundle — and will import the data types from
+ * `../execution/index.js` once the concrete implementation lands.
  */
-
-export interface SignalBundle {
-  readonly kind: "signal-bundle";
-  readonly agent: string;
-  readonly wakeReason: "scheduled" | "event";
-  // TODO: full shape per §7.1 step 2
-  // TODO(#4): trust_level tagging per signal source
-}
 
 export interface SignalAggregator {
   readonly name: string;
-  // TODO: build(agent, wakeReason) → SignalBundle
+  // TODO: build(agent, wakeReason) → SignalBundle (imported from ../execution)
 }
 
 export const SIGNALS_STUB_VERSION = "0.0.0-stub" as const;
