@@ -37,7 +37,10 @@
     "start": "node dist/bin.js start"
   },
   "dependencies": {
-    "@murmuration/core": "workspace:*"
+    "@murmuration/core": "workspace:*",
+    "@murmuration/github": "workspace:*",
+    "@murmuration/secrets-dotenv": "workspace:*",
+    "@murmuration/signals": "workspace:*"
   },
   "engines": {
     "node": ">=20.0.0"

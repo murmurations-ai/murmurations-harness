@@ -8,5 +8,10 @@
   },
   "include": ["src/**/*"],
   "exclude": ["dist", "node_modules"],
-  "references": [{ "path": "../core" }]
+  "references": [
+    { "path": "../core" },
+    { "path": "../github" },
+    { "path": "../secrets-dotenv" },
+    { "path": "../signals" }
+  ]
 }

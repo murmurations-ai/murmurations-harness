@@ -41,6 +41,15 @@ importers:
       '@murmuration/core':
         specifier: workspace:*
         version: link:../core
+      '@murmuration/github':
+        specifier: workspace:*
+        version: link:../github
+      '@murmuration/secrets-dotenv':
+        specifier: workspace:*
+        version: link:../secrets-dotenv
+      '@murmuration/signals':
+        specifier: workspace:*
+        version: link:../signals
 
   packages/core:
     dependencies:
