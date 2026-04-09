@@ -38,11 +38,16 @@ export const SEED_CATALOG: readonly ProviderRate[] = [
     provider: "gemini",
     model: "gemini-2.5-flash",
     tier: "fast",
-    inputUSDMicrosPerMillionTokens: 300_000, // ≈ $0.30/M — VERIFY
-    outputUSDMicrosPerMillionTokens: 2_500_000, // ≈ $2.50/M — VERIFY
+    // $0.30/M input (text/image/video). Audio input is $1.00/M but
+    // the harness only sends text in Phase 2, so the text rate applies.
+    inputUSDMicrosPerMillionTokens: 300_000,
+    // $2.50/M output. Google bills thinking tokens at the output rate
+    // — see CF-llm-I: the adapter must sum `usageMetadata.candidatesTokenCount`
+    // + `thoughtsTokenCount` to report true billed output count.
+    outputUSDMicrosPerMillionTokens: 2_500_000,
     maxContextTokens: 1_048_576,
     source:
-      "PLACEHOLDER — verify before Phase 2 gate (https://ai.google.dev/gemini-api/docs/pricing)",
+      "Verified 2026-04-09 via live 2A11 smoke call + https://ai.google.dev/gemini-api/docs/pricing",
     effectiveFrom: "2026-04-09",
   },
   {

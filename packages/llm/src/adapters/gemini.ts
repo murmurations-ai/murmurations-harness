@@ -65,6 +65,12 @@ const geminiResponseSchema = z.object({
     .object({
       promptTokenCount: z.number().int().nonnegative().optional(),
       candidatesTokenCount: z.number().int().nonnegative().optional(),
+      // 2.5 Pro / 2.5 Flash thinking mode: internal reasoning tokens.
+      // Google bills these at the output rate per
+      // https://ai.google.dev/gemini-api/docs/pricing, so they must
+      // be summed into `outputTokens` for cost-parity. Closes part
+      // of CF-llm-I.
+      thoughtsTokenCount: z.number().int().nonnegative().optional(),
     })
     .optional(),
 });
@@ -237,13 +243,22 @@ class GeminiAdapterImpl implements LLMAdapter {
       };
     }
 
+    // Google bills thinking tokens at the output rate
+    // (https://ai.google.dev/gemini-api/docs/pricing — "Output price
+    // including thinking tokens"). Sum candidates + thoughts into
+    // `outputTokens` so cost accounting matches what AI Studio bills.
+    // Closes CF-llm-I.
+    const candidatesTokenCount = data.usageMetadata?.candidatesTokenCount ?? 0;
+    const thoughtsTokenCount = data.usageMetadata?.thoughtsTokenCount ?? 0;
+    const outputTokens = candidatesTokenCount + thoughtsTokenCount;
+
     return {
       ok: true,
       value: {
         content,
         stopReason,
         inputTokens: data.usageMetadata?.promptTokenCount ?? 0,
-        outputTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
+        outputTokens,
         modelUsed: data.modelVersion ?? this.modelUsed,
         providerUsed: "gemini",
       },

@@ -195,6 +195,48 @@ describe("GeminiAdapter", () => {
     if (!result.ok) expect(result.error).toBeInstanceOf(LLMProviderOutageError);
   });
 
+  it("sums candidatesTokenCount + thoughtsTokenCount into outputTokens (CF-llm-I)", async () => {
+    // Gemini 2.5 Pro / Flash thinking mode: Google bills thinking
+    // tokens at the output rate. The adapter must sum them into the
+    // reported outputTokens for cost-parity.
+    const { fetch: f } = makeFakeFetch([
+      {
+        status: 200,
+        body: {
+          candidates: [
+            {
+              content: { parts: [{ text: "visible output" }] },
+              finishReason: "STOP",
+            },
+          ],
+          modelVersion: "gemini-2.5-pro",
+          usageMetadata: {
+            promptTokenCount: 50,
+            candidatesTokenCount: 10, // visible output
+            thoughtsTokenCount: 240, // hidden reasoning, billed as output
+          },
+        },
+      },
+    ]);
+    const { hook, calls: costCalls } = captureHook();
+    const client = createLLMClient({ provider: "gemini", token: TOKEN, fetch: f });
+    const result = await client.complete(
+      {
+        model: "gemini-2.5-pro",
+        messages: [{ role: "user", content: "complex question" }],
+        maxOutputTokens: 500,
+      },
+      { costHook: hook },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 10 visible + 240 thinking = 250 billable output tokens.
+      expect(result.value.outputTokens).toBe(250);
+      expect(result.value.content).toBe("visible output");
+    }
+    expect(costCalls[0]?.outputTokens).toBe(250);
+  });
+
   it("malformed JSON → LLMParseError", async () => {
     const { fetch: f } = makeFakeFetch([{ status: 200, textBody: "<<not json>>" }]);
     const client = createLLMClient({ provider: "gemini", token: TOKEN, fetch: f });

@@ -67,7 +67,7 @@ const costCalls = [];
 const client = createLLMClient({
   provider: "gemini",
   token: provider.get(GEMINI_API_KEY),
-  tier: "balanced", // resolves to gemini-2.5-pro
+  tier: "fast", // resolves to gemini-2.5-flash — no thinking-token budget burn
   defaultCostHook: {
     onLlmCall: (call) => {
       costCalls.push(call);
@@ -88,9 +88,9 @@ const prompt =
 log("smoke.complete.start", { promptLength: prompt.length });
 const t0 = Date.now();
 const result = await client.complete({
-  model: "gemini-2.5-pro",
+  model: "gemini-2.5-flash",
   messages: [{ role: "user", content: prompt }],
-  maxOutputTokens: 200,
+  maxOutputTokens: 2000,
   temperature: 0.2,
 });
 const wallClockMs = Date.now() - t0;
