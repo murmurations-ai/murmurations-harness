@@ -53,6 +53,20 @@ const helloWorld: RegisteredAgent = {
       },
     ],
   },
+  githubWriteScopes: {
+    issueComments: [],
+    branchCommits: [],
+    labels: [],
+  },
+  budget: {
+    maxCostMicros: 0,
+    maxGithubApiCalls: 0,
+    onBreach: "warn",
+  },
+  secrets: {
+    required: [],
+    optional: [],
+  },
 };
 
 describe("Daemon", () => {

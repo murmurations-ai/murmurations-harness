@@ -241,3 +241,171 @@ model_tier: fast
     expect(loaded.frontmatter.max_wall_clock_ms).toBe(15_000);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ADR-0016 extensions — Phase 2C role template
+// ---------------------------------------------------------------------------
+
+describe("roleFrontmatterSchema (ADR-0016 extensions)", () => {
+  let rootDir = "";
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "murmuration-role-"));
+  });
+
+  afterEach(async () => {
+    if (rootDir) await rm(rootDir, { recursive: true, force: true });
+  });
+
+  const writeFixture = async (relativePath: string, content: string): Promise<void> => {
+    const full = join(rootDir, relativePath);
+    const dir = full.substring(0, full.lastIndexOf("/"));
+    await mkdir(dir, { recursive: true });
+    await writeFile(full, content, "utf8");
+  };
+
+  const writeMinimalFixture = async (agentDir: string, roleFrontmatter: string): Promise<void> => {
+    await writeFixture("murmuration/soul.md", "# Murmuration Soul\n\nShared.\n");
+    await writeFixture(`agents/${agentDir}/soul.md`, "# Soul\n\nChar.\n");
+    await writeFixture(`agents/${agentDir}/role.md`, `---\n${roleFrontmatter}\n---\n\n# Role\n`);
+    await writeFixture("governance/circles/engineering.md", "# Engineering\n");
+  };
+
+  it("minimal hello-world frontmatter still loads (backwards compat)", async () => {
+    await writeMinimalFixture(
+      "hello-world",
+      [
+        'agent_id: "hello-world"',
+        'name: "Hello World Agent"',
+        "model_tier: fast",
+        "circle_memberships:",
+        "  - engineering",
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    const loaded = await loader.load("hello-world");
+    expect(loaded.frontmatter.llm).toBeUndefined();
+    expect(loaded.frontmatter.signals.sources).toEqual([
+      "github-issue",
+      "private-note",
+      "inbox-message",
+    ]);
+    expect(loaded.frontmatter.github.write_scopes.issue_comments).toEqual([]);
+    expect(loaded.frontmatter.github.write_scopes.branch_commits).toEqual([]);
+    expect(loaded.frontmatter.budget.max_cost_micros).toBe(0);
+    expect(loaded.frontmatter.budget.on_breach).toBe("warn");
+    expect(loaded.frontmatter.secrets.required).toEqual([]);
+    expect(loaded.frontmatter.prompt.ref).toBeUndefined();
+  });
+
+  it("full Research Agent #1 frontmatter loads with every field", async () => {
+    await writeMinimalFixture(
+      "01-research",
+      [
+        'agent_id: "01-research"',
+        'name: "Research Agent"',
+        "model_tier: balanced",
+        "max_wall_clock_ms: 600000",
+        "circle_memberships:",
+        "  - engineering",
+        "llm:",
+        '  provider: "gemini"',
+        '  model: "gemini-2.5-pro"',
+        "wake_schedule:",
+        '  cron: "0 18 * * 0"',
+        "signals:",
+        "  sources:",
+        '    - "github-issue"',
+        '    - "private-note"',
+        "  github_scopes:",
+        '    - owner: "xeeban"',
+        '      repo: "emergent-praxis"',
+        "      filter:",
+        '        state: "all"',
+        "        since_days: 7",
+        "github:",
+        "  write_scopes:",
+        "    issue_comments:",
+        '      - "xeeban/emergent-praxis"',
+        "    branch_commits:",
+        '      - repo: "xeeban/emergent-praxis"',
+        "        paths:",
+        '          - "notes/weekly/**"',
+        "prompt:",
+        '  ref: "./prompts/wake.md"',
+        "budget:",
+        "  max_cost_micros: 500000",
+        "  max_github_api_calls: 100",
+        '  on_breach: "abort"',
+        "secrets:",
+        "  required:",
+        '    - "GEMINI_API_KEY"',
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    const loaded = await loader.load("01-research");
+    expect(loaded.frontmatter.llm?.provider).toBe("gemini");
+    expect(loaded.frontmatter.llm?.model).toBe("gemini-2.5-pro");
+    expect(loaded.frontmatter.wake_schedule?.cron).toBe("0 18 * * 0");
+    expect(loaded.frontmatter.signals.github_scopes).toHaveLength(1);
+    expect(loaded.frontmatter.github.write_scopes.issue_comments).toEqual([
+      "xeeban/emergent-praxis",
+    ]);
+    expect(loaded.frontmatter.github.write_scopes.branch_commits[0]?.paths).toEqual([
+      "notes/weekly/**",
+    ]);
+    expect(loaded.frontmatter.prompt.ref).toBe("./prompts/wake.md");
+    expect(loaded.frontmatter.budget.max_cost_micros).toBe(500_000);
+    expect(loaded.frontmatter.budget.on_breach).toBe("abort");
+    expect(loaded.frontmatter.secrets.required).toEqual(["GEMINI_API_KEY"]);
+  });
+
+  it("rejects unknown llm.provider enum", async () => {
+    await writeMinimalFixture(
+      "bad-provider",
+      [
+        'agent_id: "bad-provider"',
+        'name: "Bad"',
+        "model_tier: fast",
+        "llm:",
+        '  provider: "xai"',
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    await expect(loader.load("bad-provider")).rejects.toThrow(FrontmatterInvalidError);
+  });
+
+  it("rejects invalid cron expression", async () => {
+    await writeMinimalFixture(
+      "bad-cron",
+      [
+        'agent_id: "bad-cron"',
+        'name: "Bad Cron"',
+        "model_tier: fast",
+        "wake_schedule:",
+        '  cron: "not a cron"',
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    await expect(loader.load("bad-cron")).rejects.toThrow(FrontmatterInvalidError);
+  });
+
+  it("rejects branch_commits.repo not in owner/name form", async () => {
+    await writeMinimalFixture(
+      "bad-repo",
+      [
+        'agent_id: "bad-repo"',
+        'name: "Bad Repo"',
+        "model_tier: fast",
+        "github:",
+        "  write_scopes:",
+        "    branch_commits:",
+        '      - repo: "not-a-valid-repo-name"',
+        "        paths:",
+        '          - "docs/**"',
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    await expect(loader.load("bad-repo")).rejects.toThrow(FrontmatterInvalidError);
+  });
+});

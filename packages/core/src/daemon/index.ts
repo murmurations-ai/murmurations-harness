@@ -87,6 +87,78 @@ export interface RegisteredAgent {
    * Phase 1B reads from frontmatter.
    */
   readonly maxWallClockMs: number;
+
+  // -------------------------------------------------------------------
+  // ADR-0016 extensions (Phase 2C)
+  // -------------------------------------------------------------------
+
+  /**
+   * LLM pin from `role.md`. Undefined for non-LLM agents (hello-world
+   * stays unchanged). The CLI boot path uses this to instantiate the
+   * per-agent LLMClient.
+   */
+  readonly llm?: {
+    readonly provider: "gemini" | "anthropic" | "openai" | "ollama";
+    readonly model?: string;
+  };
+
+  /**
+   * Per-agent signal scoping. If absent, daemon-level aggregator
+   * defaults apply. See CF-signals-C and ADR-0016.
+   */
+  readonly signalScopes?: {
+    readonly sources: readonly string[];
+    readonly githubScopes?: readonly {
+      readonly owner: string;
+      readonly repo: string;
+      readonly filter: {
+        readonly state: "open" | "closed" | "all";
+        readonly sinceDays?: number;
+        readonly labels?: readonly string[];
+      };
+    }[];
+  };
+
+  /**
+   * Least-privilege GitHub write surface. Empty arrays mean read-only.
+   * Enforced at the github client layer by harness#16 (P5) —
+   * declaration surfaces here.
+   */
+  readonly githubWriteScopes: {
+    readonly issueComments: readonly string[];
+    readonly branchCommits: readonly {
+      readonly repo: string;
+      readonly paths: readonly string[];
+    }[];
+    readonly labels: readonly string[];
+  };
+
+  /**
+   * Absolute path (resolved) to the wake prompt file. Undefined for
+   * hello-world. The agent runner reads this and hands it to the
+   * LLMClient.
+   */
+  readonly promptPath?: string;
+
+  /**
+   * Budget ceiling input per ADR-0011. The daemon constructs a
+   * `CostBudget` from these values plus the resolved model. Zero
+   * values mean "fall back to daemon-level ceiling".
+   */
+  readonly budget: {
+    readonly maxCostMicros: number;
+    readonly maxGithubApiCalls: number;
+    readonly onBreach: "warn" | "abort";
+  };
+
+  /**
+   * Secret declarations to union into the daemon's SecretDeclaration
+   * at boot per ADR-0010.
+   */
+  readonly secrets: {
+    readonly required: readonly string[];
+    readonly optional: readonly string[];
+  };
 }
 
 /**
@@ -102,6 +174,7 @@ export interface RegisteredAgent {
 export const registeredAgentFromLoadedIdentity = (
   loaded: LoadedAgentIdentity,
   trigger: WakeTrigger,
+  options: { readonly rolePath?: string } = {},
 ): RegisteredAgent => {
   const { chain, frontmatter } = loaded;
   const circleContexts = chain.layers
@@ -114,6 +187,55 @@ export const registeredAgentFromLoadedIdentity = (
   const murmurationSoul = chain.layers.find((l) => l.kind === "murmuration-soul")?.content ?? "";
   const agentSoul = chain.layers.find((l) => l.kind === "agent-soul")?.content ?? "";
   const agentRole = chain.layers.find((l) => l.kind === "agent-role")?.content ?? "";
+
+  // ADR-0016: map snake_case YAML fields to camelCase runtime fields.
+  const llm = frontmatter.llm
+    ? {
+        provider: frontmatter.llm.provider,
+        ...(frontmatter.llm.model !== undefined ? { model: frontmatter.llm.model } : {}),
+      }
+    : undefined;
+
+  const signalScopes =
+    frontmatter.signals.github_scopes !== undefined
+      ? {
+          sources: frontmatter.signals.sources,
+          githubScopes: frontmatter.signals.github_scopes.map((s) => ({
+            owner: s.owner,
+            repo: s.repo,
+            filter: {
+              state: s.filter.state,
+              ...(s.filter.since_days !== undefined ? { sinceDays: s.filter.since_days } : {}),
+              ...(s.filter.labels !== undefined ? { labels: s.filter.labels } : {}),
+            },
+          })),
+        }
+      : { sources: frontmatter.signals.sources };
+
+  const githubWriteScopes = {
+    issueComments: frontmatter.github.write_scopes.issue_comments,
+    branchCommits: frontmatter.github.write_scopes.branch_commits.map((b) => ({
+      repo: b.repo,
+      paths: b.paths,
+    })),
+    labels: frontmatter.github.write_scopes.labels,
+  };
+
+  const promptPath =
+    frontmatter.prompt.ref !== undefined && options.rolePath !== undefined
+      ? resolveRolePath(options.rolePath, frontmatter.prompt.ref)
+      : undefined;
+
+  const budget = {
+    maxCostMicros: frontmatter.budget.max_cost_micros,
+    maxGithubApiCalls: frontmatter.budget.max_github_api_calls,
+    onBreach: frontmatter.budget.on_breach,
+  };
+
+  const secrets = {
+    required: frontmatter.secrets.required,
+    optional: frontmatter.secrets.optional,
+  };
 
   return {
     agentId: chain.agentId.value,
@@ -128,7 +250,30 @@ export const registeredAgentFromLoadedIdentity = (
       circleContexts,
     },
     maxWallClockMs: frontmatter.max_wall_clock_ms,
+    ...(llm !== undefined ? { llm } : {}),
+    signalScopes,
+    githubWriteScopes,
+    ...(promptPath !== undefined ? { promptPath } : {}),
+    budget,
+    secrets,
   };
+};
+
+/**
+ * Resolve `prompt.ref` (relative to role.md) to an absolute path.
+ * Kept inline to avoid a new helper file for a one-line operation.
+ */
+const resolveRolePath = (rolePath: string, ref: string): string => {
+  // Use the dirname of the role.md file as the base.
+  const dir = rolePath.substring(0, Math.max(rolePath.lastIndexOf("/"), 0));
+  if (ref.startsWith("/")) return ref;
+  if (ref.startsWith("./") || ref.startsWith("../")) {
+    // Simple relative resolution without importing node:path — good enough
+    // for the hello-world case and Research Agent #1.
+    const cleaned = ref.replace(/^\.\//, "");
+    return `${dir}/${cleaned}`;
+  }
+  return `${dir}/${ref}`;
 };
 
 // ---------------------------------------------------------------------------

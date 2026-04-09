@@ -19,6 +19,7 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import cronParser from "cron-parser";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -77,22 +78,151 @@ export class FrontmatterInvalidError extends IdentityLoaderError {
 
 const modelTierSchema = z.enum(["fast", "balanced", "deep"]);
 
-const wakeScheduleSchema = z.object({
-  cron: z.string().optional(),
-  delayMs: z.number().int().nonnegative().optional(),
-  intervalMs: z.number().int().nonnegative().optional(),
-  events: z.array(z.string()).optional(),
+/**
+ * LLM provider enum — kept in sync with `@murmuration/llm`'s
+ * `ProviderId`. Extended in ADR-0016 (Phase 2C role template).
+ */
+const llmProviderSchema = z.enum(["gemini", "anthropic", "openai", "ollama"]);
+
+/**
+ * Cron expression validator. Uses `cron-parser` at load time; any
+ * malformed expression surfaces as a `FrontmatterInvalidError`.
+ */
+const cronStringSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (s) => {
+      try {
+        cronParser.parseExpression(s);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: "wake_schedule.cron must be a valid cron expression" },
+  );
+
+const wakeScheduleSchema = z
+  .object({
+    cron: cronStringSchema.optional(),
+    delayMs: z.number().int().nonnegative().optional(),
+    intervalMs: z.number().int().nonnegative().optional(),
+    events: z.array(z.string().min(1)).optional(),
+  })
+  .refine(
+    (s) =>
+      s.cron !== undefined ||
+      s.delayMs !== undefined ||
+      s.intervalMs !== undefined ||
+      (s.events !== undefined && s.events.length > 0),
+    { message: "wake_schedule must declare at least one trigger" },
+  );
+
+// ---------------------------------------------------------------------------
+// ADR-0016 extensions — llm, signals, github, prompt, budget, secrets
+// ---------------------------------------------------------------------------
+
+const llmSchema = z.object({
+  provider: llmProviderSchema,
+  model: z.string().min(1).optional(),
 });
 
-/** Shape expected from `role.md` YAML frontmatter. Spec §5.3. */
+const githubFilterSchema = z
+  .object({
+    state: z.enum(["open", "closed", "all"]).default("all"),
+    since_days: z.number().int().positive().optional(),
+    labels: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+const githubScopeSchema = z
+  .object({
+    owner: z.string().min(1),
+    repo: z.string().min(1),
+    filter: githubFilterSchema.default({ state: "all" }),
+  })
+  .strict();
+
+const signalsSchema = z
+  .object({
+    sources: z
+      .array(
+        z.enum([
+          "github-issue",
+          "private-note",
+          "inbox-message",
+          "pipeline-item",
+          "governance-round",
+          "stall-alert",
+        ]),
+      )
+      .default(["github-issue", "private-note", "inbox-message"]),
+    github_scopes: z.array(githubScopeSchema).optional(),
+  })
+  .default({ sources: ["github-issue", "private-note", "inbox-message"] });
+
+const branchCommitScopeSchema = z
+  .object({
+    repo: z.string().regex(/^[^/]+\/[^/]+$/, "repo must be owner/name"),
+    paths: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+
+const githubWriteScopesSchema = z
+  .object({
+    issue_comments: z.array(z.string().regex(/^[^/]+\/[^/]+$/)).default([]),
+    branch_commits: z.array(branchCommitScopeSchema).default([]),
+    labels: z.array(z.string()).default([]),
+  })
+  .default({ issue_comments: [], branch_commits: [], labels: [] });
+
+const githubSchema = z
+  .object({
+    write_scopes: githubWriteScopesSchema,
+  })
+  .default({ write_scopes: { issue_comments: [], branch_commits: [], labels: [] } });
+
+const promptSchema = z
+  .object({
+    ref: z.string().min(1).optional(),
+  })
+  .default({});
+
+const budgetSchema = z
+  .object({
+    max_cost_micros: z.number().int().nonnegative().default(0),
+    max_github_api_calls: z.number().int().nonnegative().default(0),
+    on_breach: z.enum(["warn", "abort"]).default("warn"),
+  })
+  .default({ max_cost_micros: 0, max_github_api_calls: 0, on_breach: "warn" });
+
+const secretsSchema = z
+  .object({
+    required: z.array(z.string().min(1)).default([]),
+    optional: z.array(z.string().min(1)).default([]),
+  })
+  .default({ required: [], optional: [] });
+
+/** Shape expected from `role.md` YAML frontmatter. Spec §5.3 + ADR-0016. */
 export const roleFrontmatterSchema = z.object({
   agent_id: z.string().min(1),
   name: z.string().min(1),
   soul_file: z.string().min(1).optional(),
+
+  // legacy compat (Phase 1B)
   model_tier: modelTierSchema,
   wake_schedule: wakeScheduleSchema.optional(),
   circle_memberships: z.array(z.string().min(1)).default([]),
   max_wall_clock_ms: z.number().int().positive().default(15_000),
+
+  // new in ADR-0016 (Phase 2C)
+  llm: llmSchema.optional(), // schema-optional; daemon enforces for LLM agents
+  signals: signalsSchema,
+  github: githubSchema,
+  prompt: promptSchema,
+  budget: budgetSchema,
+  secrets: secretsSchema,
 });
 
 /** Parsed, validated shape of a `role.md` frontmatter block. */
