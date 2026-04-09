@@ -65,3 +65,6 @@ per the Engineering Lead #22 gate review ([issue #6](https://github.com/murmurat
 | [ADR-0011](./0011-cost-record-schema.md)         | WakeCostRecord schema and cost instrumentation plumbing                                      | Accepted |
 | [ADR-0012](./0012-github-client.md)              | @murmuration/github — native fetch, SecretValue auth, per-call cost hook                     | Accepted |
 | [ADR-0013](./0013-signal-aggregator.md)          | SignalAggregator v0.1 with interim trust taxonomy (pending harness#4)                        | Accepted |
+| [ADR-0014](./0014-llm-client.md)                 | @murmuration/llm four-provider client (Gemini P0, Anthropic, OpenAI, Ollama)                 | Accepted |
+| [ADR-0015](./0015-pricing-catalog.md)            | Per-provider LLM pricing catalog populating WakeCostRecord.llm.costMicros                    | Accepted |
+| [ADR-0016](./0016-role-template.md)              | Extended role.md frontmatter for real agents (provider pin, scopes, budget, prompt ref)      | Accepted |
