@@ -34,6 +34,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@murmuration/core": "workspace:*",
+    "@murmuration/llm": "workspace:*",
+    "@murmuration/secrets-dotenv": "workspace:*",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^4.1.4",
     "eslint": "^10.2.0",

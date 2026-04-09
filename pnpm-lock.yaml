@@ -11,6 +11,15 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.2.0)
+      '@murmuration/core':
+        specifier: workspace:*
+        version: link:packages/core
+      '@murmuration/llm':
+        specifier: workspace:*
+        version: link:packages/llm
+      '@murmuration/secrets-dotenv':
+        specifier: workspace:*
+        version: link:packages/secrets-dotenv
       '@types/node':
         specifier: ^22.10.0
         version: 22.19.17
