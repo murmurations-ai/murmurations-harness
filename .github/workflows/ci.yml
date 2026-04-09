@@ -56,7 +56,7 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Gate test (Phase 1A wake loop)
+      - name: Gate test (Phase 1B wake loop — full pipeline)
         shell: bash
         run: |
           set -e
@@ -67,7 +67,28 @@ jobs:
           wait $PID 2>/dev/null || true
           echo "--- gate log ---"
           cat /tmp/gate.log
+
+          # ------ Phase 1A guarantees (structural wake loop) ------
+          grep -q '"event":"daemon.boot"' /tmp/gate.log
+          grep -q '"event":"daemon.ready"' /tmp/gate.log
+          grep -q '"event":"daemon.wake.fire"' /tmp/gate.log
           grep -q '"event":"daemon.wake.completed"' /tmp/gate.log
           grep -q '"outcome":"completed"' /tmp/gate.log
           grep -q '"event":"daemon.shutdown.complete"' /tmp/gate.log
-          echo "--- gate PASS ---"
+
+          # ------ Phase 1B-d guarantees (signal aggregation) ------
+          # daemon.wake.fire carries signalCount populated by the aggregator.
+          # The hello-world fixture ships 2 notes + 2 inbox messages = 4.
+          grep -q '"event":"daemon.wake.fire".*"signalCount":4' /tmp/gate.log
+          grep -q '"event":"daemon.wake.fire".*"signalWarnings":0' /tmp/gate.log
+
+          # ------ Phase 1B-c guarantees (cost instrumentation) ------
+          # daemon.wake.cost fires with the v1 schema and real subprocess delta.
+          grep -q '"event":"daemon.wake.cost"' /tmp/gate.log
+          grep -q '"event":"daemon.wake.cost".*"schemaVersion":1' /tmp/gate.log
+          grep -q '"event":"daemon.wake.cost".*"modelProvider":"placeholder"' /tmp/gate.log
+          grep -q '"event":"daemon.wake.cost".*"costUsdFormatted":"0.0000"' /tmp/gate.log
+          grep -q '"event":"daemon.wake.cost".*"dayUtc":"' /tmp/gate.log
+          grep -q '"event":"daemon.wake.cost".*"isoWeekUtc":"' /tmp/gate.log
+
+          echo "--- gate PASS (Phase 1A + 1B-c + 1B-d) ---"

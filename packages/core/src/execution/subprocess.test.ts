@@ -119,6 +119,26 @@ describe("SubprocessExecutor", () => {
     expect(isCompleted(result)).toBe(true);
     expect(result.wakeSummary).toContain("hello from test");
     expect(result.cost.wallClockMs).toBeGreaterThanOrEqual(0);
+
+    // 1B-c: costRecord is populated with subprocess delta.
+    expect(result.costRecord).toBeDefined();
+    expect(result.costRecord?.schemaVersion).toBe(1);
+    expect(result.costRecord?.wallClockMs).toBeGreaterThanOrEqual(0);
+    expect(result.costRecord?.subprocess).toBeDefined();
+    // CPU deltas are monotonic non-negative.
+    expect(result.costRecord?.subprocess?.userCpuMicros).toBeGreaterThanOrEqual(0);
+    expect(result.costRecord?.subprocess?.systemCpuMicros).toBeGreaterThanOrEqual(0);
+    // maxRSS is measured in kilobytes and should be positive for any real wake.
+    expect(result.costRecord?.subprocess?.maxRssKb).toBeGreaterThan(0);
+    // LLM and github fields are stubs in Phase 1.
+    expect(result.costRecord?.llm.inputTokens).toBe(0);
+    expect(result.costRecord?.llm.modelProvider).toBe("placeholder");
+    expect(result.costRecord?.github.restCalls).toBe(0);
+    expect(result.costRecord?.totals.costMicros.value).toBe(0);
+    expect(result.costRecord?.budget).toBeNull();
+    // Rollup hints have the right shape.
+    expect(result.costRecord?.rollupHints.dayUtc).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(result.costRecord?.rollupHints.isoWeekUtc).toMatch(/^\d{4}-W\d{2}$/);
   });
 
   it("captures a non-zero exit as a failed outcome", async () => {
