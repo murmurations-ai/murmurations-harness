@@ -16,4 +16,6 @@ export * from "./scheduler/index.js";
 export * from "./signals/index.js";
 export * from "./governance/index.js";
 export * from "./identity/index.js";
+export * from "./secrets/index.js";
+export * from "./cost/index.js";
 export * from "./daemon/index.js";

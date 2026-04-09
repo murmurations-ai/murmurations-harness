@@ -18,6 +18,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
+import { WakeCostBuilder } from "../cost/builder.js";
+import type { WakeCostRecord } from "../cost/record.js";
 import {
   HandleUnknownError,
   InternalExecutorError,
@@ -93,6 +95,14 @@ interface WakeRecord {
    */
   readonly terminal: Promise<TerminalReason>;
   resolveTerminal: (reason: TerminalReason) => void;
+  /**
+   * Cost accumulator for this wake. Closes carry-forward #5 (Performance
+   * Agent #27). Populated via `builder.recordSubprocessUsage` in
+   * `waitForCompletion` using the delta of `process.resourceUsage()`
+   * captured at spawn versus exit.
+   */
+  readonly costBuilder: WakeCostBuilder;
+  readonly rusageAtSpawn: NodeJS.ResourceUsage;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +189,15 @@ export class SubprocessExecutor implements AgentExecutor {
       });
     }
 
+    const costBuilder = WakeCostBuilder.start({
+      wakeId: context.wakeId,
+      agentId: context.agentId,
+      modelTier: context.budget.model.tier,
+      circleIds: context.identity.frontmatter.circleMemberships.map((c) => c.value),
+      ceiling: null,
+    });
+    const rusageAtSpawn = process.resourceUsage();
+
     const record: WakeRecord = {
       context,
       startedAt,
@@ -189,6 +208,8 @@ export class SubprocessExecutor implements AgentExecutor {
       settled: false,
       terminal,
       resolveTerminal,
+      costBuilder,
+      rusageAtSpawn,
     };
 
     child.stdout?.setEncoding("utf8");
@@ -255,7 +276,18 @@ export class SubprocessExecutor implements AgentExecutor {
     const stderr = record.stderrChunks.join("");
     const { wakeSummary, governanceEvents } = parseChildOutput(stdout);
 
-    const cost = zeroCost(record.startedAt, finishedAt);
+    // Record the parent-process resource-usage delta captured around the
+    // subprocess lifetime. This is an approximation of the child's own
+    // cost (Node does not cheaply expose per-child rusage); precision
+    // improves in Phase 2 per Performance #27's carry-forward.
+    const rusageAtExit = process.resourceUsage();
+    record.costBuilder.recordSubprocessUsage({
+      userCpuMicros: Math.max(0, rusageAtExit.userCPUTime - record.rusageAtSpawn.userCPUTime),
+      systemCpuMicros: Math.max(0, rusageAtExit.systemCPUTime - record.rusageAtSpawn.systemCPUTime),
+      maxRssKb: Math.max(0, rusageAtExit.maxRSS),
+    });
+    const costRecord = record.costBuilder.finalize(finishedAt);
+    const cost = actualsFromCostRecord(costRecord, record.startedAt, finishedAt);
 
     switch (terminal.kind) {
       case "exit": {
@@ -267,6 +299,7 @@ export class SubprocessExecutor implements AgentExecutor {
             outputs: [],
             governanceEvents,
             cost,
+            costRecord,
             wakeSummary: wakeSummary ?? stdout.trim(),
             startedAt: record.startedAt,
             finishedAt,
@@ -288,6 +321,7 @@ export class SubprocessExecutor implements AgentExecutor {
           outputs: [],
           governanceEvents,
           cost,
+          costRecord,
           wakeSummary: wakeSummary ?? stdout.trim(),
           startedAt: record.startedAt,
           finishedAt,
@@ -307,6 +341,7 @@ export class SubprocessExecutor implements AgentExecutor {
           outputs: [],
           governanceEvents,
           cost,
+          costRecord,
           wakeSummary: wakeSummary ?? "",
           startedAt: record.startedAt,
           finishedAt,
@@ -323,6 +358,7 @@ export class SubprocessExecutor implements AgentExecutor {
           outputs: [],
           governanceEvents,
           cost,
+          costRecord,
           wakeSummary: wakeSummary ?? stdout.trim(),
           startedAt: record.startedAt,
           finishedAt,
@@ -336,6 +372,7 @@ export class SubprocessExecutor implements AgentExecutor {
           outputs: [],
           governanceEvents,
           cost,
+          costRecord,
           wakeSummary: wakeSummary ?? stdout.trim(),
           startedAt: record.startedAt,
           finishedAt,
@@ -413,12 +450,21 @@ const clearWakeTimeout = (record: WakeRecord): void => {
   }
 };
 
-const zeroCost = (startedAt: Date, finishedAt: Date): CostActuals => ({
-  inputTokens: 0,
-  outputTokens: 0,
+/**
+ * Derive the legacy {@link CostActuals} summary from a rich
+ * {@link WakeCostRecord}. Both fields ride on every {@link AgentResult};
+ * this keeps them in sync rather than computing them independently.
+ */
+const actualsFromCostRecord = (
+  record: WakeCostRecord,
+  startedAt: Date,
+  finishedAt: Date,
+): CostActuals => ({
+  inputTokens: record.llm.inputTokens,
+  outputTokens: record.llm.outputTokens,
   wallClockMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
-  costMicros: 0,
-  budgetOverrunEvents: 0,
+  costMicros: record.totals.costMicros.value,
+  budgetOverrunEvents: record.budget?.overrunEvents ?? 0,
 });
 
 /**

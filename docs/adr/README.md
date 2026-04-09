@@ -61,3 +61,5 @@ per the Engineering Lead #22 gate review ([issue #6](https://github.com/murmurat
 | [ADR-0007](./0007-phase-1a-stdio-protocol.md)    | Phase 1A subprocess stdio output protocol (`::wake-summary::`, `::governance::<kind>::`)     | Accepted |
 | [ADR-0008](./0008-test-framework.md)             | Test framework: Vitest                                                                       | Accepted |
 | [ADR-0009](./0009-lint-format.md)                | Lint + format: ESLint flat config + Prettier                                                 | Accepted |
+| [ADR-0010](./0010-secrets-provider-interface.md) | SecretsProvider interface and dotenv default provider                                        | Accepted |
+| [ADR-0011](./0011-cost-record-schema.md)         | WakeCostRecord schema and cost instrumentation plumbing                                      | Accepted |

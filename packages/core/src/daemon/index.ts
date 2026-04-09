@@ -11,6 +11,7 @@
  * Spec §4 architecture diagram, §15 Phase 1 gate.
  */
 
+import { formatUSDMicros } from "../cost/usd.js";
 import {
   isCompleted,
   isFailed,
@@ -29,6 +30,12 @@ import {
   type SignalBundle,
 } from "../execution/index.js";
 import type { LoadedAgentIdentity } from "../identity/index.js";
+import {
+  REDACT,
+  scrubLogRecord,
+  type SecretDeclaration,
+  type SecretsProvider,
+} from "../secrets/index.js";
 import {
   TimerScheduler,
   type Scheduler,
@@ -145,6 +152,19 @@ export interface DaemonConfig {
    * prepared for the extra log volume.
    */
   readonly heartbeatMs?: number;
+  /**
+   * Optional secrets block. If present, `start()` calls
+   * `provider.load(declaration)` before scheduling any wakes. A missing
+   * required secret causes boot to log `daemon.secrets.load.failed`
+   * and refuse to start (the caller should exit with code 78 per the
+   * sysexits.h convention for config errors).
+   *
+   * Ratified as part of Phase 1B step B1 (Security Agent #25).
+   */
+  readonly secrets?: {
+    readonly provider: SecretsProvider;
+    readonly declaration: SecretDeclaration;
+  };
 }
 
 export interface DaemonLogger {
@@ -166,6 +186,9 @@ export class Daemon {
   readonly #logger: DaemonLogger;
   readonly #inFlight = new Set<Promise<void>>();
   readonly #heartbeatMs: number;
+  readonly #secrets:
+    | { readonly provider: SecretsProvider; readonly declaration: SecretDeclaration }
+    | undefined;
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
 
@@ -175,6 +198,37 @@ export class Daemon {
     this.#agents = config.agents;
     this.#logger = config.logger ?? defaultLogger();
     this.#heartbeatMs = config.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
+    this.#secrets = config.secrets;
+  }
+
+  /**
+   * Load the configured secrets provider (if any), returning `true` on
+   * success. On failure, logs `daemon.secrets.load.failed` and returns
+   * `false` without starting the daemon. Callers should exit with code
+   * 78 (sysexits.h EX_CONFIG) on `false`.
+   *
+   * Separate from {@link start} so the CLI can inspect the outcome
+   * before committing to a daemon lifecycle.
+   */
+  public async loadSecrets(): Promise<boolean> {
+    if (!this.#secrets) return true;
+    const { provider, declaration } = this.#secrets;
+    const result = await provider.load(declaration);
+    if (!result.ok) {
+      this.#logger.error("daemon.secrets.load.failed", {
+        provider: provider.capabilities().id,
+        code: result.error.code,
+        message: result.error.message,
+      });
+      return false;
+    }
+    this.#logger.info("daemon.secrets.load.ok", {
+      provider: provider.capabilities().id,
+      loadedCount: result.loadedCount,
+      loadedKeys: provider.loadedKeys().map((k) => k.value),
+      missingOptional: result.missingOptional.map((k) => k.value),
+    });
+    return true;
   }
 
   public start(): void {
@@ -299,6 +353,47 @@ export class Daemon {
         reason: result.outcome.reason,
       });
     }
+    // Cost instrumentation (carry-forward #5, Performance #27). Emitted
+    // in addition to the outcome event so outcome and cost consumers
+    // can evolve independently.
+    const { costRecord } = result;
+    if (costRecord !== undefined) {
+      this.#logger.info("daemon.wake.cost", {
+        schemaVersion: costRecord.schemaVersion,
+        wakeId: costRecord.wakeId.value,
+        agentId: costRecord.agentId.value,
+        modelTier: costRecord.modelTier,
+        startedAt: costRecord.startedAt.toISOString(),
+        finishedAt: costRecord.finishedAt.toISOString(),
+        wallClockMs: costRecord.wallClockMs,
+        subprocess: costRecord.subprocess,
+        llm: {
+          ...costRecord.llm,
+          costMicros: costRecord.llm.costMicros.value,
+          costUsdFormatted: formatUSDMicros(costRecord.llm.costMicros),
+        },
+        github: {
+          ...costRecord.github,
+          rateLimitRemaining: costRecord.github.rateLimitRemaining ?? null,
+        },
+        totals: {
+          costMicros: costRecord.totals.costMicros.value,
+          costUsdFormatted: formatUSDMicros(costRecord.totals.costMicros),
+          apiCalls: costRecord.totals.apiCalls,
+        },
+        budget: costRecord.budget,
+        rollupHints: costRecord.rollupHints,
+      });
+      if (costRecord.budget && costRecord.budget.breaches.length > 0) {
+        const level: "warn" | "error" = costRecord.budget.aborted ? "error" : "warn";
+        this.#logger[level]("daemon.wake.budget.breach", {
+          wakeId: costRecord.wakeId.value,
+          agentId: costRecord.agentId.value,
+          breaches: costRecord.budget.breaches,
+          aborted: costRecord.budget.aborted,
+        });
+      }
+    }
   }
 }
 
@@ -384,8 +479,18 @@ const buildSpawnContext = (
 };
 
 /**
- * Minimal JSON-lines logger to stdout. Replaced in Phase 1B once
- * Performance Agent #27 lands the cost accounting schema.
+ * Minimal JSON-lines logger to stdout. As of Phase 1B step B1 (Security
+ * Agent #25), the logger applies two redaction layers before
+ * serialization:
+ *
+ *   1. Any field under the {@link REDACT} symbol is stripped entirely.
+ *   2. Any string-valued field whose *name* matches the sensitive-name
+ *      regex (token, secret, credential, apiKey, …) and whose value is
+ *      at least 8 characters is replaced with `"[REDACTED:scrubbed-by-name]"`.
+ *
+ * The redaction pass is O(n) in the number of top-level fields and adds
+ * negligible overhead to a JSON-lines logger that was already iterating
+ * the record to serialize it.
  */
 const defaultLogger = (): DaemonLogger => {
   const write = (
@@ -393,11 +498,12 @@ const defaultLogger = (): DaemonLogger => {
     event: string,
     data: Record<string, unknown>,
   ): void => {
+    const scrubbed = scrubLogRecord(data);
     const record = {
       ts: new Date().toISOString(),
       level,
       event,
-      ...data,
+      ...scrubbed,
     };
     process.stdout.write(`${JSON.stringify(record)}\n`);
   };
@@ -407,6 +513,11 @@ const defaultLogger = (): DaemonLogger => {
     error: (event, data) => write("error", event, data),
   };
 };
+
+// Re-export the redaction symbol so tests and plugins in downstream
+// packages can opt into the symbol-bucket form without reaching into
+// `@murmuration/core/secrets`.
+export { REDACT };
 
 // Re-export the trigger types + WakeId helper so downstream packages
 // (notably the CLI) can construct registrations without reaching into

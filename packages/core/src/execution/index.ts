@@ -1,3 +1,5 @@
+import type { WakeCostRecord } from "../cost/record.js";
+
 /**
  * Agent execution — the pluggable boundary between the harness daemon and
  * whatever actually runs an agent session.
@@ -433,6 +435,16 @@ export interface AgentResult {
   readonly outputs: readonly AgentOutputArtifact[];
   readonly governanceEvents: readonly EmittedGovernanceEvent[];
   readonly cost: CostActuals;
+  /**
+   * Rich per-wake cost record (schema owned by Performance / Observability
+   * Agent #27; closes carry-forward #5). Populated by executors that
+   * construct a {@link import("../cost/index.js").WakeCostBuilder} —
+   * the default {@link import("./subprocess.js").SubprocessExecutor}
+   * does. Optional because the field is additive over the pre-1B-c
+   * `AgentResult` shape; legacy consumers that only need summary
+   * numbers keep reading {@link AgentResult.cost}.
+   */
+  readonly costRecord?: WakeCostRecord;
   /**
    * Agent-authored wake summary (spec §7.1 step 4). May be empty when the
    * wake failed before the summary was written.
