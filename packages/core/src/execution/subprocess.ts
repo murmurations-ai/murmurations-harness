@@ -170,16 +170,10 @@ export class SubprocessExecutor implements AgentExecutor {
 
     let child: ChildProcess;
     try {
+      const childEnv = buildChildEnv({ context, resolverEnv: resolved.env });
       child = spawn(resolved.command, [...resolved.args], {
         cwd: resolved.cwd ?? process.cwd(),
-        env: {
-          ...process.env,
-          ...(resolved.env ?? {}),
-          MURMURATION_WAKE_ID: context.wakeId.value,
-          MURMURATION_AGENT_ID: context.agentId.value,
-          MURMURATION_SPAWN_CONTEXT: serializeContext(context),
-          ...context.environment,
-        },
+        env: childEnv,
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (cause) {
@@ -525,6 +519,109 @@ const GOVERNANCE_KINDS = [
 const isGovernanceKind = (value: string | undefined): value is EmittedGovernanceEvent["kind"] => {
   if (value === undefined) return false;
   return (GOVERNANCE_KINDS as readonly string[]).includes(value);
+};
+
+// ---------------------------------------------------------------------------
+// Env scrub (ADR-0010 §8 / harness#8 — Security Agent #25)
+// ---------------------------------------------------------------------------
+
+/**
+ * Environment variables from the daemon's `process.env` that are allowed
+ * to pass through to agent subprocesses. Every other variable — including
+ * every secret loaded by the Secrets Provider — is scrubbed.
+ *
+ * This is an allow-list by construction: the child env is built from
+ * scratch rather than spreading `process.env`. Adding a new entry here
+ * is an auditable PR diff.
+ *
+ * Explicitly NOT allowed: anything matching `*TOKEN*`, `*KEY*`,
+ * `*SECRET*`, `*PASSWORD*`, `AWS_*`, `SSH_*`, `LD_*`, `DYLD_*`, or any
+ * adopter-defined secret. If an agent genuinely needs one of those, it
+ * must arrive via `resolved.env` (command resolver, daemon-scoped) or
+ * `context.environment` (per-wake, explicit).
+ *
+ * Security Agent #25 design doc: `docs/adr/0010-secrets-provider-interface.md` §8.
+ */
+const PASSTHROUGH_ENV_ALLOWLIST: readonly string[] = [
+  "PATH", // child needs to resolve `node`, `sh`, etc.
+  "HOME", // git, npm, and most user tooling read config from $HOME
+  "SHELL", // some child tools shell out; keep the adopter's login shell
+  "USER", // diagnostic identity; some tools fail hard without it
+  "LOGNAME", // POSIX pair with USER
+  "LANG", // locale for text handling — affects Node string ops
+  "LC_ALL", // locale override
+  "LC_CTYPE", // locale character classification
+  "TMPDIR", // POSIX temp file location
+  "TMP", // Windows/cross-platform temp
+  "TEMP", // Windows/cross-platform temp
+  "NODE_ENV", // Node convention; `development` vs `production` behavior
+  "TZ", // timezone — matters for any agent emitting timestamps
+] as const;
+
+/**
+ * Prefix of env vars that belong to the murmuration harness's own
+ * namespace and are always passed through if present in `process.env`.
+ */
+const MURMURATION_ENV_PREFIX = "MURMURATION_";
+
+interface BuildChildEnvInput {
+  readonly context: AgentSpawnContext;
+  readonly resolverEnv: Readonly<Record<string, string>> | undefined;
+}
+
+/**
+ * Build the child process environment from scratch. Precedence
+ * (lowest to highest):
+ *
+ *   1. Allow-listed `process.env` entries (e.g. PATH, HOME, LANG)
+ *   2. `MURMURATION_*` entries from `process.env` (harness namespace)
+ *   3. `resolverEnv` — explicit env from the SubprocessCommand resolver
+ *   4. Harness-injected wake identifiers (WAKE_ID, AGENT_ID, SPAWN_CONTEXT)
+ *   5. `context.environment` — per-wake overrides from the spawn context
+ *
+ * Later entries overwrite earlier entries. Secrets in the daemon's
+ * `process.env` never reach the child unless an entry in (3) or (5)
+ * explicitly names them.
+ */
+const buildChildEnv = (input: BuildChildEnvInput): Record<string, string> => {
+  const { context, resolverEnv } = input;
+  const env: Record<string, string> = {};
+
+  // (1) Allow-listed passthroughs.
+  for (const key of PASSTHROUGH_ENV_ALLOWLIST) {
+    const value = process.env[key];
+    if (typeof value === "string") {
+      env[key] = value;
+    }
+  }
+
+  // (2) Harness namespace passthrough.
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith(MURMURATION_ENV_PREFIX) && typeof value === "string") {
+      env[key] = value;
+    }
+  }
+
+  // (3) Resolver-provided env (already audited by the daemon owner).
+  if (resolverEnv) {
+    for (const [key, value] of Object.entries(resolverEnv)) {
+      env[key] = value;
+    }
+  }
+
+  // (4) Harness-injected wake identifiers. Authoritative — always
+  // overwrite whatever (1)-(3) may have supplied in the MURMURATION_
+  // namespace.
+  env.MURMURATION_WAKE_ID = context.wakeId.value;
+  env.MURMURATION_AGENT_ID = context.agentId.value;
+  env.MURMURATION_SPAWN_CONTEXT = serializeContext(context);
+
+  // (5) Per-wake overrides from the spawn context.
+  for (const [key, value] of Object.entries(context.environment)) {
+    env[key] = value;
+  }
+
+  return env;
 };
 
 /**

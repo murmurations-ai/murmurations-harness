@@ -281,3 +281,90 @@ describe("SubprocessExecutor", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Env scrub (ADR-0010 §8 / harness#8 — Security Agent #25)
+// ---------------------------------------------------------------------------
+
+describe("SubprocessExecutor env scrub (ADR-0010 §8 / harness#8)", () => {
+  const spawnProbe = async (
+    envVarName: string,
+    opts: {
+      contextEnvironment?: Record<string, string>;
+      resolverEnv?: Record<string, string>;
+    } = {},
+  ): Promise<string> => {
+    const executor = new SubprocessExecutor({
+      resolveCommand: (): SubprocessCommand => {
+        const cmd: {
+          command: string;
+          args: string[];
+          env?: Record<string, string>;
+        } = {
+          command: "node",
+          args: [
+            "-e",
+            `process.stdout.write('::wake-summary:: ' + (process.env[${JSON.stringify(envVarName)}] ?? '<unset>') + '\\n'); process.exit(0);`,
+          ],
+        };
+        if (opts.resolverEnv) cmd.env = opts.resolverEnv;
+        return cmd as SubprocessCommand;
+      },
+    });
+    const ctx = makeContext("probe-agent", `wake-probe-${envVarName}`);
+    if (opts.contextEnvironment) {
+      (ctx as { environment: Record<string, string> }).environment = opts.contextEnvironment;
+    }
+    const handle = await executor.spawn(ctx);
+    const result = await executor.waitForCompletion(handle);
+    expect(isCompleted(result)).toBe(true);
+    return result.wakeSummary.trim();
+  };
+
+  it("scrubs GITHUB_TOKEN from the child env even when set in process.env", async () => {
+    process.env.GITHUB_TOKEN = "ghp_fake_should_not_leak";
+    try {
+      const seen = await spawnProbe("GITHUB_TOKEN");
+      expect(seen).toBe("<unset>");
+    } finally {
+      delete process.env.GITHUB_TOKEN;
+    }
+  });
+
+  it("scrubs ANTHROPIC_API_KEY from the child env", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-ant-fake";
+    try {
+      const seen = await spawnProbe("ANTHROPIC_API_KEY");
+      expect(seen).toBe("<unset>");
+    } finally {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
+  it("passes PATH through so the child can resolve node (allow-list smoke test)", async () => {
+    const seen = await spawnProbe("PATH");
+    expect(seen).not.toBe("<unset>");
+    expect(seen.length).toBeGreaterThan(0);
+  });
+
+  it("sets MURMURATION_WAKE_ID and MURMURATION_AGENT_ID in the child", async () => {
+    const seenWake = await spawnProbe("MURMURATION_WAKE_ID");
+    const seenAgent = await spawnProbe("MURMURATION_AGENT_ID");
+    expect(seenWake).toContain("wake-probe-");
+    expect(seenAgent).toBe("probe-agent");
+  });
+
+  it("context.environment overrides flow through to the child", async () => {
+    const seen = await spawnProbe("MY_WAKE_VAR", {
+      contextEnvironment: { MY_WAKE_VAR: "wake-scoped-value" },
+    });
+    expect(seen).toBe("wake-scoped-value");
+  });
+
+  it("resolved.env from the command resolver flows through to the child", async () => {
+    const seen = await spawnProbe("MY_RESOLVER_VAR", {
+      resolverEnv: { MY_RESOLVER_VAR: "resolver-scoped-value" },
+    });
+    expect(seen).toBe("resolver-scoped-value");
+  });
+});
