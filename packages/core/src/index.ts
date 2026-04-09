@@ -15,4 +15,5 @@ export * from "./execution/subprocess.js";
 export * from "./scheduler/index.js";
 export * from "./signals/index.js";
 export * from "./governance/index.js";
+export * from "./identity/index.js";
 export * from "./daemon/index.js";

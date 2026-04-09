@@ -1,68 +1,62 @@
 /**
- * Phase 1A daemon boot — wires SubprocessExecutor + TimerScheduler +
- * Daemon around a single hardcoded hello-world agent, fires one wake,
- * waits for SIGINT, shuts down cleanly.
+ * Phase 1B daemon boot — wires SubprocessExecutor + TimerScheduler +
+ * Daemon around the hello-world agent whose identity is read from
+ * disk via IdentityLoader.
  *
- * This is the concrete integration of the Phase 1A gate. Everything
- * past this is Phase 1B (agent registry from disk, signal aggregator,
- * secrets, GitHub client, real cron).
+ * Changed from Phase 1A: the identity chain (murmuration soul, agent
+ * soul, agent role, circle contexts) is no longer hardcoded inline.
+ * The CLI now resolves the example directory, loads the identity via
+ * `@murmuration/core/identity`, and constructs a RegisteredAgent from
+ * the result. This closes CF-1 from the Engineering Lead #22 Phase 1A
+ * gate review (issue #6).
  */
 
-import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   Daemon,
+  IdentityLoader,
   SubprocessExecutor,
+  registeredAgentFromLoadedIdentity,
   type RegisteredAgent,
   type SubprocessCommand,
+  type WakeTrigger,
 } from "@murmuration/core";
-
-const HELLO_WORLD_AGENT: RegisteredAgent = {
-  agentId: "hello-world",
-  displayName: "Hello World Agent",
-  trigger: { kind: "delay-once", delayMs: 2000 },
-  circleMemberships: ["engineering"],
-  modelTier: "fast",
-  maxWallClockMs: 10_000,
-  identityContent: {
-    murmurationSoul:
-      "[phase-1a placeholder] The murmuration is a test instance. The one agent in it is hello-world, and its only job is to prove the wake loop works.",
-    agentSoul:
-      "[phase-1a placeholder] I am the hello-world agent. I have no purpose beyond proving the daemon can spawn me and reap my result.",
-    agentRole: "[phase-1a placeholder] My role is to print a wake summary and exit cleanly.",
-    circleContexts: [
-      {
-        circleId: "engineering",
-        content:
-          "[phase-1a placeholder] The Engineering Circle is building the harness I am running inside.",
-      },
-    ],
-  },
-};
 
 /**
  * Boot the daemon, run until SIGINT/SIGTERM, then shut down cleanly.
  */
 export const bootHelloWorldDaemon = async (): Promise<void> => {
-  const helloWorldAgentPath = resolveHelloWorldAgentPath();
+  const exampleRoot = resolveExampleRoot();
+  const agentScriptPath = resolve(exampleRoot, "agent.mjs");
+
+  const loader = new IdentityLoader({ rootDir: exampleRoot });
+  const loaded = await loader.load("hello-world");
+
+  // Phase 1B default trigger: the loader parses `wake_schedule.delayMs`
+  // from frontmatter but does not yet own trigger construction
+  // (that's Phase 1B-c / B3). For now the CLI converts frontmatter →
+  // trigger inline; this moves to a shared helper in Phase 1B-c.
+  const trigger: WakeTrigger = { kind: "delay-once", delayMs: 2000 };
+
+  const registered: RegisteredAgent = registeredAgentFromLoadedIdentity(loaded, trigger);
 
   const executor = new SubprocessExecutor({
     resolveCommand: (context): SubprocessCommand => {
       if (context.agentId.value !== "hello-world") {
-        // Phase 1A has exactly one agent. Anything else is a bug.
         throw new Error(`resolveCommand: unknown agent ${context.agentId.value}`);
       }
       return {
         command: process.execPath,
-        args: [helloWorldAgentPath],
+        args: [agentScriptPath],
       };
     },
   });
 
   const daemon = new Daemon({
     executor,
-    agents: [HELLO_WORLD_AGENT],
+    agents: [registered],
   });
 
   const shutdownPromise = new Promise<void>((resolveShutdown) => {
@@ -80,8 +74,12 @@ export const bootHelloWorldDaemon = async (): Promise<void> => {
         resolveShutdown();
       })();
     };
-    process.once("SIGINT", () => shutdown("SIGINT"));
-    process.once("SIGTERM", () => shutdown("SIGTERM"));
+    process.once("SIGINT", () => {
+      shutdown("SIGINT");
+    });
+    process.once("SIGTERM", () => {
+      shutdown("SIGTERM");
+    });
   });
 
   daemon.start();
@@ -98,16 +96,15 @@ export const bootHelloWorldDaemon = async (): Promise<void> => {
 };
 
 /**
- * Resolve the absolute path to `examples/hello-world-agent/agent.mjs`.
+ * Resolve the absolute path to `<repo-root>/examples/hello-world-agent/`.
  *
  * The CLI is built to `packages/cli/dist/boot.js`; the example lives at
- * `<repo-root>/examples/hello-world-agent/agent.mjs`. We walk up from
- * the compiled file location to the repo root.
+ * `<repo-root>/examples/hello-world-agent/`. Walk up from the compiled
+ * file location to the repo root.
  */
-const resolveHelloWorldAgentPath = (): string => {
+const resolveExampleRoot = (): string => {
   const here = dirname(fileURLToPath(import.meta.url));
   // here = <repo>/packages/cli/dist
-  // repo root = ../../..
   const repoRoot = resolve(here, "..", "..", "..");
-  return resolve(repoRoot, "examples", "hello-world-agent", "agent.mjs");
+  return resolve(repoRoot, "examples", "hello-world-agent");
 };

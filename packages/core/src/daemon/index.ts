@@ -28,6 +28,7 @@ import {
   type ResolvedModel,
   type SignalBundle,
 } from "../execution/index.js";
+import type { LoadedAgentIdentity } from "../identity/index.js";
 import {
   TimerScheduler,
   type Scheduler,
@@ -40,9 +41,18 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * A single registered agent the daemon is willing to wake. Phase 1A
- * holds these in memory; Phase 1B loads them by parsing
- * `agents/NN-name/role.md` frontmatter.
+ * A single registered agent the daemon is willing to wake. Holds
+ * everything the daemon needs to build an {@link AgentSpawnContext}
+ * for this agent without re-reading the repo on every wake.
+ *
+ * Two construction paths:
+ *
+ * 1. Manual construction — used by the hello-world Phase 1A path
+ *    where content is inline placeholder strings (see
+ *    `packages/cli/src/boot.ts`).
+ * 2. {@link registeredAgentFromLoadedIdentity} — construct from an
+ *    `IdentityLoader.load()` result plus a wake trigger. Use this in
+ *    Phase 1B+ production paths where identity is read from disk.
  */
 export interface RegisteredAgent {
   readonly agentId: string;
@@ -51,8 +61,9 @@ export interface RegisteredAgent {
   readonly circleMemberships: readonly string[];
   readonly modelTier: "fast" | "balanced" | "deep";
   /**
-   * The identity content layers. Phase 1A: minimal placeholder strings;
-   * Phase 1B: read from disk and passed through frontmatter validation.
+   * The identity content layers to thread through to the executor.
+   * Populated either inline (Phase 1A) or by
+   * {@link registeredAgentFromLoadedIdentity} (Phase 1B+).
    */
   readonly identityContent: {
     readonly murmurationSoul: string;
@@ -69,6 +80,48 @@ export interface RegisteredAgent {
    */
   readonly maxWallClockMs: number;
 }
+
+/**
+ * Construct a {@link RegisteredAgent} from a loaded identity chain.
+ * The resulting registration can be passed directly to
+ * {@link DaemonConfig.agents}.
+ *
+ * The wake trigger must be provided separately — it comes from
+ * either the role frontmatter (parsed elsewhere) or a daemon-owned
+ * registry. For Phase 1B this is called by the CLI boot path after
+ * it reads the agent directory listing.
+ */
+export const registeredAgentFromLoadedIdentity = (
+  loaded: LoadedAgentIdentity,
+  trigger: WakeTrigger,
+): RegisteredAgent => {
+  const { chain, frontmatter } = loaded;
+  const circleContexts = chain.layers
+    .filter(
+      (l): l is Extract<(typeof chain.layers)[number], { kind: "circle-context" }> =>
+        l.kind === "circle-context",
+    )
+    .map((l) => ({ circleId: l.circleId.value, content: l.content }));
+
+  const murmurationSoul = chain.layers.find((l) => l.kind === "murmuration-soul")?.content ?? "";
+  const agentSoul = chain.layers.find((l) => l.kind === "agent-soul")?.content ?? "";
+  const agentRole = chain.layers.find((l) => l.kind === "agent-role")?.content ?? "";
+
+  return {
+    agentId: chain.agentId.value,
+    displayName: frontmatter.name,
+    trigger,
+    circleMemberships: frontmatter.circle_memberships,
+    modelTier: frontmatter.model_tier,
+    identityContent: {
+      murmurationSoul,
+      agentSoul,
+      agentRole,
+      circleContexts,
+    },
+    maxWallClockMs: frontmatter.max_wall_clock_ms,
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Daemon configuration
