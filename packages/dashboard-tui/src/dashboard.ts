@@ -23,82 +23,70 @@ import {
 } from "./data.js";
 
 // ---------------------------------------------------------------------------
-// Panel renderers
+// Panel renderers — plain text, no manual box-drawing (emoji-safe)
 // ---------------------------------------------------------------------------
 
-const STATUS_ICONS: Record<string, string> = {
-  completed: "✅",
-  failed: "❌",
-  "timed-out": "⏰",
-  killed: "🛑",
+const STATUS_MARKER: Record<string, string> = {
+  completed: "[ok]",
+  failed: "[FAIL]",
+  "timed-out": "[TIMEOUT]",
+  killed: "[KILLED]",
 };
 
+const HR = "────────────────────────────────────────────────────";
+
 const renderPipeline = (agents: readonly AgentStatus[]): string => {
-  const lines = ["┌─ Pipeline State ─────────────────────────────────┐"];
+  const lines = [" Pipeline State", ` ${HR}`];
   for (const a of agents) {
-    const icon = a.outcome ? (STATUS_ICONS[a.outcome] ?? "⬚") : "⬚";
-    const staleFlag = a.stale ? " ⚠️" : "";
+    const marker = a.outcome ? (STATUS_MARKER[a.outcome] ?? "[?]") : "[--]";
+    const staleFlag = a.stale ? " STALE" : "";
     const time = a.lastWake ? a.lastWake.toISOString().slice(11, 16) : "never";
-    const line = `│ ${icon} ${a.agentId.padEnd(22)} ${time}  ${a.costFormatted}${staleFlag}`;
-    lines.push(line.padEnd(52) + "│");
+    lines.push(`  ${marker.padEnd(10)} ${a.agentId.padEnd(24)} ${time}  ${a.costFormatted}${staleFlag}`);
   }
-  lines.push("└──────────────────────────────────────────────────┘");
   return lines.join("\n");
 };
 
 const renderActivity = (entries: readonly ActivityEntry[]): string => {
-  const lines = ["┌─ Agent Activity ─────────────────────────────────┐"];
+  const lines = [" Agent Activity", ` ${HR}`];
   if (entries.length === 0) {
-    lines.push("│ (no recent activity — start the daemon)".padEnd(52) + "│");
+    lines.push("  (no recent activity — start the daemon)");
   }
   for (const e of entries.slice(-12)) {
-    const line = `│ ${e.ts} [${e.agentId.slice(0, 15).padEnd(15)}] ${e.event.slice(0, 10).padEnd(10)}`;
-    lines.push(line.padEnd(52) + "│");
+    lines.push(`  ${e.ts}  ${e.agentId.padEnd(24)} ${e.event}`);
   }
-  lines.push("└──────────────────────────────────────────────────┘");
   return lines.join("\n");
 };
 
 const renderGovernance = (items: readonly GovernanceEntry[]): string => {
-  const lines = ["┌─ Governance ─────────────────────────────────────┐"];
+  const lines = [" Governance", ` ${HR}`];
   if (items.length === 0) {
-    lines.push("│ (no governance items)".padEnd(52) + "│");
+    lines.push("  (no governance items)");
   }
   for (const item of items.slice(0, 8)) {
-    const due = item.reviewDue ? " 🔴" : "";
-    const line = `│ ${item.id} ${item.kind.padEnd(12)} ${item.state.padEnd(14)}${due}`;
-    lines.push(line.padEnd(52) + "│");
+    const due = item.reviewDue ? " [REVIEW DUE]" : "";
+    lines.push(`  ${item.id}  ${item.kind.padEnd(12)} ${item.state.padEnd(14)}${due}`);
   }
   const dueCount = items.filter((i) => i.reviewDue).length;
   if (dueCount > 0) {
-    lines.push(`│ 📋 ${String(dueCount)} items due for review`.padEnd(52) + "│");
+    lines.push(`  ${String(dueCount)} items due for review`);
   }
-  lines.push("└──────────────────────────────────────────────────┘");
   return lines.join("\n");
 };
 
 const formatUsd = (micros: number): string => `$${(micros / 1_000_000).toFixed(4)}`;
 
 const renderCost = (cost: CostSummary): string => {
-  const lines = ["┌─ Cost & Budget ──────────────────────────────────┐"];
-  lines.push(
-    `│ Today:    ${formatUsd(cost.todayMicros).padEnd(12)} (${String(cost.todayWakes)} wakes)`.padEnd(52) + "│",
-  );
-  lines.push(
-    `│ Week:     ${formatUsd(cost.weekMicros).padEnd(12)} (${String(cost.weekWakes)} wakes)`.padEnd(52) + "│",
-  );
-  lines.push(
-    `│ Month:    ${formatUsd(cost.monthMicros).padEnd(12)} (${String(cost.monthWakes)} wakes)`.padEnd(52) + "│",
-  );
-  lines.push("│──────────────────────────────────────────────────│".padEnd(52) + "│");
-  for (const a of cost.perAgent.slice(0, 6)) {
-    const line = `│  ${a.agentId.padEnd(22)} ${formatUsd(a.totalMicros).padEnd(10)} ${String(a.wakes).padStart(3)} wakes`;
-    lines.push(line.padEnd(52) + "│");
+  const lines = [" Cost & Budget", ` ${HR}`];
+  lines.push(`  Today:    ${formatUsd(cost.todayMicros).padEnd(12)} (${String(cost.todayWakes)} wakes)`);
+  lines.push(`  Week:     ${formatUsd(cost.weekMicros).padEnd(12)} (${String(cost.weekWakes)} wakes)`);
+  lines.push(`  Month:    ${formatUsd(cost.monthMicros).padEnd(12)} (${String(cost.monthWakes)} wakes)`);
+  lines.push(`  ${HR.slice(0, 40)}`);
+  for (const a of cost.perAgent.slice(0, 10)) {
+    lines.push(`  ${a.agentId.padEnd(24)} ${formatUsd(a.totalMicros).padEnd(10)} ${String(a.wakes).padStart(3)} wakes`);
   }
-  if (cost.perAgent.length > 6) {
-    lines.push(`│  ... and ${String(cost.perAgent.length - 6)} more agents`.padEnd(52) + "│");
+  if (cost.perAgent.length > 10) {
+    lines.push(`  ... and ${String(cost.perAgent.length - 10)} more agents`);
   }
-  lines.push("└──────────────────────────────────────────────────┘");
   return lines.join("\n");
 };
 
