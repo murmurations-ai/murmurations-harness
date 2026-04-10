@@ -700,6 +700,22 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   // (LLM agents) or when a github client becomes available. Only
   // keep the first-pass daemon if neither condition applies — which
   // is the hello-world / no-token path.
+  // Map the agent's signal scopes from role.md into the shape the
+  // DefaultSignalAggregator expects. `sinceDays` becomes a `since`
+  // Date relative to now (approximation — good enough for the 7-day
+  // window the Research Agent role declares).
+  const githubSignalScopes =
+    registered.signalScopes?.githubScopes?.map((scope) => ({
+      repo: makeRepoCoordinate(scope.owner, scope.repo),
+      filter: {
+        state: scope.filter.state,
+        ...(scope.filter.labels !== undefined ? { labels: scope.filter.labels } : {}),
+        ...(scope.filter.sinceDays !== undefined
+          ? { since: new Date(Date.now() - scope.filter.sinceDays * 86_400_000) }
+          : {}),
+      },
+    })) ?? [];
+
   const needsRebuild = effectiveExecutor !== provisionalExecutor || githubClient !== undefined;
   const effectiveDaemon: Daemon = needsRebuild
     ? new Daemon({
@@ -709,10 +725,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
           ? new DefaultSignalAggregator({
               rootDir: exampleRoot,
               github: githubClient,
-              // No scopes configured by default — adopters set this via
-              // real murmuration config. Hello-world leaves it empty so
-              // the aggregator exercises filesystem sources only.
-              githubScopes: [],
+              githubScopes: githubSignalScopes,
             })
           : filesystemOnlyAggregator,
         runArtifactWriter,
