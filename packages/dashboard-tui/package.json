@@ -1,0 +1,24 @@
+{
+  "name": "@murmuration/dashboard-tui",
+  "version": "0.0.0",
+  "description": "Terminal dashboard for the Murmuration Harness — pipeline state, agent activity, governance rounds, cost tracking.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "murmuration-dashboard": "./dist/bin.js"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist .tsbuildinfo .tsbuildinfo.build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mariozechner/pi-tui": "^0.66.1",
+    "@murmuration/core": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
