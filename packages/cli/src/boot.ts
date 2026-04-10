@@ -21,6 +21,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -402,6 +403,15 @@ export interface BootDaemonOptions {
    *  every mutation attempt defaults-denies at the client layer. Used by
    *  Phase 2C6's Gemini dry-run gate. */
   readonly dryRun?: boolean;
+  /**
+   * If true, the daemon exits cleanly after the first wake completes
+   * (regardless of outcome). Designed for cron-triggered single-shot
+   * wakes — macOS launchd (or system cron) starts the daemon before
+   * the wake window, the wake fires via delayMs, and the daemon
+   * exits without an operator needing to SIGINT. Phase 2E uses this
+   * for the weekly dual-run cadence.
+   */
+  readonly once?: boolean;
 }
 
 /**
@@ -414,6 +424,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const exampleRoot = options.rootDir ? resolve(options.rootDir) : resolveHelloWorldRoot();
   const agentDir = options.agentDir ?? "hello-world";
   const dryRun = options.dryRun === true;
+  const once = options.once === true;
   const agentScriptPath = resolve(exampleRoot, "agent.mjs");
 
   process.stdout.write(
@@ -734,7 +745,37 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   effectiveDaemon.start();
 
-  await shutdownPromise;
+  if (once) {
+    // --once mode: wait for the first wake to produce a run artifact,
+    // then stop the daemon and exit. We detect completion by polling
+    // the index.jsonl that RunArtifactWriter appends to after every
+    // wake — this avoids any daemon internals changes and is correct
+    // because the artifact is written AFTER the wake completes.
+    const indexPath = resolve(exampleRoot, ".murmuration", "runs", agentDir, "index.jsonl");
+    const pollIntervalMs = 2000;
+    const maxWaitMs = 300_000; // 5 minutes hard ceiling
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < maxWaitMs) {
+      await new Promise((r) => setTimeout(r, pollIntervalMs));
+      try {
+        const contents = await readFile(indexPath, "utf8");
+        if (contents.trim().length > 0) break;
+      } catch {
+        // file not written yet
+      }
+    }
+    process.stdout.write(
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "daemon.once.stopping",
+        reason: "first wake artifact detected (or 5-minute ceiling reached)",
+      })}\n`,
+    );
+    await effectiveDaemon.stop();
+  } else {
+    await shutdownPromise;
+  }
 
   process.stdout.write(
     `${JSON.stringify({

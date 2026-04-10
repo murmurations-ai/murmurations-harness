@@ -23,12 +23,14 @@ interface StartArgs {
   readonly rootDir: string | undefined;
   readonly agentDir: string | undefined;
   readonly dryRun: boolean;
+  readonly once: boolean;
 }
 
 const parseStartArgs = (rest: readonly string[]): StartArgs => {
   let rootDir: string | undefined;
   let agentDir: string | undefined;
   let dryRun = false;
+  let once = false;
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
     if (arg === "--root") {
@@ -43,11 +45,13 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
       i++;
     } else if (arg === "--dry-run") {
       dryRun = true;
+    } else if (arg === "--once") {
+      once = true;
     } else {
       throw new Error(`unknown argument: ${arg ?? "(undefined)"}`);
     }
   }
-  return { rootDir, agentDir, dryRun };
+  return { rootDir, agentDir, dryRun, once };
 };
 
 const usage = (): string =>
@@ -65,11 +69,14 @@ start options:
   --agent <id>     Agent dir under <root>/agents/ (default: "hello-world")
   --dry-run        Construct every GithubClient without writeScopes so
                    all mutations default-deny at the client layer
+  --once           Exit cleanly after the first wake completes. Designed
+                   for cron-triggered single-shot wakes (launchd / crontab)
 
 Examples:
   murmuration start
   murmuration start --root ../test-murmuration --agent 01-research
   murmuration start --root ../test-murmuration --agent 01-research --dry-run
+  murmuration start --root ../test-murmuration --agent 01-research --once
 `.trimStart();
 
 const main = async (): Promise<void> => {
@@ -80,6 +87,7 @@ const main = async (): Promise<void> => {
         ...(args.rootDir !== undefined ? { rootDir: args.rootDir } : {}),
         ...(args.agentDir !== undefined ? { agentDir: args.agentDir } : {}),
         ...(args.dryRun ? { dryRun: true } : {}),
+        ...(args.once ? { once: true } : {}),
       });
       break;
     }
