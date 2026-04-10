@@ -732,6 +732,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       executorMap.set(
         agent.agentId,
         new InProcessExecutor<InProcessRunnerClients>({
+          instanceId: `in-process-${capturedAgent.agentId}`,
           resolveRunner: async ({ agentId }) => {
             if (agentId !== capturedAgent.agentId) {
               throw new Error(`resolveRunner: unknown agent ${agentId}`);
