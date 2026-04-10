@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -407,5 +408,111 @@ describe("roleFrontmatterSchema (ADR-0016 extensions)", () => {
     );
     const loader = new IdentityLoader({ rootDir });
     await expect(loader.load("bad-repo")).rejects.toThrow(FrontmatterInvalidError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Real-world example: the shipped `examples/research-agent/` identity chain
+//
+// This is not a synthetic fixture — it is the actual files under
+// `examples/research-agent/`, the Phase 2C port of the Emergent Praxis
+// Research Agent #1 identity. The test exists so any change to the role
+// template schema (ADR-0016 and successors) immediately breaks CI if the
+// example stops loading cleanly. Cheapest way to keep the example honest.
+// ---------------------------------------------------------------------------
+
+describe("examples/research-agent identity chain", () => {
+  const hereDir = dirname(fileURLToPath(import.meta.url));
+  // packages/core/src/identity → repo root → examples/research-agent
+  const exampleRoot = resolve(hereDir, "..", "..", "..", "..", "examples", "research-agent");
+
+  it("loads the research-agent identity chain without errors", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("01-research");
+
+    expect(loaded.agentId.value).toBe("01-research");
+    expect(loaded.frontmatter.name).toBe("Research Agent");
+    expect(loaded.frontmatter.model_tier).toBe("balanced");
+    expect(loaded.frontmatter.circle_memberships).toEqual(["intelligence"]);
+  });
+
+  it("parses the ADR-0016 llm pin (gemini / gemini-2.5-pro)", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("01-research");
+
+    expect(loaded.frontmatter.llm).toEqual({
+      provider: "gemini",
+      model: "gemini-2.5-pro",
+    });
+  });
+
+  it("parses the weekly cron wake schedule", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("01-research");
+
+    expect(loaded.frontmatter.wake_schedule?.cron).toBe("0 18 * * 0");
+  });
+
+  it("parses the ADR-0017 write scopes — notes/weekly/** on emergent-praxis", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("01-research");
+
+    const write = loaded.frontmatter.github.write_scopes;
+    expect(write.issue_comments).toEqual(["xeeban/emergent-praxis"]);
+    expect(write.branch_commits).toEqual([
+      {
+        repo: "xeeban/emergent-praxis",
+        paths: ["notes/weekly/**"],
+      },
+    ]);
+    expect(write.labels).toEqual([]);
+  });
+
+  it("parses the signal github_scopes for both repos", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("01-research");
+
+    expect(loaded.frontmatter.signals.github_scopes).toEqual([
+      {
+        owner: "xeeban",
+        repo: "emergent-praxis",
+        filter: { state: "all", since_days: 7 },
+      },
+      {
+        owner: "murmurations-ai",
+        repo: "murmurations-harness",
+        filter: { state: "all", since_days: 7 },
+      },
+    ]);
+  });
+
+  it("parses the budget ceiling + on_breach = abort", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("01-research");
+
+    expect(loaded.frontmatter.budget).toEqual({
+      max_cost_micros: 500_000,
+      max_github_api_calls: 100,
+      on_breach: "abort",
+    });
+  });
+
+  it("declares GEMINI_API_KEY and GITHUB_TOKEN as required secrets", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("01-research");
+
+    expect(loaded.frontmatter.secrets.required).toEqual(["GEMINI_API_KEY", "GITHUB_TOKEN"]);
+    expect(loaded.frontmatter.secrets.optional).toEqual([]);
+  });
+
+  it("assembles a four-layer identity chain (soul + agent-soul + role + intelligence circle)", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("01-research");
+
+    expect(loaded.chain.layers).toHaveLength(4);
+    expect(loaded.chain.layers[0]?.kind).toBe("murmuration-soul");
+    expect(loaded.chain.layers[1]?.kind).toBe("agent-soul");
+    expect(loaded.chain.layers[2]?.kind).toBe("agent-role");
+    expect(loaded.chain.layers[3]?.kind).toBe("circle-context");
   });
 });
