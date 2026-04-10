@@ -310,6 +310,48 @@ describe("GithubClient", () => {
     }
   });
 
+  it("getRef — parses object.sha from git/refs/heads response", async () => {
+    const { fetch: f, calls } = makeFakeFetch([
+      {
+        status: 200,
+        headers: {
+          "x-ratelimit-limit": "5000",
+          "x-ratelimit-remaining": "4900",
+          "x-ratelimit-reset": "9999999999",
+        },
+        body: {
+          ref: "refs/heads/main",
+          node_id: "MDM6UmVmMTIzNDU=",
+          url: "https://api.github.com/repos/xeeban/emergent-praxis/git/refs/heads/main",
+          object: {
+            sha: "deadbeefcafef00d0000000000000000deadbeef",
+            type: "commit",
+            url: "https://api.github.com/repos/xeeban/emergent-praxis/git/commits/deadbeefcafef00d0000000000000000deadbeef",
+          },
+        },
+      },
+    ]);
+    const client = createGithubClient({ token: TOKEN, fetch: f });
+    const result = await client.getRef(REPO, "main");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.oid).toBe("deadbeefcafef00d0000000000000000deadbeef");
+      expect(result.value.branch).toBe("main");
+      expect(result.value.repo.owner.value).toBe("xeeban");
+    }
+    expect(calls[0]?.url).toContain("/git/refs/heads/main");
+  });
+
+  it("getRef — 404 on unknown branch → GithubNotFoundError", async () => {
+    const { fetch: f } = makeFakeFetch([{ status: 404, body: { message: "Not Found" } }]);
+    const client = createGithubClient({ token: TOKEN, fetch: f });
+    const result = await client.getRef(REPO, "no-such-branch");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(GithubNotFoundError);
+    }
+  });
+
   it("lastRateLimit() returns the most recent snapshot", async () => {
     const { fetch: f } = makeFakeFetch([
       {

@@ -58,6 +58,14 @@ const mutationDenied = async (): Promise<{
   error: { code: "write-scope-denied" } as unknown as GithubClientError,
 });
 
+const notFound = async (): Promise<{
+  readonly ok: false;
+  readonly error: GithubClientError;
+}> => ({
+  ok: false,
+  error: { code: "not-found" } as unknown as GithubClientError,
+});
+
 const makeFakeGithub = (issues: readonly GithubIssue[]): GithubClient => ({
   async getIssue() {
     return {
@@ -74,6 +82,7 @@ const makeFakeGithub = (issues: readonly GithubIssue[]): GithubClient => ({
   async listIssueLabels() {
     return { ok: true, value: [] };
   },
+  getRef: notFound,
   createIssueComment: mutationDenied,
   createIssue: mutationDenied,
   createCommitOnBranch: mutationDenied,
@@ -96,6 +105,7 @@ const makeFailingGithub = (): GithubClient => ({
   async listIssueLabels() {
     return { ok: true, value: [] };
   },
+  getRef: notFound,
   createIssueComment: mutationDenied,
   createIssue: mutationDenied,
   createCommitOnBranch: mutationDenied,

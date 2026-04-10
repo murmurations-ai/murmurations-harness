@@ -164,6 +164,17 @@ export interface GithubCreatedCommit {
   readonly branch: string;
 }
 
+/**
+ * Branch HEAD reference — just enough for ADR-0017's
+ * `expectedHeadOid` argument to `createCommitOnBranch`. Read-only.
+ * Closes CF-github-J from ADR-0017 §11.
+ */
+export interface GithubRefHead {
+  readonly repo: RepoCoordinate;
+  readonly branch: string;
+  readonly oid: string;
+}
+
 export interface GithubClient {
   getIssue(
     repo: RepoCoordinate,
@@ -187,6 +198,17 @@ export interface GithubClient {
     number: IssueNumber,
     options?: CallOptions,
   ): Promise<Result<readonly string[], GithubClientError>>;
+
+  /**
+   * Read-only lookup of a branch's HEAD commit. Used to fetch the
+   * `expectedHeadOid` that `createCommitOnBranch` requires — closes
+   * CF-github-J from ADR-0017 §11.
+   */
+  getRef(
+    repo: RepoCoordinate,
+    branch: string,
+    options?: CallOptions,
+  ): Promise<Result<GithubRefHead, GithubClientError>>;
 
   // -- Mutations (ADR-0017) ------------------------------------------------
 
@@ -344,6 +366,36 @@ class GithubClientImpl implements GithubClient {
       }
     }
     return { ok: true, value: out };
+  }
+
+  public async getRef(
+    repo: RepoCoordinate,
+    branch: string,
+    options: CallOptions = {},
+  ): Promise<Result<GithubRefHead, GithubClientError>> {
+    // GET /repos/{owner}/{repo}/git/refs/heads/{branch}
+    // REST response shape:
+    //   { ref, node_id, url, object: { sha, type, url } }
+    // We want object.sha.
+    const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/git/refs/heads/${encodeURIComponent(branch)}`;
+    const raw = await this.#request(url, options);
+    if (!raw.ok) return raw;
+    const body = raw.value.body;
+    if (typeof body !== "object" || body === null) {
+      return { ok: false, error: new GithubParseError("getRef: body not an object") };
+    }
+    const object = (body as { object?: unknown }).object;
+    if (typeof object !== "object" || object === null) {
+      return { ok: false, error: new GithubParseError("getRef: missing object field") };
+    }
+    const sha = (object as { sha?: unknown }).sha;
+    if (typeof sha !== "string" || sha.length === 0) {
+      return { ok: false, error: new GithubParseError("getRef: missing object.sha") };
+    }
+    return {
+      ok: true,
+      value: { repo, branch, oid: sha },
+    };
   }
 
   // ---------------------------------------------------------------------

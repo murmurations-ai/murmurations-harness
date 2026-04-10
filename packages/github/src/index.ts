@@ -20,6 +20,7 @@ export type {
   GithubFileChanges,
   GithubCommitMessage,
   GithubCreatedCommit,
+  GithubRefHead,
   RetryPolicy,
 } from "./client.js";
 

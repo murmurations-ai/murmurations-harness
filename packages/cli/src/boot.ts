@@ -45,7 +45,13 @@ import {
   type WakeCostBuilder,
   type WakeTrigger,
 } from "@murmuration/core";
-import { createGithubClient, type GithubClient, type GithubWriteScopes } from "@murmuration/github";
+import {
+  createGithubClient,
+  makeRepoCoordinate,
+  type GithubClient,
+  type GithubWriteScopes,
+  type RepoCoordinate,
+} from "@murmuration/github";
 import { createLLMClient, type LLMClient, type LLMCostHook } from "@murmuration/llm";
 import { resolveLLMCost } from "@murmuration/llm/pricing";
 import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
@@ -100,6 +106,23 @@ export const makeDaemonHook = (builder: WakeCostBuilder): LLMCostHook => ({
     });
   },
 });
+
+/**
+ * Parse an `"owner/repo"` write-scope key into a typed
+ * `RepoCoordinate`. Used by the InProcessExecutor's resolveClients
+ * to derive the target repo for the Research Agent's digest commit.
+ * Returns `undefined` on malformed input rather than throwing so a
+ * single bad scope doesn't take down the whole boot.
+ */
+const parseRepoKey = (key: string): RepoCoordinate | undefined => {
+  const [owner, name] = key.split("/");
+  if (!owner || !name) return undefined;
+  try {
+    return makeRepoCoordinate(owner, name);
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * Map `RegisteredAgent.githubWriteScopes` (ADR-0016 camelCase) to the
@@ -208,6 +231,20 @@ interface AgentComposition {
 export interface ResearchAgentClients {
   readonly llm?: LLMClient;
   readonly github?: GithubClient;
+  /**
+   * First `branchCommits` entry from the agent's writeScopes, pre-built
+   * as a `RepoCoordinate` so the runner (which lives outside the
+   * harness monorepo and can't import from @murmuration/github) can
+   * pass it straight to `github.createCommitOnBranch` without
+   * constructing a coordinate itself.
+   */
+  readonly targetRepo?: RepoCoordinate;
+  /**
+   * Target branch for the weekly digest commit. Defaults to `"main"`.
+   * Exposed separately from `targetRepo` so a follow-up can lift it
+   * into role.md frontmatter without touching this type.
+   */
+  readonly targetBranch?: string;
 }
 
 /**
@@ -628,9 +665,17 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
             dryRun,
             ollamaBaseUrl,
           });
+          // Derive the target repo for the digest commit from the
+          // agent's branchCommits write scope. If the agent has no
+          // branchCommits declared, `targetRepo` is absent and the
+          // runner will degrade to "digest-only" mode.
+          const firstBranchScope = registered.githubWriteScopes.branchCommits[0];
+          const targetRepo = firstBranchScope ? parseRepoKey(firstBranchScope.repo) : undefined;
           return {
             ...(wakeClients.llm ? { llm: wakeClients.llm } : {}),
             ...(wakeClients.github ? { github: wakeClients.github } : {}),
+            ...(targetRepo ? { targetRepo } : {}),
+            targetBranch: "main",
           };
         },
       })
