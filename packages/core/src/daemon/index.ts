@@ -44,6 +44,7 @@ import {
   type WakeTrigger,
 } from "../scheduler/index.js";
 import type { SignalAggregator } from "../signals/index.js";
+import { NoOpGovernancePlugin, type GovernancePlugin } from "../governance/index.js";
 
 // ---------------------------------------------------------------------------
 // Agent registry (Phase 1A: hardcoded inline; Phase 1B: loaded from disk)
@@ -330,6 +331,12 @@ export interface DaemonConfig {
    * run root. See Phase 2D step 2D5 and `./runs.ts`.
    */
   readonly runArtifactWriter?: RunArtifactWriter | DispatchRunArtifactWriter;
+  /**
+   * Governance plugin. If absent, defaults to `NoOpGovernancePlugin`
+   * which allows every action and discards every governance event.
+   * See `governance/index.ts` for the full interface.
+   */
+  readonly governance?: GovernancePlugin;
 }
 
 export interface DaemonLogger {
@@ -356,6 +363,7 @@ export class Daemon {
     | undefined;
   readonly #signalAggregator: SignalAggregator | undefined;
   readonly #runArtifactWriter: RunArtifactWriter | DispatchRunArtifactWriter | undefined;
+  readonly #governance: GovernancePlugin;
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
 
@@ -368,6 +376,7 @@ export class Daemon {
     this.#secrets = config.secrets;
     this.#signalAggregator = config.signalAggregator;
     this.#runArtifactWriter = config.runArtifactWriter;
+    this.#governance = config.governance ?? new NoOpGovernancePlugin();
   }
 
   /**
@@ -404,9 +413,21 @@ export class Daemon {
     if (this.#running) return;
     this.#running = true;
 
+    // Governance plugin lifecycle — fire-and-forget so a slow plugin
+    // doesn't block the daemon from registering agents.
+    if (this.#governance.onDaemonStart) {
+      void this.#governance.onDaemonStart().catch((err: unknown) => {
+        this.#logger.error("daemon.governance.start.failed", {
+          plugin: this.#governance.name,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
     this.#logger.info("daemon.boot", {
       agentCount: this.#agents.length,
       executor: this.#executor.capabilities().id,
+      governance: this.#governance.name,
     });
 
     this.#scheduler.onWake((event) => this.#handleWake(event));
@@ -450,6 +471,16 @@ export class Daemon {
     }
     await this.#scheduler.stop();
     await Promise.allSettled([...this.#inFlight]);
+    try {
+      if (this.#governance.onDaemonStop) {
+        await this.#governance.onDaemonStop();
+      }
+    } catch (err) {
+      this.#logger.error("daemon.governance.stop.failed", {
+        plugin: this.#governance.name,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     this.#logger.info("daemon.shutdown.complete", {});
   }
 
@@ -487,9 +518,39 @@ export class Daemon {
       const result = await this.#executor.waitForCompletion(handle);
       this.#logResult(result);
       if (this.#runArtifactWriter) {
-        // Artifact writes are best-effort per 2D5 design — the writer
-        // swallows its own errors and reports them via the logger.
         await this.#runArtifactWriter.record(result, result.costRecord, this.#logger);
+      }
+      // Governance event routing — hand emitted events to the plugin
+      // and log the routing decisions. Actual dispatch (enqueuing
+      // signals to target agents, filing GitHub issues, etc.) is a
+      // Phase 3 follow-up; for now the decisions are logged for
+      // operator visibility and plugin testing.
+      if (result.governanceEvents.length > 0) {
+        try {
+          const decisions = await this.#governance.onEventsEmitted({
+            wakeId: result.wakeId,
+            agentId: result.agentId,
+            events: result.governanceEvents,
+          });
+          if (decisions.length > 0) {
+            this.#logger.info("daemon.governance.routed", {
+              wakeId: result.wakeId.value,
+              agentId: result.agentId.value,
+              plugin: this.#governance.name,
+              decisions: decisions.map((d) => ({
+                kind: d.event.kind,
+                routes: d.routes.map((r) => r.target),
+              })),
+            });
+          }
+        } catch (err) {
+          this.#logger.error("daemon.governance.route.failed", {
+            wakeId: result.wakeId.value,
+            agentId: result.agentId.value,
+            plugin: this.#governance.name,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     } catch (error) {
       this.#logger.error("daemon.wake.error", {

@@ -373,27 +373,24 @@ export interface AgentSpawnContext {
 /**
  * Governance events an agent can emit during a wake. Captured by the
  * executor from the agent's structured output and forwarded to the
- * Governance Plugin Runtime after the wake completes.
+ * {@link GovernancePlugin} after the wake completes.
  *
- * This is intentionally a narrow *envelope* shape — the detailed event
- * types (`TensionEvent`, `ProposalEvent`, etc.) live in the governance
- * module and are being hardened under carry-forward
- * {@link https://github.com/murmurations-ai/murmurations-harness/issues/2 | #2}.
- * The executor MUST NOT parse or validate the payload; it just ferries it.
+ * The `kind` is an open string — not a closed enum — so any governance
+ * model can define its own event kinds (S3 uses `"tension"`,
+ * `"proposal-opened"`, etc.; a command-and-control model might use
+ * `"approval-requested"`, `"directive-issued"`). The executor MUST NOT
+ * parse or validate the payload; the governance plugin does that.
  *
  * @see https://github.com/murmurations-ai/murmurations-harness/issues/2
  */
-export type EmittedGovernanceEvent =
-  | { readonly kind: "tension"; readonly payload: unknown }
-  | { readonly kind: "proposal-opened"; readonly payload: unknown }
-  | { readonly kind: "notify"; readonly payload: unknown }
-  | { readonly kind: "autonomous-action"; readonly payload: unknown }
-  | { readonly kind: "held"; readonly payload: unknown };
-// TODO(#2): replace `unknown` payloads with the concrete governance event
-// types once GovernancePlugin interface hardening lands. This is
-// deliberately a semver-minor-safe narrowing: strengthening `unknown` to
-// a concrete type is not a breaking change for callers that already
-// produced a valid payload.
+export interface EmittedGovernanceEvent {
+  readonly kind: string;
+  readonly payload: unknown;
+  /** Agent that emitted this event. Populated by the executor. */
+  readonly sourceAgentId?: AgentId;
+  /** Target agent (if the event is addressed to a specific peer). */
+  readonly targetAgentId?: AgentId;
+}
 
 // ---------------------------------------------------------------------------
 // Agent result (what the executor returns)

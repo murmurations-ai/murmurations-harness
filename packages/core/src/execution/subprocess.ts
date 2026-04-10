@@ -493,12 +493,12 @@ const parseChildOutput = (
     if (governanceMatch) {
       const kindRaw = governanceMatch[1];
       const payloadRaw = governanceMatch[2] ?? "";
-      if (!isGovernanceKind(kindRaw)) continue;
+      if (!kindRaw) continue;
       try {
         const payload: unknown = payloadRaw ? JSON.parse(payloadRaw) : null;
         governanceEvents.push({ kind: kindRaw, payload });
       } catch {
-        // Malformed governance line — ignore for Phase 1A.
+        // Malformed governance payload — skip this line.
       }
     }
   }
@@ -508,18 +508,10 @@ const parseChildOutput = (
   };
 };
 
-const GOVERNANCE_KINDS = [
-  "tension",
-  "proposal-opened",
-  "notify",
-  "autonomous-action",
-  "held",
-] as const;
-
-const isGovernanceKind = (value: string | undefined): value is EmittedGovernanceEvent["kind"] => {
-  if (value === undefined) return false;
-  return (GOVERNANCE_KINDS as readonly string[]).includes(value);
-};
+// The governance kind allow-list was removed in the harness#2 refactor.
+// Any `::governance::<kind>:: <payload>` line is now accepted. The
+// GovernancePlugin decides what to do with unknown kinds, not the
+// subprocess parser.
 
 // ---------------------------------------------------------------------------
 // Env scrub (ADR-0010 §8 / harness#8 — Security Agent #25)
