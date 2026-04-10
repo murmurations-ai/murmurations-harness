@@ -11,6 +11,7 @@
  * Spec §4 architecture diagram, §15 Phase 1 gate.
  */
 
+import { randomUUID } from "node:crypto";
 import { formatUSDMicros } from "../cost/usd.js";
 import { RunArtifactWriter, DispatchRunArtifactWriter } from "./runs.js";
 import {
@@ -24,6 +25,7 @@ import {
   type AgentExecutor,
   type AgentResult,
   type AgentSpawnContext,
+  type EmittedGovernanceEvent,
   type CircleId,
   type CostBudget,
   type IdentityChain,
@@ -369,6 +371,14 @@ export class Daemon {
   readonly #runArtifactWriter: RunArtifactWriter | DispatchRunArtifactWriter | undefined;
   readonly #governance: GovernancePlugin;
   readonly #governanceStore: GovernanceStateStore;
+  /**
+   * In-memory governance inbox — events routed to `target: "agent"`
+   * are queued here by agentId and injected into the target agent's
+   * signal bundle on its next wake. Ephemeral (cleared on daemon
+   * stop); durable queuing comes with the filesystem governance
+   * store (#33).
+   */
+  readonly #governanceInbox = new Map<string, EmittedGovernanceEvent[]>();
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
 
@@ -513,7 +523,35 @@ export class Daemon {
   }
 
   async #runWake(agent: RegisteredAgent, event: ScheduledWakeEvent): Promise<void> {
-    const context = await buildSpawnContext(agent, event, this.#signalAggregator, this.#logger);
+    const baseContext = await buildSpawnContext(agent, event, this.#signalAggregator, this.#logger);
+
+    // Inject any queued governance events from the inbox into the
+    // signal bundle as `custom` signals with sourceId
+    // "governance-inbox". This is the delivery side of the
+    // `target: "agent"` routing — the sending side queues events
+    // in #dispatchGovernanceRoute, the receiving side picks them up
+    // here on the target agent's next wake.
+    const inbox = this.#governanceInbox.get(agent.agentId);
+    let context = baseContext;
+    if (inbox && inbox.length > 0) {
+      this.#governanceInbox.delete(agent.agentId);
+      const governanceSignals = inbox.map((evt) => ({
+        kind: "custom" as const,
+        sourceId: "governance-inbox",
+        data: evt,
+        id: `gov-${randomUUID()}`,
+        trust: "trusted" as const,
+        fetchedAt: new Date(),
+      }));
+      context = {
+        ...baseContext,
+        signals: {
+          ...baseContext.signals,
+          signals: [...baseContext.signals.signals, ...governanceSignals],
+        },
+      };
+    }
+
     this.#logger.info("daemon.wake.fire", {
       agentId: agent.agentId,
       wakeId: event.wakeId.value,
@@ -529,11 +567,8 @@ export class Daemon {
       if (this.#runArtifactWriter) {
         await this.#runArtifactWriter.record(result, result.costRecord, this.#logger);
       }
-      // Governance event routing — hand emitted events to the plugin
-      // and log the routing decisions. Actual dispatch (enqueuing
-      // signals to target agents, filing GitHub issues, etc.) is a
-      // Phase 3 follow-up; for now the decisions are logged for
-      // operator visibility and plugin testing.
+      // Governance event routing — hand emitted events to the plugin,
+      // then dispatch each routing decision.
       if (result.governanceEvents.length > 0) {
         try {
           const decisions = await this.#governance.onEventsEmitted(
@@ -544,16 +579,10 @@ export class Daemon {
             },
             this.#governanceStore,
           );
-          if (decisions.length > 0) {
-            this.#logger.info("daemon.governance.routed", {
-              wakeId: result.wakeId.value,
-              agentId: result.agentId.value,
-              plugin: this.#governance.name,
-              decisions: decisions.map((d) => ({
-                kind: d.event.kind,
-                routes: d.routes.map((r) => r.target),
-              })),
-            });
+          for (const decision of decisions) {
+            for (const route of decision.routes) {
+              this.#dispatchGovernanceRoute(result, decision.event, route);
+            }
           }
         } catch (err) {
           this.#logger.error("daemon.governance.route.failed", {
@@ -570,6 +599,58 @@ export class Daemon {
         wakeId: event.wakeId.value,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  /**
+   * Dispatch a single governance routing decision to its target.
+   *
+   * - `agent` → queue the event in the target agent's governance
+   *   inbox; the daemon injects it into the signal bundle on the
+   *   agent's next wake.
+   * - `source` → log at warn level so it surfaces in the activity
+   *   feed. Future: file a GitHub issue or send a notification.
+   * - `external` → log the channel + ref for downstream consumers
+   *   (Slack, email, webhooks). Extension point — not yet wired.
+   * - `discard` → no-op.
+   */
+  #dispatchGovernanceRoute(
+    result: AgentResult,
+    event: EmittedGovernanceEvent,
+    route: import("../governance/index.js").GovernanceRouteTarget,
+  ): void {
+    switch (route.target) {
+      case "agent": {
+        const targetId = route.agentId.value;
+        const inbox = this.#governanceInbox.get(targetId) ?? [];
+        inbox.push(event);
+        this.#governanceInbox.set(targetId, inbox);
+        this.#logger.info("daemon.governance.dispatch.agent", {
+          from: result.agentId.value,
+          to: targetId,
+          kind: event.kind,
+        });
+        break;
+      }
+      case "source": {
+        this.#logger.warn("daemon.governance.dispatch.source", {
+          from: result.agentId.value,
+          kind: event.kind,
+          payload: event.payload,
+        });
+        break;
+      }
+      case "external": {
+        this.#logger.info("daemon.governance.dispatch.external", {
+          from: result.agentId.value,
+          kind: event.kind,
+          channel: route.channel,
+          ref: route.ref,
+        });
+        break;
+      }
+      case "discard":
+        break;
     }
   }
 
