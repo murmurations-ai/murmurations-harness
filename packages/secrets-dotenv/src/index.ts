@@ -161,6 +161,21 @@ export class DotenvSecretsProvider implements SecretsProvider {
       return { ok: false, error: new EnvFileParseError(this.#envPath, { cause }) };
     }
 
+    // Warn on lines that aren't blank, comments, or valid KEY=value
+    // assignments. These are almost always typos (e.g. pasting a bare
+    // token without the KEY= prefix) and cause silent degradation
+    // when the provider skips them. Closes #26.
+    for (const [idx, line] of raw.split(/\r?\n/).entries()) {
+      if (line.trim().length === 0) continue; // blank
+      if (/^\s*#/.test(line)) continue; // comment
+      if (/^[A-Za-z_][A-Za-z0-9_]*\s*=/.test(line)) continue; // valid
+      // Warn without revealing the value — show first 20 chars max.
+      const preview = line.length > 20 ? `${line.slice(0, 20)}...` : line;
+      console.warn(
+        `[secrets:dotenv] ${this.#envPath} line ${String(idx + 1)}: malformed — expected KEY=value, got "${preview}"`,
+      );
+    }
+
     // Only load declared keys. Undeclared keys are silently ignored
     // (least-privilege — we don't hold what we weren't asked for).
     this.#values.clear();

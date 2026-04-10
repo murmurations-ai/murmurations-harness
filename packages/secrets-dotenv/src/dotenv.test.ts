@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { makeSecretKey, UnknownSecretKeyError } from "@murmuration/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   DotenvSecretsProvider,
@@ -175,5 +175,42 @@ describe("DotenvSecretsProvider", () => {
     expect(caps.id).toBe("dotenv");
     expect(caps.supportsHotReload).toBe(false);
     expect(caps.stateful).toBe(false);
+  });
+
+  it("warns on malformed .env lines (closes #26)", async () => {
+    // A bare token value with no KEY= prefix — the exact mistake that
+    // caused silent degradation during the 2D8 gate test.
+    await write("GITHUB_TOKEN=tok12345\ngithub_pat_FAKE_VALUE_HERE\n");
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const provider = new DotenvSecretsProvider({ envPath });
+      const result = await provider.load({
+        required: [GITHUB_TOKEN],
+        optional: [],
+      });
+      // Load still succeeds — the malformed line is ignored by dotenv
+      // but the provider warns the operator on stderr.
+      expect(result.ok).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+      const call = spy.mock.calls[0]?.[0] as string;
+      expect(call).toContain("line 2");
+      expect(call).toContain("malformed");
+      // The warning should NOT contain the full value (could be a token).
+      expect(call).not.toContain("FAKE_VALUE_HERE");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("does not warn on valid lines, blanks, and comments", async () => {
+    await write("# comment\nGITHUB_TOKEN=tok12345\n\n  # indented comment\n");
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const provider = new DotenvSecretsProvider({ envPath });
+      await provider.load({ required: [GITHUB_TOKEN], optional: [] });
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

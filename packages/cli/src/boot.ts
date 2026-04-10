@@ -318,16 +318,31 @@ const buildAgentClients = ({
     }
   }
 
+  // GitHub cost hook: same shape as the LLM cost hook — routes
+  // every getRef / createCommitOnBranch / createIssueComment call
+  // into the per-wake WakeCostBuilder so index.jsonl carries
+  // accurate github.restCalls / graphqlCalls counts. Closes #25.
+  const githubCostHook = costBuilder
+    ? {
+        onGithubCall: (call: Parameters<typeof costBuilder.addGithubCall>[0]): void =>
+          costBuilder.addGithubCall(call),
+      }
+    : undefined;
+
   if (hasAnyWriteScope(agent)) {
     if (dryRun) {
       if (provider?.has(GITHUB_TOKEN) === true) {
-        result.github = createGithubClient({ token: provider.get(GITHUB_TOKEN) });
+        result.github = createGithubClient({
+          token: provider.get(GITHUB_TOKEN),
+          ...(githubCostHook ? { defaultCostHook: githubCostHook } : {}),
+        });
       }
       // dry-run never sets githubSkipReason; the caller logs the dryRun event.
     } else if (provider?.has(GITHUB_TOKEN) === true) {
       result.github = createGithubClient({
         token: provider.get(GITHUB_TOKEN),
         writeScopes: toClientWriteScopes(agent),
+        ...(githubCostHook ? { defaultCostHook: githubCostHook } : {}),
       });
     } else {
       result.githubSkipReason = "GITHUB_TOKEN absent; write-scoped client not constructed";
