@@ -343,6 +343,12 @@ export interface DaemonConfig {
    * See `governance/index.ts` for the full interface.
    */
   readonly governance?: GovernancePlugin;
+  /**
+   * Directory for durable governance state persistence. If set, the
+   * GovernanceStateStore writes items.jsonl here and restores on
+   * daemon restart. Typically `<rootDir>/.murmuration/governance/`.
+   */
+  readonly governancePersistDir?: string;
 }
 
 export interface DaemonLogger {
@@ -392,7 +398,9 @@ export class Daemon {
     this.#signalAggregator = config.signalAggregator;
     this.#runArtifactWriter = config.runArtifactWriter;
     this.#governance = config.governance ?? new NoOpGovernancePlugin();
-    this.#governanceStore = new GovernanceStateStore();
+    this.#governanceStore = new GovernanceStateStore({
+      ...(config.governancePersistDir ? { persistDir: config.governancePersistDir } : {}),
+    });
   }
 
   /**
@@ -429,11 +437,24 @@ export class Daemon {
     if (this.#running) return;
     this.#running = true;
 
-    // Register the plugin's state graphs so the store can validate
-    // transitions, then fire the plugin's onDaemonStart hook.
+    // Register the plugin's state graphs, then restore any persisted
+    // governance items from disk, then fire the plugin's onDaemonStart.
     for (const graph of this.#governance.stateGraphs()) {
       this.#governanceStore.registerGraph(graph);
     }
+    void this.#governanceStore
+      .load()
+      .then((count) => {
+        if (count > 0) {
+          this.#logger.info("daemon.governance.restored", {
+            plugin: this.#governance.name,
+            itemsRestored: count,
+          });
+        }
+      })
+      .catch(() => {
+        /* load is best-effort */
+      });
     if (this.#governance.onDaemonStart) {
       void this.#governance.onDaemonStart(this.#governanceStore).catch((err: unknown) => {
         this.#logger.error("daemon.governance.start.failed", {

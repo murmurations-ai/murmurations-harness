@@ -32,6 +32,8 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import type { AgentId, WakeId, EmittedGovernanceEvent } from "../execution/index.js";
 
@@ -154,17 +156,67 @@ export interface GovernanceItemFilter {
 }
 
 /**
- * In-memory governance state store. The daemon owns one instance;
- * the plugin reads and writes through it. Phase 3 replaces this with
- * a durable store (SQLite, filesystem, or external).
+ * Governance state store. Tracks items through model-defined states
+ * with a full audit trail. Optionally persists to disk when
+ * `persistDir` is set — items are written to `items.jsonl` on every
+ * create/transition and restored on `load()`.
+ *
+ * In-memory when `persistDir` is omitted (tests, Phase 1/2 behavior).
+ * Durable when `persistDir` is set (production daemon restarts).
  */
 export class GovernanceStateStore {
   readonly #items = new Map<string, GovernanceItem>();
   readonly #graphs = new Map<string, GovernanceStateGraph>();
   readonly #now: () => Date;
+  readonly #persistDir: string | undefined;
 
-  public constructor(options: { readonly now?: () => Date } = {}) {
+  public constructor(options: { readonly now?: () => Date; readonly persistDir?: string } = {}) {
     this.#now = options.now ?? ((): Date => new Date());
+    this.#persistDir = options.persistDir;
+  }
+
+  /**
+   * Load persisted governance items from disk. Call once at daemon
+   * start, AFTER registering graphs. No-op if `persistDir` is unset
+   * or the file doesn't exist yet (first run).
+   */
+  public async load(): Promise<number> {
+    if (!this.#persistDir) return 0;
+    const path = join(this.#persistDir, "items.jsonl");
+    let contents: string;
+    try {
+      contents = await readFile(path, "utf8");
+    } catch {
+      return 0; // file doesn't exist yet
+    }
+    let loaded = 0;
+    for (const line of contents.trim().split("\n")) {
+      if (line.length === 0) continue;
+      try {
+        const raw = JSON.parse(line) as GovernanceItem & {
+          createdBy: { value: string };
+          createdAt: string;
+          reviewAt: string | null;
+          history: (GovernanceStateTransition & { at: string })[];
+        };
+        // Rehydrate dates from ISO strings.
+        const item: GovernanceItem = {
+          ...raw,
+          createdBy: { kind: "agent-id", value: raw.createdBy.value } as AgentId,
+          createdAt: new Date(raw.createdAt as unknown as string),
+          reviewAt: raw.reviewAt ? new Date(raw.reviewAt) : null,
+          history: raw.history.map((h) => ({
+            ...h,
+            at: new Date(h.at as unknown as string),
+          })),
+        };
+        this.#items.set(item.id, item);
+        loaded++;
+      } catch {
+        // Malformed line — skip.
+      }
+    }
+    return loaded;
   }
 
   /** Register a state graph. Call once per kind at plugin init. */
@@ -203,6 +255,7 @@ export class GovernanceStateStore {
       history: [],
     };
     this.#items.set(item.id, item);
+    void this.#persist(item);
     return item;
   }
 
@@ -253,6 +306,7 @@ export class GovernanceStateStore {
       history: [...item.history, transition],
     };
     this.#items.set(itemId, updated);
+    void this.#persist(updated);
     return updated;
   }
 
@@ -297,6 +351,24 @@ export class GovernanceStateStore {
   /** How many items are tracked (for logging). */
   public size(): number {
     return this.#items.size;
+  }
+
+  /**
+   * Persist a single item by rewriting the full items.jsonl file.
+   * This is append-style in spirit but rewrites on every mutation
+   * to keep the file a clean snapshot (no stale entries for the same
+   * item id). Best-effort — errors are swallowed so governance
+   * operations are never blocked by I/O.
+   */
+  async #persist(_item: GovernanceItem): Promise<void> {
+    if (!this.#persistDir) return;
+    try {
+      await mkdir(this.#persistDir, { recursive: true });
+      const lines = [...this.#items.values()].map((i) => JSON.stringify(i));
+      await writeFile(join(this.#persistDir, "items.jsonl"), lines.join("\n") + "\n", "utf8");
+    } catch {
+      // Best-effort persistence — swallow errors.
+    }
   }
 }
 

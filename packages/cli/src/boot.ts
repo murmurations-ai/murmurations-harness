@@ -591,6 +591,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     runArtifactWriter,
     ...(secretsBlock ? { secrets: secretsBlock } : {}),
     ...(governancePlugin ? { governance: governancePlugin } : {}),
+    governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
   });
 
   let githubClient: GithubClient | undefined;
@@ -817,6 +818,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         runArtifactWriter,
         ...(secretsBlock ? { secrets: secretsBlock } : {}),
         ...(governancePlugin ? { governance: governancePlugin } : {}),
+        governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
       })
     : firstPassDaemon;
 
