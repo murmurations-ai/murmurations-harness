@@ -2,10 +2,9 @@
  * Governance plugin interface — the pluggable boundary for decision
  * lifecycle, event routing, action authorization, and state tracking.
  *
- * The interface is governance-model-agnostic. It does not assume S3
- * (Sociocracy 3.0), command-and-control, consensus, meritocratic, or
- * any other specific governance model. Instead it exposes generic
- * primitives that any model can implement:
+ * The interface is governance-model-agnostic. It does not assume any
+ * specific governance model. Instead it exposes generic primitives
+ * that any model can implement:
  *
  *   - **Event routing** — after a wake, the daemon hands the plugin
  *     the emitted governance events and asks "where should these go?"
@@ -46,10 +45,10 @@ import type { AgentId, WakeId, EmittedGovernanceEvent } from "../execution/index
  * harness validates every transition attempt against the graph.
  *
  * Examples:
- *   S3 tension:  open → deliberating → consent-round → resolved | withdrawn
- *   C&C directive: drafted → submitted → approved → executing → completed
- *   Meritocratic: open → review → scored → accepted | rejected
- *   Consensus:    proposed → discussion → voting → passed | failed
+ *   Self-Organizing (S3): open → deliberating → consent-round → resolved | withdrawn
+ *   Chain of Command:     drafted → submitted → approved → executing → completed
+ *   Meritocratic:         open → review → scored → accepted | rejected
+ *   Consensus:            proposed → discussion → voting → passed | failed
  */
 export interface GovernanceStateGraph {
   readonly kind: string;
@@ -359,7 +358,7 @@ export type GovernanceDecision =
  * trail and automatic review-date enforcement.
  */
 export interface GovernancePlugin {
-  /** Human-readable name for logging (e.g. "s3", "command-and-control"). */
+  /** Human-readable name for logging (e.g. "self-organizing", "chain-of-command", "meritocratic", "consensus"). */
   readonly name: string;
   /** Semver version of the plugin implementation. */
   readonly version: string;

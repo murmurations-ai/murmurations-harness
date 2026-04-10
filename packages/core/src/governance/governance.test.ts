@@ -20,7 +20,7 @@ const S3_TENSION: GovernanceStateGraph = {
   ],
 };
 
-const CC_DIRECTIVE: GovernanceStateGraph = {
+const CHAIN_OF_COMMAND_DIRECTIVE: GovernanceStateGraph = {
   kind: "directive",
   initialState: "drafted",
   terminalStates: ["completed", "rejected"],
@@ -103,7 +103,7 @@ describe("GovernanceStateStore", () => {
     const now = new Date("2026-04-10T12:00:00.000Z");
     const store = new GovernanceStateStore({ now: () => now });
     store.registerGraph(S3_TENSION);
-    store.registerGraph(CC_DIRECTIVE);
+    store.registerGraph(CHAIN_OF_COMMAND_DIRECTIVE);
 
     store.create("tension", AGENT, { topic: "a" });
     const b = store.create("directive", AGENT, { topic: "b" });
@@ -138,7 +138,7 @@ describe("GovernanceStateStore", () => {
 
   it("buildDecisionRecord captures the full audit trail", () => {
     const store = new GovernanceStateStore();
-    store.registerGraph(CC_DIRECTIVE);
+    store.registerGraph(CHAIN_OF_COMMAND_DIRECTIVE);
 
     const item = store.create("directive", AGENT, { directive: "deploy to prod" });
     store.transition(item.id, "submitted", AGENT.value);
@@ -157,7 +157,7 @@ describe("GovernanceStateStore", () => {
 
   it("works with the command-and-control graph (amber model)", () => {
     const store = new GovernanceStateStore();
-    store.registerGraph(CC_DIRECTIVE);
+    store.registerGraph(CHAIN_OF_COMMAND_DIRECTIVE);
 
     const item = store.create("directive", AGENT, { action: "reassign team" });
     store.transition(item.id, "submitted", AGENT.value);
