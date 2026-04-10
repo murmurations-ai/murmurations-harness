@@ -435,6 +435,13 @@ export interface BootDaemonOptions {
    * for the weekly dual-run cadence.
    */
   readonly once?: boolean;
+  /**
+   * Path to a governance plugin module. The module must export a
+   * `GovernancePlugin` as its default export. If omitted,
+   * `NoOpGovernancePlugin` is used (allows everything, discards
+   * all events).
+   */
+  readonly governancePath?: string;
 }
 
 /**
@@ -447,6 +454,35 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const exampleRoot = options.rootDir ? resolve(options.rootDir) : resolveHelloWorldRoot();
   const dryRun = options.dryRun === true;
   const once = options.once === true;
+
+  // Load governance plugin if specified.
+  let governancePlugin: import("@murmuration/core").GovernancePlugin | undefined;
+  if (options.governancePath) {
+    const pluginUrl = pathToFileURL(resolve(options.governancePath)).href;
+    const mod = (await import(pluginUrl)) as { default?: unknown };
+    const candidate: unknown = mod.default;
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      typeof (candidate as { name?: unknown }).name !== "string" ||
+      typeof (candidate as { onEventsEmitted?: unknown }).onEventsEmitted !== "function"
+    ) {
+      process.stderr.write(
+        `murmuration: governance module at ${options.governancePath} must export a GovernancePlugin as default\n`,
+      );
+      process.exit(78);
+    }
+    governancePlugin = candidate as import("@murmuration/core").GovernancePlugin;
+    process.stdout.write(
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "daemon.governance.loaded",
+        plugin: governancePlugin.name,
+        version: governancePlugin.version,
+      })}\n`,
+    );
+  }
 
   const loader = new IdentityLoader({ rootDir: exampleRoot });
 
@@ -554,6 +590,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     signalAggregator: filesystemOnlyAggregator,
     runArtifactWriter,
     ...(secretsBlock ? { secrets: secretsBlock } : {}),
+    ...(governancePlugin ? { governance: governancePlugin } : {}),
   });
 
   let githubClient: GithubClient | undefined;
@@ -779,6 +816,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
           : filesystemOnlyAggregator,
         runArtifactWriter,
         ...(secretsBlock ? { secrets: secretsBlock } : {}),
+        ...(governancePlugin ? { governance: governancePlugin } : {}),
       })
     : firstPassDaemon;
 

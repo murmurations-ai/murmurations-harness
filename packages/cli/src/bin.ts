@@ -24,6 +24,7 @@ interface StartArgs {
   readonly agentDir: string | undefined;
   readonly dryRun: boolean;
   readonly once: boolean;
+  readonly governancePath: string | undefined;
 }
 
 const parseStartArgs = (rest: readonly string[]): StartArgs => {
@@ -31,9 +32,15 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
   let agentDir: string | undefined;
   let dryRun = false;
   let once = false;
+  let governancePath: string | undefined;
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
-    if (arg === "--root") {
+    if (arg === "--governance") {
+      const next = rest[i + 1];
+      if (next === undefined) throw new Error("--governance requires a module path");
+      governancePath = next;
+      i++;
+    } else if (arg === "--root") {
       const next = rest[i + 1];
       if (next === undefined) throw new Error("--root requires a value");
       rootDir = next;
@@ -51,7 +58,7 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
       throw new Error(`unknown argument: ${arg ?? "(undefined)"}`);
     }
   }
-  return { rootDir, agentDir, dryRun, once };
+  return { rootDir, agentDir, dryRun, once, governancePath };
 };
 
 const usage = (): string =>
@@ -71,6 +78,8 @@ start options:
   --dry-run        Construct every GithubClient without writeScopes so
                    all mutations default-deny at the client layer
   --once           Exit cleanly after the first wake of any agent completes
+  --governance <path>  Path to a governance plugin module (default: no-op).
+                   The module must export a GovernancePlugin as default.
 
 Examples:
   murmuration start                                          # hello-world only
@@ -88,6 +97,7 @@ const main = async (): Promise<void> => {
         ...(args.agentDir !== undefined ? { agentDir: args.agentDir } : {}),
         ...(args.dryRun ? { dryRun: true } : {}),
         ...(args.once ? { once: true } : {}),
+        ...(args.governancePath !== undefined ? { governancePath: args.governancePath } : {}),
       });
       break;
     }
