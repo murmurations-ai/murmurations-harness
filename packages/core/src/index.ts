@@ -7,7 +7,7 @@
  * scheduler (TimerScheduler), daemon (wiring), signals (aggregator
  * stub), and governance (plugin stub).
  *
- * Spec: https://github.com/xeeban/emergent-praxis/blob/main/docs/MURMURATION-HARNESS-SPEC.md
+ * Spec: https://github.com/murmurations-ai/murmurations-harness/blob/main/docs/MURMURATION-HARNESS-SPEC.md
  */
 
 export * from "./execution/index.js";

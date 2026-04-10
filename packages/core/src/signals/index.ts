@@ -39,13 +39,28 @@ import type {
 // Public interface
 // ---------------------------------------------------------------------------
 
-export type SignalSourceId =
+/**
+ * Well-known signal source identifiers shipped with the harness. These
+ * have typed `Signal` variants with structured fields. Operators can
+ * declare additional custom source IDs as plain strings — they flow
+ * through the `"custom"` Signal variant with an opaque `data` payload.
+ */
+export type WellKnownSignalSourceId =
   | "github-issue"
   | "private-note"
   | "inbox-message"
   | "pipeline-item"
   | "governance-round"
   | "stall-alert";
+
+/**
+ * Any signal source identifier — well-known or operator-defined.
+ * Custom sources use the `"custom"` Signal variant and carry an
+ * opaque `data` payload the agent interprets. The harness routes
+ * them through the same aggregation and cost paths as built-in
+ * sources.
+ */
+export type SignalSourceId = WellKnownSignalSourceId | (string & {});
 
 export interface SignalAggregationContext {
   readonly wakeId: WakeId;

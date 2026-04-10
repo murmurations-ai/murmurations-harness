@@ -227,28 +227,26 @@ interface AgentComposition {
 }
 
 /**
- * Shape the in-process runner receives in its `clients` bag. The
- * LLM and GitHub fields are optional because an agent may not have
- * an LLM pin, or its writeScopes may have been denied (dry-run or
- * missing token). The runner must handle the `undefined` case.
+ * Generic shape the in-process runner receives in its `clients` bag.
+ * The LLM and GitHub fields are optional because an agent may not
+ * have an LLM pin, or its writeScopes may have been denied (dry-run
+ * or missing token). The runner must handle the `undefined` case.
+ *
+ * `targetRepo` and `targetBranch` are convenience fields derived from
+ * the agent's `branchCommits` write scopes at boot time. They save
+ * the runner from needing to import `@murmuration/github` (which
+ * doesn't resolve outside the monorepo). Operators whose runners
+ * don't commit to GitHub can ignore them.
  */
-export interface ResearchAgentClients {
+export interface InProcessRunnerClients {
   readonly llm?: LLMClient;
   readonly github?: GithubClient;
-  /**
-   * First `branchCommits` entry from the agent's writeScopes, pre-built
-   * as a `RepoCoordinate` so the runner (which lives outside the
-   * harness monorepo and can't import from @murmuration/github) can
-   * pass it straight to `github.createCommitOnBranch` without
-   * constructing a coordinate itself.
-   */
   readonly targetRepo?: RepoCoordinate;
-  /**
-   * Target branch for the weekly digest commit. Defaults to `"main"`.
-   * Exposed separately from `targetRepo` so a follow-up can lift it
-   * into role.md frontmatter without touching this type.
-   */
   readonly targetBranch?: string;
+  /** Operator-defined extension fields. The harness passes these
+   *  through without interpretation — runners cast them at the call
+   *  site based on their own type knowledge. */
+  readonly [key: string]: unknown;
 }
 
 /**
@@ -668,12 +666,12 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   //
   // Runner resolution: by convention the agent's runner module lives
   // at `<rootDir>/agents/<agentDir>/runner.mjs` and exposes a
-  // default export that is an `AgentRunner<ResearchAgentClients>`.
+  // default export that is an `AgentRunner<InProcessRunnerClients>`.
   // Dynamic import keeps core + cli dep-free of specific agent code.
   // -------------------------------------------------------------------
 
   const effectiveExecutor: AgentExecutor = registered.llm
-    ? new InProcessExecutor<ResearchAgentClients>({
+    ? new InProcessExecutor<InProcessRunnerClients>({
         resolveRunner: async ({ agentId }) => {
           if (agentId !== registered.agentId) {
             throw new Error(`resolveRunner: unknown agent ${agentId}`);
@@ -689,7 +687,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               `runner at ${runnerPath} must export a default function or a named \`runWake\` function`,
             );
           }
-          return candidate as AgentRunner<ResearchAgentClients>;
+          return candidate as AgentRunner<InProcessRunnerClients>;
         },
         resolveClients: ({ costBuilder }) => {
           const wakeClients = buildAgentClients({

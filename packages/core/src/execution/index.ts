@@ -26,7 +26,7 @@ import type { WakeCostRecord } from "../cost/record.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Identifier for an agent (e.g. `"08-editorial"`).
+ * Identifier for an agent (e.g. `"01-research"`, `"my-agent"`).
  *
  * Branded object rather than a bare string so callers cannot cross-wire
  * agent ids with arbitrary strings at the type level. Construct via
@@ -220,9 +220,12 @@ interface SignalBase {
 }
 
 /**
- * A single signal in the bundle. Discriminated union over the sources
- * enumerated in spec §7.1 step 2. Executors must not interpret signal
- * contents — the agent does that.
+ * A single signal in the bundle. The well-known variants have typed
+ * fields; the `custom` variant carries an opaque `data` payload so
+ * operators can define signal sources the harness doesn't ship
+ * built-in support for (e.g. `pr-review`, `ci-failure`,
+ * `slack-message`). Executors must not interpret signal contents —
+ * the agent does that.
  */
 export type Signal =
   | (SignalBase & {
@@ -263,6 +266,15 @@ export type Signal =
       readonly subjectIssue: number;
       readonly stage: string;
       readonly stalledForHours: number;
+    })
+  | (SignalBase & {
+      /** Operator-defined signal source. The `sourceId` names the custom
+       *  source (e.g. `"pr-review"`, `"slack-message"`). The `data`
+       *  payload is opaque to the harness — the agent's runner interprets
+       *  it based on `sourceId`. */
+      readonly kind: "custom";
+      readonly sourceId: string;
+      readonly data: unknown;
     });
 
 /**

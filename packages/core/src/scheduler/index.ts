@@ -14,9 +14,8 @@
  * regardless of the operator's local timezone. This matches the
  * ADR-0016 role template convention and makes wake timings
  * deterministic across machines and CI. Per-role timezone overrides
- * (the EP manifest's `tz: "America/Vancouver"` pattern) are a
- * follow-up that will land with a `wake_schedule.tz` field on
- * the role template.
+ * Per-role timezone overrides are supported via the `tz` field on
+ * the `cron` trigger (e.g. `tz: "America/Vancouver"`).
  *
  * Not pluggable — core component per spec §4.1.
  *

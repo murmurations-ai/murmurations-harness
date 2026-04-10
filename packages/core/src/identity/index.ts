@@ -147,20 +147,17 @@ const githubScopeSchema = z
   })
   .strict();
 
+/**
+ * Signal sources are open strings, not a closed enum. The harness
+ * ships well-known sources (`github-issue`, `private-note`,
+ * `inbox-message`, `pipeline-item`, `governance-round`, `stall-alert`)
+ * with typed Signal variants, but operators can declare any string
+ * (e.g. `"pr-review"`, `"slack-message"`, `"ci-failure"`) and the
+ * aggregator will route them through the `custom` Signal variant.
+ */
 const signalsSchema = z
   .object({
-    sources: z
-      .array(
-        z.enum([
-          "github-issue",
-          "private-note",
-          "inbox-message",
-          "pipeline-item",
-          "governance-round",
-          "stall-alert",
-        ]),
-      )
-      .default(["github-issue", "private-note", "inbox-message"]),
+    sources: z.array(z.string().min(1)).default(["github-issue", "private-note", "inbox-message"]),
     github_scopes: z.array(githubScopeSchema).optional(),
   })
   .default({ sources: ["github-issue", "private-note", "inbox-message"] });
@@ -257,8 +254,7 @@ export const splitFrontmatter = (
 // ---------------------------------------------------------------------------
 
 /**
- * Where to find the identity files. Phase 1B default layout mirrors
- * the Emergent Praxis repo structure:
+ * Where to find the identity files. Default layout:
  *
  *   <rootDir>/murmuration/soul.md
  *   <rootDir>/agents/<agentDir>/soul.md
@@ -311,7 +307,7 @@ export class IdentityLoader {
 
   /**
    * Load one agent's identity. `agentDir` is the subdirectory name
-   * under `agents/` (e.g. `"08-editorial"`). The loader expects the
+   * under `agents/` (e.g. `"01-research"`, `"my-agent"`). The loader expects the
    * conventional files `soul.md` and `role.md` inside that directory.
    */
   public async load(agentDir: string): Promise<LoadedAgentIdentity> {
