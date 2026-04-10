@@ -105,7 +105,8 @@ const renderPipeline = (agents: readonly AgentStatus[]): string => {
 
     const staleFlag = a.stale ? yellow(" STALE") : "";
     const time = a.lastWake ? a.lastWake.toISOString().slice(11, 16) : dim("never");
-    lines.push(`  ${marker} ${a.agentId.padEnd(24)} ${time}  ${a.costFormatted}${staleFlag}`);
+    const next = a.nextWakeCountdown !== "--" ? dim(`  next: ${a.nextWakeCountdown}`) : "";
+    lines.push(`  ${marker} ${a.agentId.padEnd(24)} ${time}  ${a.costFormatted}${staleFlag}${next}`);
   }
   return lines.join("\n");
 };

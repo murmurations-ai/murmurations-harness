@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@mariozechner/pi-tui": "^0.66.1",
-    "@murmuration/core": "workspace:*"
+    "@murmuration/core": "workspace:*",
+    "cron-parser": "^4.9.0"
   },
   "engines": {
     "node": ">=20.0.0"

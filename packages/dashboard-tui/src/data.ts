@@ -7,6 +7,8 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import cronParser from "cron-parser";
+
 // ---------------------------------------------------------------------------
 // Panel 1: Pipeline State — last wake per agent
 // ---------------------------------------------------------------------------
@@ -18,26 +20,90 @@ export interface AgentStatus {
   readonly costMicros: number;
   readonly costFormatted: string;
   readonly stale: boolean; // no wake in > 48h
+  readonly nextWake: Date | null;
+  readonly nextWakeCountdown: string; // human-readable "2h 14m" or "--"
 }
 
+/** Parse the cron expression from an agent's role.md frontmatter. */
+const parseCronFromRole = async (rootDir: string, agentId: string): Promise<{ cron?: string | undefined; tz?: string | undefined; delayMs?: number | undefined }> => {
+  try {
+    const rolePath = join(rootDir, "agents", agentId, "role.md");
+    const content = await readFile(rolePath, "utf8");
+    const fmMatch = /^---\n([\s\S]*?)\n---/m.exec(content);
+    if (!fmMatch) return {};
+    const fm = fmMatch[1] ?? "";
+    const cronMatch = /cron:\s*"([^"]+)"/.exec(fm);
+    const tzMatch = /tz:\s*"([^"]+)"/.exec(fm);
+    const delayMatch = /delayMs:\s*(\d+)/.exec(fm);
+    return {
+      cron: cronMatch?.[1],
+      tz: tzMatch?.[1],
+      delayMs: delayMatch ? Number(delayMatch[1]) : undefined,
+    };
+  } catch {
+    return {};
+  }
+};
+
+/** Compute next fire time from a cron expression. */
+const computeNextFire = (cron: string, tz?: string): Date | null => {
+  try {
+    const parsed = cronParser.parseExpression(cron, { currentDate: new Date(), tz: tz ?? "UTC" });
+    const next = parsed.next();
+    return new Date(next.getTime());
+  } catch {
+    return null;
+  }
+};
+
+/** Format a countdown like "2h 14m" or "34m" or "< 1m". */
+const formatCountdown = (target: Date | null): string => {
+  if (!target) return "--";
+  const deltaMs = target.getTime() - Date.now();
+  if (deltaMs <= 0) return "now";
+  const totalMin = Math.floor(deltaMs / 60_000);
+  if (totalMin < 1) return "< 1m";
+  const hours = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  if (hours === 0) return `${String(mins)}m`;
+  return `${String(hours)}h ${String(mins).padStart(2, "0")}m`;
+};
+
 export const readPipelineState = async (rootDir: string): Promise<readonly AgentStatus[]> => {
-  const runsDir = join(rootDir, ".murmuration", "runs");
+  // Discover agents from the agents/ directory (not just runs/)
+  // so we show agents that haven't woken yet too.
+  const agentsDir = join(rootDir, "agents");
   let agentDirs: string[];
   try {
-    agentDirs = await readdir(runsDir);
+    const entries = await readdir(agentsDir);
+    // Filter to dirs that have role.md
+    const valid: string[] = [];
+    for (const e of entries.sort()) {
+      try {
+        await readFile(join(agentsDir, e, "role.md"), "utf8");
+        valid.push(e);
+      } catch { /* skip */ }
+    }
+    agentDirs = valid;
   } catch {
     return [];
   }
 
+  const runsDir = join(rootDir, ".murmuration", "runs");
   const results: AgentStatus[] = [];
   for (const agentId of agentDirs.sort()) {
+    // Read next wake from role.md cron
+    const schedule = await parseCronFromRole(rootDir, agentId);
+    const nextWake = schedule.cron ? computeNextFire(schedule.cron, schedule.tz) : null;
+    const nextWakeCountdown = formatCountdown(nextWake);
+
     const indexPath = join(runsDir, agentId, "index.jsonl");
     try {
       const contents = await readFile(indexPath, "utf8");
       const lines = contents.trim().split("\n").filter((l) => l.length > 0);
       const lastLine = lines[lines.length - 1];
       if (!lastLine) {
-        results.push({ agentId, lastWake: null, outcome: null, costMicros: 0, costFormatted: "$0.0000", stale: true });
+        results.push({ agentId, lastWake: null, outcome: null, costMicros: 0, costFormatted: "$0.0000", stale: true, nextWake, nextWakeCountdown });
         continue;
       }
       const entry = JSON.parse(lastLine) as {
@@ -54,9 +120,11 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         costMicros: entry.llm?.costMicros ?? 0,
         costFormatted: `$${entry.llm?.costUsdFormatted ?? "0.0000"}`,
         stale,
+        nextWake,
+        nextWakeCountdown,
       });
     } catch {
-      results.push({ agentId, lastWake: null, outcome: null, costMicros: 0, costFormatted: "$0.0000", stale: true });
+      results.push({ agentId, lastWake: null, outcome: null, costMicros: 0, costFormatted: "$0.0000", stale: true, nextWake, nextWakeCountdown });
     }
   }
   return results;

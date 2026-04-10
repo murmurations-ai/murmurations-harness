@@ -83,6 +83,9 @@ importers:
       '@murmuration/core':
         specifier: workspace:*
         version: link:../core
+      cron-parser:
+        specifier: ^4.9.0
+        version: 4.9.0
 
   packages/github:
     dependencies:
