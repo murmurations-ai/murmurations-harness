@@ -39,6 +39,7 @@
   "dependencies": {
     "@murmuration/core": "workspace:*",
     "@murmuration/github": "workspace:*",
+    "@murmuration/llm": "workspace:*",
     "@murmuration/secrets-dotenv": "workspace:*",
     "@murmuration/signals": "workspace:*"
   },

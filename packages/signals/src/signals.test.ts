@@ -46,6 +46,18 @@ const fakeIssue = (
 });
 
 /* eslint-disable @typescript-eslint/require-await -- fake clients mimic the async interface */
+// ADR-0017 added three mutation methods to GithubClient. Signals tests
+// only exercise the read path, so the fakes return a `write-scope-denied`
+// Result for each mutation — the aggregator never calls these, so the
+// behavior is only satisfying the type.
+const mutationDenied = async (): Promise<{
+  readonly ok: false;
+  readonly error: GithubClientError;
+}> => ({
+  ok: false,
+  error: { code: "write-scope-denied" } as unknown as GithubClientError,
+});
+
 const makeFakeGithub = (issues: readonly GithubIssue[]): GithubClient => ({
   async getIssue() {
     return {
@@ -62,6 +74,9 @@ const makeFakeGithub = (issues: readonly GithubIssue[]): GithubClient => ({
   async listIssueLabels() {
     return { ok: true, value: [] };
   },
+  createIssueComment: mutationDenied,
+  createIssue: mutationDenied,
+  createCommitOnBranch: mutationDenied,
   lastRateLimit: () => null,
 });
 
@@ -81,6 +96,9 @@ const makeFailingGithub = (): GithubClient => ({
   async listIssueLabels() {
     return { ok: true, value: [] };
   },
+  createIssueComment: mutationDenied,
+  createIssue: mutationDenied,
+  createCommitOnBranch: mutationDenied,
   lastRateLimit: () => null,
 });
 /* eslint-enable @typescript-eslint/require-await */

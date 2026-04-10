@@ -53,6 +53,9 @@ importers:
       '@murmuration/github':
         specifier: workspace:*
         version: link:../github
+      '@murmuration/llm':
+        specifier: workspace:*
+        version: link:../llm
       '@murmuration/secrets-dotenv':
         specifier: workspace:*
         version: link:../secrets-dotenv
