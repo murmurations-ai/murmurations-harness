@@ -12,6 +12,7 @@
  */
 
 import { formatUSDMicros } from "../cost/usd.js";
+import { RunArtifactWriter } from "./runs.js";
 import {
   isCompleted,
   isFailed,
@@ -320,6 +321,13 @@ export interface DaemonConfig {
    * Added in Phase 1B step B4 (Architecture Agent #23).
    */
   readonly signalAggregator?: SignalAggregator;
+  /**
+   * Optional run artifact writer. If present, the daemon calls
+   * `record(result, costRecord)` after every completed wake so the
+   * wake summary + cost record land on disk under the configured
+   * run root. See Phase 2D step 2D5 and `./runs.ts`.
+   */
+  readonly runArtifactWriter?: RunArtifactWriter;
 }
 
 export interface DaemonLogger {
@@ -345,6 +353,7 @@ export class Daemon {
     | { readonly provider: SecretsProvider; readonly declaration: SecretDeclaration }
     | undefined;
   readonly #signalAggregator: SignalAggregator | undefined;
+  readonly #runArtifactWriter: RunArtifactWriter | undefined;
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
 
@@ -356,6 +365,7 @@ export class Daemon {
     this.#heartbeatMs = config.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
     this.#secrets = config.secrets;
     this.#signalAggregator = config.signalAggregator;
+    this.#runArtifactWriter = config.runArtifactWriter;
   }
 
   /**
@@ -474,6 +484,11 @@ export class Daemon {
       const handle = await this.#executor.spawn(context);
       const result = await this.#executor.waitForCompletion(handle);
       this.#logResult(result);
+      if (this.#runArtifactWriter) {
+        // Artifact writes are best-effort per 2D5 design — the writer
+        // swallows its own errors and reports them via the logger.
+        await this.#runArtifactWriter.record(result, result.costRecord, this.#logger);
+      }
     } catch (error) {
       this.#logger.error("daemon.wake.error", {
         agentId: agent.agentId,
@@ -718,3 +733,8 @@ export { REDACT };
 // (notably the CLI) can construct registrations without reaching into
 // execution module internals.
 export { makeWakeId };
+
+// Re-export the run-artifact writer surface so the CLI boot path can
+// construct one without reaching into internal module paths.
+export { RunArtifactWriter } from "./runs.js";
+export type { RunArtifactWriterConfig, RunArtifactIndexEntry, RunArtifactLogger } from "./runs.js";

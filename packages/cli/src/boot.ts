@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import {
   Daemon,
   IdentityLoader,
+  RunArtifactWriter,
   SubprocessExecutor,
   makeSecretKey,
   makeUSDMicros,
@@ -332,6 +333,14 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     ? { provider, declaration }
     : undefined;
 
+  // Per-agent run artifact writer (2D5). Artifacts land under
+  // `<rootDir>/.murmuration/runs/<agentDir>/` so they travel with
+  // the murmuration, not with the harness install. The writer is
+  // agent-scoped — dual-run fairness rests on per-agent isolation.
+  const runArtifactWriter = new RunArtifactWriter({
+    rootDir: resolve(exampleRoot, ".murmuration", "runs", agentDir),
+  });
+
   // First pass: construct a daemon with the filesystem-only aggregator
   // and load secrets. If GITHUB_TOKEN is present after load, rebuild
   // with an upgraded aggregator that includes the github client.
@@ -343,6 +352,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     executor,
     agents: [registered],
     signalAggregator: filesystemOnlyAggregator,
+    runArtifactWriter,
     ...(secretsBlock ? { secrets: secretsBlock } : {}),
   });
 
@@ -506,6 +516,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
           // the aggregator exercises filesystem sources only.
           githubScopes: [],
         }),
+        runArtifactWriter,
         ...(secretsBlock ? { secrets: secretsBlock } : {}),
       })
     : firstPassDaemon;
