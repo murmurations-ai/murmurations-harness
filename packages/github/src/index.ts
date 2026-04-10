@@ -11,8 +11,20 @@ export type {
   GithubClient,
   GithubClientConfig,
   GithubCostHook,
+  GithubCreateCommentInput,
+  GithubCreatedComment,
+  GithubCreateIssueInput,
+  GithubCreatedIssue,
+  GithubFileAddition,
+  GithubFileDeletion,
+  GithubFileChanges,
+  GithubCommitMessage,
+  GithubCreatedCommit,
   RetryPolicy,
 } from "./client.js";
+
+export { compileGlob, compileWriteScopes } from "./write-scopes.js";
+export type { GithubWriteScopes, WriteScopeKind } from "./write-scopes.js";
 
 export type { GithubComment, GithubIssue, ListIssuesFilter, Result } from "./types.js";
 
@@ -21,16 +33,23 @@ export { LruGithubCache } from "./cache.js";
 
 export {
   GithubClientError,
+  GithubConflictError,
   GithubForbiddenError,
   GithubInternalError,
+  GithubMutationAbortedError,
   GithubNotFoundError,
   GithubParseError,
   GithubRateLimitError,
   GithubTransportError,
   GithubUnauthorizedError,
   GithubValidationError,
+  GithubWriteScopeError,
 } from "./errors.js";
-export type { GithubClientErrorCode, GithubRateLimitSnapshot } from "./errors.js";
+export type {
+  GithubClientErrorCode,
+  GithubRateLimitSnapshot,
+  GithubWriteScopeKind,
+} from "./errors.js";
 
 export {
   makeGithubOwner,

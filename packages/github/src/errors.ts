@@ -18,7 +18,12 @@ export type GithubClientErrorCode =
   | "transport"
   | "parse"
   | "aborted"
-  | "internal";
+  | "internal"
+  | "write-scope-denied"
+  | "conflict"
+  | "mutation-aborted";
+
+export type GithubWriteScopeKind = "issue-comment" | "branch-commit" | "issue" | "label";
 
 export interface GithubRateLimitSnapshot {
   readonly limit: number;
@@ -145,5 +150,74 @@ export class GithubInternalError extends GithubClientError {
   public readonly code = "internal" as const;
   public constructor(message: string, options: { readonly cause?: unknown } = {}) {
     super(message, options);
+  }
+}
+
+/**
+ * Mutation refused because no matching write scope is configured.
+ * Fired before any network I/O. Cost hook still fires once per
+ * ADR-0017 §8 for audit bookkeeping.
+ */
+export class GithubWriteScopeError extends GithubClientError {
+  public readonly code = "write-scope-denied" as const;
+  public readonly attemptedRepo: string;
+  public readonly attemptedPath: string | null;
+  public readonly scopeKind: GithubWriteScopeKind;
+  public constructor(
+    message: string,
+    options: {
+      readonly attemptedRepo: string;
+      readonly attemptedPath?: string | null;
+      readonly scopeKind: GithubWriteScopeKind;
+      readonly requestUrl?: string;
+    },
+  ) {
+    super(message, options.requestUrl !== undefined ? { requestUrl: options.requestUrl } : {});
+    this.attemptedRepo = options.attemptedRepo;
+    this.attemptedPath = options.attemptedPath ?? null;
+    this.scopeKind = options.scopeKind;
+  }
+}
+
+/**
+ * `createCommitOnBranch` failed because `expectedHeadOid` no longer
+ * matches the server's HEAD. Not retried — the caller must re-fetch
+ * HEAD and rebuild the file changes.
+ */
+export class GithubConflictError extends GithubClientError {
+  public readonly code = "conflict" as const;
+  public readonly expectedHeadOid: string;
+  public constructor(
+    message: string,
+    options: {
+      readonly requestUrl?: string;
+      readonly cause?: unknown;
+      readonly expectedHeadOid: string;
+    },
+  ) {
+    super(message, { ...options, status: 409 });
+    this.expectedHeadOid = options.expectedHeadOid;
+  }
+}
+
+/**
+ * Mutation aborted via `AbortSignal`. Unlike reads (which re-throw
+ * AbortError), mutations return this as a Result so the caller can
+ * distinguish "aborted before bytes left the socket" from "aborted
+ * after the server may have received the request". Per ADR-0017 §5.
+ */
+export class GithubMutationAbortedError extends GithubClientError {
+  public readonly code = "mutation-aborted" as const;
+  public readonly phase: "before-send" | "in-flight";
+  public constructor(
+    message: string,
+    options: {
+      readonly phase: "before-send" | "in-flight";
+      readonly requestUrl?: string;
+      readonly cause?: unknown;
+    },
+  ) {
+    super(message, options);
+    this.phase = options.phase;
   }
 }
