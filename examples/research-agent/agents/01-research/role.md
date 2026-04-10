@@ -66,6 +66,8 @@ github:
         paths:
           - "notes/weekly/**"
     labels: []
+    issues:
+      - "xeeban/emergent-praxis"
 
 # Prompt reference — the wake prompt file, read lazily by the runner.
 prompt:

@@ -43,7 +43,7 @@ import { makeWakeId } from "../execution/index.js";
 export type WakeTrigger =
   | { readonly kind: "delay-once"; readonly delayMs: number }
   | { readonly kind: "interval"; readonly intervalMs: number }
-  | { readonly kind: "cron"; readonly expression: string }
+  | { readonly kind: "cron"; readonly expression: string; readonly tz?: string }
   // TODO(phase-3): event bus wiring
   | { readonly kind: "event"; readonly eventType: string };
 
@@ -218,9 +218,10 @@ export class TimerScheduler implements Scheduler {
 
     let delayMs: number;
     try {
+      const tz = entry.trigger.tz ?? "UTC";
       const parsed = cronParser.parseExpression(expression, {
         currentDate: new Date(),
-        tz: "UTC",
+        tz,
       });
       const next = parsed.next();
       // cron-parser returns a CronDate whose `getTime()` is the next

@@ -305,4 +305,43 @@ describe("TimerScheduler", () => {
 
     await scheduler.stop();
   });
+
+  it("cron — tz option shifts the fire time to the named timezone", async () => {
+    // "30 0 * * *" = daily at 00:30. With tz=America/Vancouver (PDT
+    // = UTC-7), 00:30 PDT = 07:30 UTC.
+    //
+    // Anchor at 2026-04-10 07:29:00 UTC = 00:29 PDT. Next fire at
+    // 00:30 PDT = 07:30 UTC — exactly 1 minute away.
+    //
+    // Without tz (defaulting to UTC), next 00:30 UTC is ~17h away.
+    // By advancing only 60s, we prove the tz=Vancouver path fires
+    // at the Vancouver time, not UTC.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-10T07:29:00.000Z"));
+
+    const scheduler = new TimerScheduler();
+    const agentId = makeAgentId("cron-tz");
+
+    const fired: ScheduledWakeEvent[] = [];
+    scheduler.onWake((event) => {
+      fired.push(event);
+    });
+
+    scheduler.schedule(agentId, {
+      kind: "cron",
+      expression: "30 0 * * *",
+      tz: "America/Vancouver",
+    });
+    scheduler.start();
+
+    // 59s — not yet at 00:30 PDT.
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(fired).toHaveLength(0);
+
+    // 1 more second — 07:30:00 UTC = 00:30:00 PDT. Fire.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fired).toHaveLength(1);
+
+    await scheduler.stop();
+  });
 });

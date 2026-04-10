@@ -132,6 +132,7 @@ export interface RegisteredAgent {
       readonly paths: readonly string[];
     }[];
     readonly labels: readonly string[];
+    readonly issues: readonly string[];
   };
 
   /**
@@ -220,6 +221,7 @@ export const registeredAgentFromLoadedIdentity = (
       paths: b.paths,
     })),
     labels: frontmatter.github.write_scopes.labels,
+    issues: frontmatter.github.write_scopes.issues,
   };
 
   const promptPath =

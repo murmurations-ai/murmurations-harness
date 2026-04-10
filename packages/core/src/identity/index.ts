@@ -109,6 +109,9 @@ const wakeScheduleSchema = z
     delayMs: z.number().int().nonnegative().optional(),
     intervalMs: z.number().int().nonnegative().optional(),
     events: z.array(z.string().min(1)).optional(),
+    /** IANA timezone for the cron expression (e.g. "America/Vancouver").
+     *  If absent, cron fires in UTC. Only meaningful when `cron` is set. */
+    tz: z.string().min(1).optional(),
   })
   .refine(
     (s) =>
@@ -174,14 +177,15 @@ const githubWriteScopesSchema = z
     issue_comments: z.array(z.string().regex(/^[^/]+\/[^/]+$/)).default([]),
     branch_commits: z.array(branchCommitScopeSchema).default([]),
     labels: z.array(z.string()).default([]),
+    issues: z.array(z.string().regex(/^[^/]+\/[^/]+$/)).default([]), // CF-github-I
   })
-  .default({ issue_comments: [], branch_commits: [], labels: [] });
+  .default({ issue_comments: [], branch_commits: [], labels: [], issues: [] });
 
 const githubSchema = z
   .object({
     write_scopes: githubWriteScopesSchema,
   })
-  .default({ write_scopes: { issue_comments: [], branch_commits: [], labels: [] } });
+  .default({ write_scopes: { issue_comments: [], branch_commits: [], labels: [], issues: [] } });
 
 const promptSchema = z
   .object({

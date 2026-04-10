@@ -65,7 +65,10 @@ const WAKE_PROMPT_PATH = pathResolve(HERE, "prompts", "wake.md");
  *     },
  *     github?: {
  *       getRef: (repo: any, branch: string) => Promise<{ ok: boolean, value?: any, error?: any }>,
- *       createCommitOnBranch: (repo: any, branch: string, msg: any, changes: any, oid: string) => Promise<{ ok: boolean, value?: any, error?: any }>
+ *       createCommitOnBranch: (repo: any, branch: string, msg: any, changes: any, oid: string) => Promise<{ ok: boolean, value?: any, error?: any }>,
+ *       listIssues: (repo: any, filter?: any) => Promise<{ ok: boolean, value?: any, error?: any }>,
+ *       createIssue: (repo: any, input: any) => Promise<{ ok: boolean, value?: any, error?: any }>,
+ *       createIssueComment: (repo: any, issueNumber: any, input: any) => Promise<{ ok: boolean, value?: any, error?: any }>
  *     },
  *     targetRepo?: any,
  *     targetBranch?: string
@@ -252,13 +255,74 @@ Return **only** the digest markdown. Do NOT wrap the digest in a code fence. Do 
     );
   }
 
+  // -- 7. Post an announcement comment on a research-digest issue ---
+  //
+  // Find the most recent open issue labelled `type: research-digest`
+  // from the last 7 days. If none exists, open one. Then post a
+  // comment linking to the committed digest.
+  let announcementUrl = null;
+  try {
+    const since = new Date(Date.now() - 7 * 86_400_000);
+    const issuesResult = await clients.github.listIssues(repo, {
+      state: "open",
+      labels: ["type: research-digest"],
+      since,
+      perPage: 5,
+    });
+
+    let issueNumber;
+    if (issuesResult.ok && issuesResult.value.length > 0) {
+      issueNumber = issuesResult.value[0].number;
+    } else {
+      // No recent digest issue found — create one.
+      const createResult = await clients.github.createIssue(repo, {
+        title: `[RESEARCH] Weekly Digest — ${dayUtc}`,
+        labels: ["circle: research", "type: research-digest"],
+        body: `Automated digest issue opened by Research Agent (#1) via the Murmuration Harness.\n\nDigests are committed to \`notes/weekly/\` and announced as comments on this issue.`,
+      });
+      if (createResult.ok) {
+        issueNumber = createResult.value.number;
+      }
+    }
+
+    if (issueNumber) {
+      const commentBody = [
+        `## Research Digest — ${dayUtc}`,
+        ``,
+        `**Commit:** [\`${commitResult.value.oid.slice(0, 8)}\`](${commitResult.value.url})`,
+        `**File:** \`${digestPath}\``,
+        `**Model:** ${llmResult.value.modelUsed} (${String(inputTokens)} in / ${String(outputTokens)} out)`,
+        `**Wake ID:** \`${wakeId}\``,
+        ``,
+        `<details><summary>Digest preview (first 500 chars)</summary>`,
+        ``,
+        "```",
+        digestBody.slice(0, 500),
+        "```",
+        `</details>`,
+      ].join("\n");
+
+      const commentResult = await clients.github.createIssueComment(
+        repo,
+        issueNumber,
+        { body: commentBody },
+      );
+      if (commentResult.ok) {
+        announcementUrl = commentResult.value.htmlUrl;
+      }
+    }
+  } catch {
+    // Announcement is best-effort — don't fail the wake over it.
+  }
+
   return {
     wakeSummary: [
       `[research-agent] wake ${wakeId}`,
-      `  status: completed — digest committed`,
+      `  status: completed — digest committed + announced`,
       `  digest_path: ${digestPath}`,
       `  commit_oid: ${commitResult.value.oid}`,
       `  commit_url: ${commitResult.value.url}`,
+      ...(announcementUrl ? [`  announcement_url: ${announcementUrl}`] : []),
       `  model: ${llmResult.value.modelUsed}`,
       `  input_tokens: ${String(inputTokens)}`,
       `  output_tokens: ${String(outputTokens)}`,
@@ -274,6 +338,15 @@ Return **only** the digest markdown. Do NOT wrap the digest in a code fence. Do 
         description: `committed ${digestPath}`,
         ref: commitResult.value.url,
       },
+      ...(announcementUrl
+        ? [
+            {
+              kind: "github-comment",
+              description: `announced digest on research-digest issue`,
+              ref: announcementUrl,
+            },
+          ]
+        : []),
     ],
   };
 }

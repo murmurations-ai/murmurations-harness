@@ -57,6 +57,7 @@ const helloWorld: RegisteredAgent = {
     issueComments: [],
     branchCommits: [],
     labels: [],
+    issues: [],
   },
   budget: {
     maxCostMicros: 0,

@@ -127,10 +127,8 @@ const parseRepoKey = (key: string): RepoCoordinate | undefined => {
 
 /**
  * Map `RegisteredAgent.githubWriteScopes` (ADR-0016 camelCase) to the
- * `@murmuration/github` `GithubWriteScopes` shape (ADR-0017 §4). The
- * `issues` field doesn't exist yet in ADR-0016 — tracked as CF-github-I;
- * for now we always pass an empty `issues: []` which makes
- * `createIssue` default-deny until ADR-0016 is amended.
+ * `@murmuration/github` `GithubWriteScopes` shape (ADR-0017 §4).
+ * CF-github-I closed: `issues` now flows through from role.md.
  */
 const toClientWriteScopes = (agent: RegisteredAgent): GithubWriteScopes => ({
   issueComments: agent.githubWriteScopes.issueComments,
@@ -139,7 +137,7 @@ const toClientWriteScopes = (agent: RegisteredAgent): GithubWriteScopes => ({
     paths: b.paths,
   })),
   labels: agent.githubWriteScopes.labels,
-  issues: [], // CF-github-I
+  issues: agent.githubWriteScopes.issues,
 });
 
 /**
@@ -149,7 +147,12 @@ const toClientWriteScopes = (agent: RegisteredAgent): GithubWriteScopes => ({
  */
 const hasAnyWriteScope = (agent: RegisteredAgent): boolean => {
   const s = agent.githubWriteScopes;
-  return s.issueComments.length > 0 || s.branchCommits.length > 0 || s.labels.length > 0;
+  return (
+    s.issueComments.length > 0 ||
+    s.branchCommits.length > 0 ||
+    s.labels.length > 0 ||
+    s.issues.length > 0
+  );
 };
 
 /**
@@ -374,11 +377,16 @@ const triggerFromFrontmatter = (
     readonly delayMs?: number | undefined;
     readonly intervalMs?: number | undefined;
     readonly events?: readonly string[] | undefined;
+    readonly tz?: string | undefined;
   },
   agentId: string,
 ): WakeTrigger => {
   if (wakeSchedule.cron !== undefined) {
-    return { kind: "cron", expression: wakeSchedule.cron };
+    return {
+      kind: "cron",
+      expression: wakeSchedule.cron,
+      ...(wakeSchedule.tz !== undefined ? { tz: wakeSchedule.tz } : {}),
+    };
   }
   if (wakeSchedule.intervalMs !== undefined) {
     return { kind: "interval", intervalMs: wakeSchedule.intervalMs };
