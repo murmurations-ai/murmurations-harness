@@ -49,6 +49,7 @@ import type { AgentId, WakeId, EmittedGovernanceEvent } from "../execution/index
  *   Chain of Command:     drafted → submitted → approved → executing → completed
  *   Meritocratic:         open → review → scored → accepted | rejected
  *   Consensus:            proposed → discussion → voting → passed | failed
+ *   Parliamentary:        motion → seconded → debate → vote → passed | failed | tabled
  */
 export interface GovernanceStateGraph {
   readonly kind: string;
@@ -358,7 +359,7 @@ export type GovernanceDecision =
  * trail and automatic review-date enforcement.
  */
 export interface GovernancePlugin {
-  /** Human-readable name for logging (e.g. "self-organizing", "chain-of-command", "meritocratic", "consensus"). */
+  /** Human-readable name for logging (e.g. "self-organizing", "chain-of-command", "meritocratic", "consensus", "parliamentary"). */
   readonly name: string;
   /** Semver version of the plugin implementation. */
   readonly version: string;
