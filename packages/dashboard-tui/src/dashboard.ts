@@ -134,15 +134,43 @@ const renderGovernance = (items: readonly GovernanceEntry[]): string => {
     lines.push(`  ${dim("All governance items are up-to-date. No pending decisions.")}`);
     return lines.join("\n");
   }
-  for (const item of items.slice(0, 8)) {
-    const dueStr = item.reviewDue ? yellow(" [REVIEW DUE]") : "";
-    const stateStr = item.state === "resolved" || item.state === "ratified"
-      ? green(item.state.padEnd(14))
-      : item.state === "open" || item.state === "deliberating"
+
+  // Split into pending (active) and decided (terminal)
+  const pending = items.filter((i) => !i.isTerminal);
+  const decided = items.filter((i) => i.isTerminal);
+
+  if (pending.length > 0) {
+    lines.push(`  ${bold("Pending")}`);
+    for (const item of pending.slice(0, 5)) {
+      const dueStr = item.reviewDue ? yellow(" [REVIEW DUE]") : "";
+      const stateStr = item.state === "open" || item.state === "deliberating"
         ? cyan(item.state.padEnd(14))
         : item.state.padEnd(14);
-    lines.push(`  ${dim(item.id)}  ${item.kind.padEnd(12)} ${stateStr}${dueStr}`);
+      const summaryStr = item.summary ? dim(` ${item.summary}`) : "";
+      lines.push(`  ${dim(item.id)}  ${item.kind.padEnd(12)} ${stateStr}${dueStr}${summaryStr}`);
+    }
   }
+
+  if (decided.length > 0) {
+    lines.push(`  ${bold("Recent Decisions")}`);
+    // Show most recent first (by lastTransitionAt)
+    const sorted = [...decided].sort((a, b) =>
+      (b.lastTransitionAt?.getTime() ?? 0) - (a.lastTransitionAt?.getTime() ?? 0),
+    );
+    for (const item of sorted.slice(0, 4)) {
+      const stateStr = item.state === "resolved" || item.state === "ratified"
+        ? green(item.state.padEnd(14))
+        : item.state === "rejected"
+          ? red(item.state.padEnd(14))
+          : item.state.padEnd(14);
+      const when = item.lastTransitionAt
+        ? dim(item.lastTransitionAt.toISOString().slice(5, 16).replace("T", " "))
+        : "";
+      const summaryStr = item.summary ? dim(` ${item.summary}`) : "";
+      lines.push(`  ${dim(item.id)}  ${item.kind.padEnd(12)} ${stateStr} ${when}${summaryStr}`);
+    }
+  }
+
   const dueCount = items.filter((i) => i.reviewDue).length;
   if (dueCount > 0) {
     lines.push(`  ${yellow(`${String(dueCount)} items due for review`)}`);

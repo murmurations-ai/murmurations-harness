@@ -190,6 +190,9 @@ export interface GovernanceEntry {
   readonly createdBy: string;
   readonly reviewDue: boolean;
   readonly summary: string;
+  readonly isTerminal: boolean;
+  readonly lastTransition: string | null; // "from → to" or null
+  readonly lastTransitionAt: Date | null;
 }
 
 export const readGovernanceState = async (rootDir: string): Promise<readonly GovernanceEntry[]> => {
@@ -213,8 +216,12 @@ export const readGovernanceState = async (rootDir: string): Promise<readonly Gov
         createdBy?: { value?: string };
         reviewAt?: string | null;
         payload?: { topic?: string; action?: string };
+        history?: { from?: string; to?: string; at?: string }[];
       };
       const reviewAt = item.reviewAt ? new Date(item.reviewAt).getTime() : null;
+      const history = item.history ?? [];
+      const lastH = history.length > 0 ? history[history.length - 1] : null;
+      const terminalStates = ["resolved", "withdrawn", "ratified", "rejected", "completed", "passed", "failed"];
       entries.push({
         id: item.id?.slice(0, 8) ?? "?",
         kind: item.kind ?? "?",
@@ -222,6 +229,9 @@ export const readGovernanceState = async (rootDir: string): Promise<readonly Gov
         createdBy: item.createdBy?.value ?? "?",
         reviewDue: reviewAt !== null && reviewAt < now,
         summary: (item.payload?.topic ?? item.payload?.action ?? "").slice(0, 40),
+        isTerminal: terminalStates.includes(item.currentState ?? ""),
+        lastTransition: lastH ? `${lastH.from ?? "?"} -> ${lastH.to ?? "?"}` : null,
+        lastTransitionAt: lastH?.at ? new Date(lastH.at) : null,
       });
     } catch {
       // skip
