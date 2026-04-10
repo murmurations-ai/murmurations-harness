@@ -195,26 +195,119 @@ interface AgentComposition {
   readonly budgetCeiling: BudgetCeiling | null;
 }
 
+/** Fallback delay used when a role declares a cron wake but the scheduler
+ *  doesn't yet support cron triggers. See `triggerFromFrontmatter`. */
+const CRON_FALLBACK_DELAY_MS = 2000;
+
 /**
- * Boot the daemon, run until SIGINT/SIGTERM, then shut down cleanly.
+ * Build a {@link WakeTrigger} from a role.md `wake_schedule` block. The
+ * identity loader already validates the schema (Zod), so this helper
+ * only chooses a shape based on which field is present. `cron` triggers
+ * currently warn and fall back to a single delayed wake because the
+ * Phase 1A TimerScheduler's cron path is a stub — real cron parsing
+ * is a separate scheduler task. Events are not yet supported either.
  */
-export const bootHelloWorldDaemon = async (): Promise<void> => {
-  const exampleRoot = resolveExampleRoot();
+const triggerFromFrontmatter = (
+  wakeSchedule: {
+    readonly cron?: string | undefined;
+    readonly delayMs?: number | undefined;
+    readonly intervalMs?: number | undefined;
+    readonly events?: readonly string[] | undefined;
+  },
+  agentId: string,
+): WakeTrigger => {
+  if (wakeSchedule.delayMs !== undefined) {
+    return { kind: "delay-once", delayMs: wakeSchedule.delayMs };
+  }
+  if (wakeSchedule.intervalMs !== undefined) {
+    return { kind: "interval", intervalMs: wakeSchedule.intervalMs };
+  }
+  if (wakeSchedule.cron !== undefined) {
+    process.stdout.write(
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        level: "warn",
+        event: "daemon.boot.cron.fallback",
+        agentId,
+        cron: wakeSchedule.cron,
+        reason:
+          "cron triggers are not yet executed by the TimerScheduler; falling back to single delay-once wake for this session",
+        fallbackDelayMs: CRON_FALLBACK_DELAY_MS,
+      })}\n`,
+    );
+    return { kind: "delay-once", delayMs: CRON_FALLBACK_DELAY_MS };
+  }
+  if (wakeSchedule.events && wakeSchedule.events.length > 0) {
+    process.stdout.write(
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        level: "warn",
+        event: "daemon.boot.events.fallback",
+        agentId,
+        events: wakeSchedule.events,
+        reason:
+          "event triggers are not yet wired to a dispatch bus; falling back to single delay-once wake for this session",
+        fallbackDelayMs: CRON_FALLBACK_DELAY_MS,
+      })}\n`,
+    );
+    return { kind: "delay-once", delayMs: CRON_FALLBACK_DELAY_MS };
+  }
+  // Schema would have caught this, but be explicit.
+  throw new Error(`role ${agentId} declares no valid wake_schedule trigger`);
+};
+
+/** Options for {@link bootDaemon}. Both are optional and default to the
+ *  shipped hello-world example so `murmuration start` with no args
+ *  retains its Phase 1A behavior. */
+export interface BootDaemonOptions {
+  /** Absolute or relative path to the identity root (the directory that
+   *  contains `murmuration/`, `agents/`, and `governance/circles/`). */
+  readonly rootDir?: string;
+  /** Subdirectory under `<rootDir>/agents/` containing the agent to boot. */
+  readonly agentDir?: string;
+  /** If true, the GithubClient is constructed without writeScopes, so
+   *  every mutation attempt defaults-denies at the client layer. Used by
+   *  Phase 2C6's Gemini dry-run gate. */
+  readonly dryRun?: boolean;
+}
+
+/**
+ * Boot the daemon against an arbitrary identity root, run until
+ * SIGINT/SIGTERM, then shut down cleanly. Defaults to the bundled
+ * hello-world example so `murmuration start` with no args behaves
+ * identically to the Phase 1A entry point.
+ */
+export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void> => {
+  const exampleRoot = options.rootDir ? resolve(options.rootDir) : resolveHelloWorldRoot();
+  const agentDir = options.agentDir ?? "hello-world";
+  const dryRun = options.dryRun === true;
   const agentScriptPath = resolve(exampleRoot, "agent.mjs");
 
-  const loader = new IdentityLoader({ rootDir: exampleRoot });
-  const loaded = await loader.load("hello-world");
+  process.stdout.write(
+    `${JSON.stringify({
+      ts: new Date().toISOString(),
+      level: "info",
+      event: "daemon.boot.config",
+      rootDir: exampleRoot,
+      agentDir,
+      dryRun,
+    })}\n`,
+  );
 
-  // Phase 1B default trigger: delay-once. The identity loader already
-  // parses `wake_schedule.delayMs` from frontmatter but does not yet own
-  // trigger construction; that's Phase 2 scope.
-  const trigger: WakeTrigger = { kind: "delay-once", delayMs: 2000 };
+  const loader = new IdentityLoader({ rootDir: exampleRoot });
+  const loaded = await loader.load(agentDir);
+
+  // Build the wake trigger from role.md frontmatter. Hello-world has
+  // `delayMs: 2000`; the research-agent example has `cron: "0 18 * * 0"`
+  // (warn-and-fallback until scheduler lands cron).
+  const wakeSchedule = loaded.frontmatter.wake_schedule ?? { delayMs: CRON_FALLBACK_DELAY_MS };
+  const trigger: WakeTrigger = triggerFromFrontmatter(wakeSchedule, loaded.agentId.value);
 
   const registered: RegisteredAgent = registeredAgentFromLoadedIdentity(loaded, trigger);
 
   const executor = new SubprocessExecutor({
     resolveCommand: (context): SubprocessCommand => {
-      if (context.agentId.value !== "hello-world") {
+      if (context.agentId.value !== registered.agentId) {
         throw new Error(`resolveCommand: unknown agent ${context.agentId.value}`);
       }
       return {
@@ -324,7 +417,31 @@ export const bootHelloWorldDaemon = async (): Promise<void> => {
 
     let agentGithub: GithubClient | undefined;
     if (hasAnyWriteScope(agent)) {
-      if (provider?.has(GITHUB_TOKEN) === true) {
+      if (dryRun) {
+        // Dry-run: construct the client WITHOUT writeScopes so every
+        // mutation default-denies at the client layer per ADR-0017 §4.
+        // The client is still constructed (and logged) so the operator
+        // can see what the composition would look like, but any actual
+        // commit attempt gets a GithubWriteScopeError before leaving
+        // the process.
+        if (provider?.has(GITHUB_TOKEN) === true) {
+          agentGithub = createGithubClient({ token: provider.get(GITHUB_TOKEN) });
+        }
+        process.stdout.write(
+          `${JSON.stringify({
+            ts: new Date().toISOString(),
+            level: "info",
+            event: "daemon.compose.github.dryRun",
+            agentId: agent.agentId,
+            declared: {
+              issueComments: agent.githubWriteScopes.issueComments,
+              branchCommits: agent.githubWriteScopes.branchCommits,
+              labels: agent.githubWriteScopes.labels,
+            },
+            enforced: "default-deny (dry-run)",
+          })}\n`,
+        );
+      } else if (provider?.has(GITHUB_TOKEN) === true) {
         agentGithub = createGithubClient({
           token: provider.get(GITHUB_TOKEN),
           writeScopes: toClientWriteScopes(agent),
@@ -434,10 +551,22 @@ export const bootHelloWorldDaemon = async (): Promise<void> => {
 };
 
 /**
- * Resolve the absolute path to `<repo-root>/examples/hello-world-agent/`.
+ * Resolve the absolute path to `<repo-root>/examples/hello-world-agent/`,
+ * used as the default identity root when no `--root` is provided. The
+ * relative walk assumes this file lives at
+ * `packages/cli/dist/boot.js` (post-build) or `packages/cli/src/boot.ts`
+ * (tsc --noEmit / test).
  */
-const resolveExampleRoot = (): string => {
+const resolveHelloWorldRoot = (): string => {
   const here = dirname(fileURLToPath(import.meta.url));
   const repoRoot = resolve(here, "..", "..", "..");
   return resolve(repoRoot, "examples", "hello-world-agent");
+};
+
+/**
+ * Phase 1A / 1B entry point — preserved as a thin alias over
+ * {@link bootDaemon} so existing call sites and docs keep working.
+ */
+export const bootHelloWorldDaemon = async (): Promise<void> => {
+  await bootDaemon();
 };

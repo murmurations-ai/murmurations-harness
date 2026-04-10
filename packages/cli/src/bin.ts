@@ -2,32 +2,85 @@
 /**
  * `murmuration` CLI entry point.
  *
- * Phase 1A: `start` is the only functional command. Every other command
- * prints a helpful error and exits non-zero.
+ * Phase 1A shipped only `start` and it was hardcoded to the hello-world
+ * example. Phase 2D3 extends `start` with:
+ *
+ *   --root <path>   identity root directory (defaults to the bundled
+ *                   hello-world example)
+ *   --agent <id>    agent directory under <root>/agents/ (defaults to
+ *                   "hello-world")
+ *   --dry-run       construct every per-agent GithubClient WITHOUT
+ *                   writeScopes, so mutations default-deny at the
+ *                   client layer per ADR-0017 §4 (Phase 2C6 gate)
  */
 
-import { bootHelloWorldDaemon } from "./boot.js";
+import { bootDaemon } from "./boot.js";
 
 const argv = process.argv.slice(2);
 const command = argv[0];
+
+interface StartArgs {
+  readonly rootDir: string | undefined;
+  readonly agentDir: string | undefined;
+  readonly dryRun: boolean;
+}
+
+const parseStartArgs = (rest: readonly string[]): StartArgs => {
+  let rootDir: string | undefined;
+  let agentDir: string | undefined;
+  let dryRun = false;
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i];
+    if (arg === "--root") {
+      const next = rest[i + 1];
+      if (next === undefined) throw new Error("--root requires a value");
+      rootDir = next;
+      i++;
+    } else if (arg === "--agent") {
+      const next = rest[i + 1];
+      if (next === undefined) throw new Error("--agent requires a value");
+      agentDir = next;
+      i++;
+    } else if (arg === "--dry-run") {
+      dryRun = true;
+    } else {
+      throw new Error(`unknown argument: ${arg ?? "(undefined)"}`);
+    }
+  }
+  return { rootDir, agentDir, dryRun };
+};
 
 const usage = (): string =>
   `
 murmuration — Murmuration Harness CLI
 
 Usage:
-  murmuration start       Boot the daemon (Phase 1A: hello-world agent)
-  murmuration status      (Phase 1B) Print daemon status
-  murmuration stop        (Phase 1B) Send SIGTERM to a running daemon
-  murmuration init        (Phase 6) Run /init-murmuration interview
+  murmuration start [options]   Boot the daemon (Phase 2D)
+  murmuration status            (Phase 1B) Print daemon status
+  murmuration stop              (Phase 1B) Send SIGTERM to a running daemon
+  murmuration init              (Phase 6) Run /init-murmuration interview
 
-Phase 1A supports only \`start\`. See docs/PHASE-1-PLAN.md.
+start options:
+  --root <path>    Identity root directory (default: bundled hello-world example)
+  --agent <id>     Agent dir under <root>/agents/ (default: "hello-world")
+  --dry-run        Construct every GithubClient without writeScopes so
+                   all mutations default-deny at the client layer
+
+Examples:
+  murmuration start
+  murmuration start --root ../test-murmuration --agent 01-research
+  murmuration start --root ../test-murmuration --agent 01-research --dry-run
 `.trimStart();
 
 const main = async (): Promise<void> => {
   switch (command) {
     case "start": {
-      await bootHelloWorldDaemon();
+      const args = parseStartArgs(argv.slice(1));
+      await bootDaemon({
+        ...(args.rootDir !== undefined ? { rootDir: args.rootDir } : {}),
+        ...(args.agentDir !== undefined ? { agentDir: args.agentDir } : {}),
+        ...(args.dryRun ? { dryRun: true } : {}),
+      });
       break;
     }
     case undefined:
@@ -40,13 +93,13 @@ const main = async (): Promise<void> => {
     case "--version":
     case "-v":
     case "version": {
-      process.stdout.write("murmuration 0.0.0 (phase-1a)\n");
+      process.stdout.write("murmuration 0.0.0 (phase-2d)\n");
       break;
     }
     case "status":
     case "stop":
     case "init": {
-      process.stderr.write(`murmuration: \`${command}\` is not yet implemented in Phase 1A.\n`);
+      process.stderr.write(`murmuration: \`${command}\` is not yet implemented.\n`);
       process.stderr.write(usage());
       process.exit(2);
       break;
