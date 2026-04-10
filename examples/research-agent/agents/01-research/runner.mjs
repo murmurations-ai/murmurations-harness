@@ -176,7 +176,7 @@ Return **only** the digest markdown. Do NOT wrap the digest in a code fence. Do 
       model: "gemini-2.5-flash",
       messages: [{ role: "user", content: userPrompt }],
       systemPromptOverride: systemPrompt,
-      maxOutputTokens: 3000,
+      maxOutputTokens: 8000,
       temperature: 0.3,
     },
     { signal },
