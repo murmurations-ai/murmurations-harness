@@ -82,6 +82,57 @@ describe("DispatchExecutor", () => {
     expect(resultB.wakeSummary).toBe("agent-b ran");
   });
 
+  it("regression: waitForCompletion resolves the correct executor even when instanceIds differ only by suffix", async () => {
+    // This test reproduces the bug fixed in 88476f5: multiple
+    // InProcessExecutors shared the default instanceId "in-process",
+    // so DispatchExecutor.waitForCompletion matched the FIRST one in
+    // the map — which wasn't necessarily the one that spawned the
+    // handle. The fix gives each executor a unique instanceId.
+    //
+    // To catch regression: create two executors with DIFFERENT unique
+    // IDs and verify each handle resolves to the correct executor's
+    // runner output. If the dispatch naively matches the first
+    // executor, agent-b's handle would fail with "unknown handle".
+
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const runnerA: AgentRunner<FakeClients> = async () => ({ wakeSummary: "from-a" });
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const runnerB: AgentRunner<FakeClients> = async () => ({ wakeSummary: "from-b" });
+
+    // Unique instanceIds per agent — this is what boot.ts now does.
+    const executorA: AgentExecutor = new InProcessExecutor<FakeClients>({
+      resolveRunner: () => runnerA,
+      resolveClients: () => ({ tag: "a" }),
+      instanceId: "in-process-agent-a",
+    });
+    const executorB: AgentExecutor = new InProcessExecutor<FakeClients>({
+      resolveRunner: () => runnerB,
+      resolveClients: () => ({ tag: "b" }),
+      instanceId: "in-process-agent-b",
+    });
+
+    const dispatch = new DispatchExecutor(
+      new Map([
+        ["agent-a", executorA],
+        ["agent-b", executorB],
+      ]),
+    );
+
+    // Spawn B first, then A — if dispatch matches by iteration
+    // order instead of instanceId, B's handle would resolve against
+    // A's executor and fail.
+    const handleB = await dispatch.spawn(makeContext("agent-b"));
+    const handleA = await dispatch.spawn(makeContext("agent-a"));
+
+    const resultB = await dispatch.waitForCompletion(handleB);
+    const resultA = await dispatch.waitForCompletion(handleA);
+
+    expect(isCompleted(resultA)).toBe(true);
+    expect(resultA.wakeSummary).toBe("from-a");
+    expect(isCompleted(resultB)).toBe(true);
+    expect(resultB.wakeSummary).toBe("from-b");
+  });
+
   it("throws for an unregistered agentId", async () => {
     const dispatch = new DispatchExecutor(new Map());
     await expect(dispatch.spawn(makeContext("unknown"))).rejects.toThrow(/no executor registered/);
