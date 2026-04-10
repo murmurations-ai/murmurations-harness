@@ -89,24 +89,38 @@ const renderOverview = (
 
 const HR = dim("────────────────────────────────────────────────────");
 
-const renderPipeline = (agents: readonly AgentStatus[]): string => {
-  const lines = [` ${bold("Pipeline State")}`, ` ${HR}`];
+const renderPipeline = (agents: readonly AgentStatus[], cost: CostSummary): string => {
+  const lines = [` ${bold("Agents")}`, ` ${HR}`];
   if (agents.length === 0) {
     lines.push(`  ${dim("No agents discovered. Run: murmuration start --root <dir>")}`);
     return lines.join("\n");
   }
+
+  // Build a cost lookup from the cost summary for total per agent
+  const costMap = new Map(cost.perAgent.map((a) => [a.agentId, a]));
+  const maxCost = Math.max(...cost.perAgent.map((a) => a.totalMicros), 1);
+  const BAR_WIDTH = 8;
+
   for (const a of agents) {
     let marker: string;
-    if (a.outcome === "completed") marker = green("[ok]".padEnd(10));
-    else if (a.outcome === "failed") marker = red("[FAIL]".padEnd(10));
-    else if (a.outcome === "timed-out") marker = yellow("[TIMEOUT]".padEnd(10));
-    else if (a.outcome === "killed") marker = red("[KILLED]".padEnd(10));
-    else marker = dim("[--]".padEnd(10));
+    if (a.outcome === "completed") marker = green("[ok]");
+    else if (a.outcome === "failed") marker = red("[FAIL]");
+    else if (a.outcome === "timed-out") marker = yellow("[TOUT]");
+    else if (a.outcome === "killed") marker = red("[KILL]");
+    else marker = dim("[--]");
 
-    const staleFlag = a.stale ? yellow(" STALE") : "";
-    const time = a.lastWake ? a.lastWake.toISOString().slice(11, 16) : dim("never");
-    const next = a.nextWakeCountdown !== "--" ? dim(`  next: ${a.nextWakeCountdown}`) : "";
-    lines.push(`  ${marker} ${a.agentId.padEnd(24)} ${time}  ${a.costFormatted}${staleFlag}${next}`);
+    const staleFlag = a.stale ? yellow(" !") : "";
+    const time = a.lastWake ? a.lastWake.toISOString().slice(11, 16) : dim("--:--");
+    const next = a.nextWakeCountdown !== "--" ? a.nextWakeCountdown.padEnd(7) : dim("--".padEnd(7));
+
+    // Cost bar from aggregate total
+    const agentCost = costMap.get(a.agentId);
+    const totalCost = agentCost ? formatUsd(agentCost.totalMicros) : dim("$0.0000");
+    const wakes = agentCost ? String(agentCost.wakes).padStart(2) : dim(" 0");
+    const barLen = agentCost ? Math.max(0, Math.round((agentCost.totalMicros / maxCost) * BAR_WIDTH)) : 0;
+    const bar = barLen > 0 ? cyan("█".repeat(barLen)) + dim("░".repeat(BAR_WIDTH - barLen)) : dim("░".repeat(BAR_WIDTH));
+
+    lines.push(`  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time} ${dim("next")} ${next} ${totalCost} ${bar} ${dim(`${wakes}w`)}${staleFlag}`);
   }
   return lines.join("\n");
 };
@@ -180,26 +194,36 @@ const renderGovernance = (items: readonly GovernanceEntry[]): string => {
 
 const formatUsd = (micros: number): string => `$${(micros / 1_000_000).toFixed(4)}`;
 
-const renderCost = (cost: CostSummary): string => {
-  const lines = [` ${bold("Cost & Budget")}`, ` ${HR}`];
-  lines.push(`  Today:    ${bold(formatUsd(cost.todayMicros).padEnd(12))} (${String(cost.todayWakes)} wakes)`);
-  lines.push(`  Week:     ${formatUsd(cost.weekMicros).padEnd(12)} (${String(cost.weekWakes)} wakes)`);
-  lines.push(`  Month:    ${formatUsd(cost.monthMicros).padEnd(12)} (${String(cost.monthWakes)} wakes)`);
-  lines.push(`  ${dim(HR.slice(0, 40))}`);
+/** Compact cost + wakes sparkline — per-agent cost is in the Agents panel now. */
+const renderCostSummary = (cost: CostSummary): string => {
+  const lines = [` ${bold("Cost & Wakes")}`, ` ${HR}`];
+  lines.push(`  Today: ${bold(formatUsd(cost.todayMicros))} (${String(cost.todayWakes)}w)    Week: ${formatUsd(cost.weekMicros)} (${String(cost.weekWakes)}w)    Month: ${formatUsd(cost.monthMicros)} (${String(cost.monthWakes)}w)`);
 
-  // Sort by highest cost first + ASCII bar chart
-  const sorted = [...cost.perAgent].sort((a, b) => b.totalMicros - a.totalMicros);
-  const maxCost = sorted[0]?.totalMicros ?? 1;
-  const BAR_WIDTH = 12;
+  // Wakes-per-day sparkline (last 7 days)
+  const sparkChars = " ▁▂▃▄▅▆▇█";
+  const days: number[] = [];
+  const dayLabels: string[] = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 86_400_000);
+    dayLabels.push(d.toISOString().slice(8, 10));
+    days.push(0);
+  }
+  // Approximate: today's wakes in the last bucket, rest spread evenly.
+  // Proper per-day breakdown needs daily aggregation from index.jsonl
+  // which the shared dashboard-data layer will provide.
+  if (cost.weekWakes > 0) {
+    const otherDays = cost.weekWakes - cost.todayWakes;
+    const perDay = otherDays > 0 ? Math.round(otherDays / 6) : 0;
+    for (let i = 0; i < 6; i++) days[i] = perDay;
+    days[6] = cost.todayWakes;
+  }
+  const maxDay = Math.max(...days, 1);
+  const spark = days
+    .map((d) => sparkChars[Math.round((d / maxDay) * (sparkChars.length - 1))])
+    .join("");
 
-  for (const a of sorted.slice(0, 10)) {
-    const barLen = Math.max(1, Math.round((a.totalMicros / maxCost) * BAR_WIDTH));
-    const bar = cyan("█".repeat(barLen) + dim("░".repeat(BAR_WIDTH - barLen)));
-    lines.push(`  ${a.agentId.padEnd(24)} ${formatUsd(a.totalMicros).padEnd(10)} ${bar} ${dim(`${String(a.wakes)} wakes`)}`);
-  }
-  if (sorted.length > 10) {
-    lines.push(`  ${dim(`... and ${String(sorted.length - 10)} more agents`)}`);
-  }
+  lines.push(`  Wakes/day: ${cyan(spark)}  ${dim(dayLabels.join(" "))}`);
   return lines.join("\n");
 };
 
@@ -226,10 +250,10 @@ export const startDashboard = async (rootDir: string): Promise<void> => {
     const header = `  ${bold("Murmuration Dashboard")} ${dim("—")} ${dim(root)}  ${dim("[q] quit  [r] refresh")}\n`;
     const overview = renderOverview(pipeline, governance, cost);
     const panels = [
-      renderPipeline(pipeline),
+      renderPipeline(pipeline, cost),
+      renderCostSummary(cost),
       renderGovernance(governance),
       renderActivity(activity),
-      renderCost(cost),
     ].join("\n\n");
 
     display.setText(header + overview + "\n" + panels);
