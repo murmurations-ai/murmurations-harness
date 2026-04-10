@@ -162,21 +162,57 @@ const S3GovernancePlugin = {
   },
 
   async evaluateAction(agentId, action, context, store) {
-    // Phase 1 S3 authorization: simplified consent check.
+    // S3 authorization: check whether a ratified governance item
+    // covers the requested action.
     //
-    // For actions that require consent (e.g. "publish-article",
-    // "commit-to-main"), check if there's a ratified governance
-    // item covering this action. If yes → allow. If no ratified
-    // item exists, check whether the action falls under the agent's
-    // autonomous tier (per the decision-tiers in their circle doc).
+    // The `context` object may carry a `tier` field ("autonomous",
+    // "notify", "consent", "source") from the agent's role.md
+    // decision-tiers section. The plugin uses this to decide whether
+    // the store needs a ratified item or the agent can proceed.
     //
-    // For Phase 1, we allow everything and log the check. Real
-    // consent rounds (blocking until all circle members respond)
-    // are Phase 3 work.
-    //
-    // The store is available for future use: store.query({ kind: "proposal", state: "ratified" })
-    // would find ratified proposals covering the requested action.
+    // Flow:
+    //   tier "autonomous" → always allow
+    //   tier "notify"     → allow + (caller logs)
+    //   tier "consent"    → check store for ratified proposal
+    //                       covering this action → allow if found,
+    //                       deny if not
+    //   tier "source"     → deny (requires explicit Source approval)
+    //   no tier specified → allow (backward compat / NoOp fallback)
 
+    const ctx = typeof context === "object" && context !== null ? context : {};
+    const tier = /** @type {string|undefined} */ (/** @type {any} */ (ctx).tier);
+
+    if (!tier || tier === "autonomous" || tier === "notify") {
+      return { allow: true };
+    }
+
+    if (tier === "source") {
+      return {
+        allow: false,
+        reason: `action "${action}" requires explicit Source approval (tier: source)`,
+      };
+    }
+
+    if (tier === "consent") {
+      // Look for a ratified proposal that covers this action.
+      // We match on `payload.action` in the governance item.
+      const ratified = store.query({ kind: "proposal", state: "ratified" });
+      const covering = ratified.find((item) => {
+        const payload = typeof item.payload === "object" && item.payload !== null ? item.payload : {};
+        return /** @type {any} */ (payload).action === action;
+      });
+
+      if (covering) {
+        return { allow: true };
+      }
+
+      return {
+        allow: false,
+        reason: `action "${action}" requires a ratified consent-round proposal (tier: consent). Open a [CONSENT] issue to start the round.`,
+      };
+    }
+
+    // Unknown tier — allow with a warning (forward compatibility).
     return { allow: true };
   },
 

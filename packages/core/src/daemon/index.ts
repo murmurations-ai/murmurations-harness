@@ -385,6 +385,7 @@ export class Daemon {
    * store (#33).
    */
   readonly #governanceInbox = new Map<string, EmittedGovernanceEvent[]>();
+  readonly #governanceTimers = new Map<string, NodeJS.Timeout>();
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
 
@@ -450,6 +451,7 @@ export class Daemon {
             plugin: this.#governance.name,
             itemsRestored: count,
           });
+          this.#armGovernanceTimeouts();
         }
       })
       .catch(() => {
@@ -509,6 +511,10 @@ export class Daemon {
       clearInterval(this.#heartbeatHandle);
       this.#heartbeatHandle = undefined;
     }
+    for (const timer of this.#governanceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.#governanceTimers.clear();
     await this.#scheduler.stop();
     await Promise.allSettled([...this.#inFlight]);
     try {
@@ -605,6 +611,9 @@ export class Daemon {
               this.#dispatchGovernanceRoute(result, decision.event, route);
             }
           }
+          // Re-arm timeouts in case the plugin created or advanced
+          // governance items during onEventsEmitted.
+          this.#armGovernanceTimeouts();
         } catch (err) {
           this.#logger.error("daemon.governance.route.failed", {
             wakeId: result.wakeId.value,
@@ -620,6 +629,58 @@ export class Daemon {
         wakeId: event.wakeId.value,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  /**
+   * Arm governance timeout timers for all non-terminal items. For each
+   * item in the store whose current state has a transition with
+   * `timeoutMs`, schedule a timer that auto-fires the transition when
+   * the timeout elapses. Called at daemon start (for restored items)
+   * and after every governance transition.
+   */
+  #armGovernanceTimeouts(): void {
+    // Clear existing timers and re-arm from scratch. This is O(n)
+    // in the number of governance items but n is small (< 100 even
+    // for a busy murmuration) and runs infrequently (only on
+    // governance events, not on every wake).
+    for (const timer of this.#governanceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.#governanceTimers.clear();
+
+    for (const graph of this.#governanceStore.graphs()) {
+      for (const rule of graph.transitions) {
+        if (rule.timeoutMs === undefined) continue;
+        // Find items in the `from` state for this timeout rule.
+        const items = this.#governanceStore.query({ kind: graph.kind, state: rule.from });
+        for (const item of items) {
+          // Already have a timer? Skip.
+          if (this.#governanceTimers.has(item.id)) continue;
+          const timer = setTimeout(() => {
+            if (!this.#running) return;
+            try {
+              const updated = this.#governanceStore.transition(item.id, rule.to, "timeout");
+              this.#logger.info("daemon.governance.timeout", {
+                itemId: item.id,
+                kind: item.kind,
+                from: rule.from,
+                to: rule.to,
+                timeoutMs: rule.timeoutMs,
+              });
+              this.#governance.onTransition?.(
+                updated,
+                updated.history[updated.history.length - 1]!,
+              );
+            } catch {
+              // Transition may no longer be valid if the item was
+              // advanced by another path — that's fine.
+            }
+            this.#governanceTimers.delete(item.id);
+          }, rule.timeoutMs);
+          this.#governanceTimers.set(item.id, timer);
+        }
+      }
     }
   }
 
