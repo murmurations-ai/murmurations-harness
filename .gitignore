@@ -71,6 +71,11 @@ web_modules/
 .env.*
 !.env.example
 
+# Run artifacts from local smoke boots of the shipped examples.
+# The .murmuration/runs/ tree is written by RunArtifactWriter (2D5)
+# and is always a runtime side-effect, never a committed fixture.
+examples/**/.murmuration/
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

@@ -22,16 +22,19 @@
 
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   Daemon,
   IdentityLoader,
+  InProcessExecutor,
   RunArtifactWriter,
   SubprocessExecutor,
   makeSecretKey,
   makeUSDMicros,
   registeredAgentFromLoadedIdentity,
+  type AgentExecutor,
+  type AgentRunner,
   type BudgetCeiling,
   type DaemonConfig,
   type RegisteredAgent,
@@ -196,6 +199,106 @@ interface AgentComposition {
   readonly budgetCeiling: BudgetCeiling | null;
 }
 
+/**
+ * Shape the in-process runner receives in its `clients` bag. The
+ * LLM and GitHub fields are optional because an agent may not have
+ * an LLM pin, or its writeScopes may have been denied (dry-run or
+ * missing token). The runner must handle the `undefined` case.
+ */
+export interface ResearchAgentClients {
+  readonly llm?: LLMClient;
+  readonly github?: GithubClient;
+}
+
+/**
+ * Options passed to {@link buildAgentClients}. The `costBuilder`
+ * field is the per-wake seam: when present, the LLM client is
+ * constructed with `defaultCostHook` bound to that builder via
+ * {@link makeDaemonHook}, so every `llm.complete()` call inside the
+ * wake automatically fires into THIS wake's cost record per
+ * ADR-0014 §Cost hook contract. When absent, the LLM client is
+ * constructed without a cost hook — used by the boot-time
+ * composition loop purely for validation + logging.
+ */
+interface BuildAgentClientsArgs {
+  readonly agent: RegisteredAgent;
+  readonly provider: DotenvSecretsProvider | undefined;
+  readonly costBuilder?: WakeCostBuilder;
+  readonly dryRun: boolean;
+  readonly ollamaBaseUrl: string | undefined;
+}
+
+interface BuildAgentClientsResult {
+  readonly llm?: LLMClient;
+  readonly github?: GithubClient;
+  readonly llmSkipReason?: string;
+  readonly githubSkipReason?: string;
+}
+
+/**
+ * Construct the per-agent client bag from the composition inputs.
+ * Used twice: once at boot for the validation + logging pass (with
+ * no cost builder), and once per wake inside
+ * `InProcessExecutor.resolveClients` (with the wake's own cost
+ * builder) so the cost hook lands on the right record.
+ */
+const buildAgentClients = ({
+  agent,
+  provider,
+  costBuilder,
+  dryRun,
+  ollamaBaseUrl,
+}: BuildAgentClientsArgs): BuildAgentClientsResult => {
+  const result: {
+    llm?: LLMClient;
+    github?: GithubClient;
+    llmSkipReason?: string;
+    githubSkipReason?: string;
+  } = {};
+
+  if (agent.llm) {
+    const keyName = PROVIDER_SECRET_KEY[agent.llm.provider];
+    const costHook = costBuilder ? makeDaemonHook(costBuilder) : undefined;
+    if (agent.llm.provider === "ollama") {
+      result.llm = createLLMClient({
+        provider: "ollama",
+        token: null,
+        ...(agent.llm.model !== undefined ? { model: agent.llm.model } : {}),
+        ...(ollamaBaseUrl !== undefined ? { baseUrl: ollamaBaseUrl } : {}),
+        ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+      });
+    } else if (keyName !== null && provider?.has(makeSecretKey(keyName)) === true) {
+      const token = provider.get(makeSecretKey(keyName));
+      result.llm = createLLMClient({
+        provider: agent.llm.provider,
+        token,
+        ...(agent.llm.model !== undefined ? { model: agent.llm.model } : {}),
+        ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+      });
+    } else {
+      result.llmSkipReason = "provider api key missing from secrets";
+    }
+  }
+
+  if (hasAnyWriteScope(agent)) {
+    if (dryRun) {
+      if (provider?.has(GITHUB_TOKEN) === true) {
+        result.github = createGithubClient({ token: provider.get(GITHUB_TOKEN) });
+      }
+      // dry-run never sets githubSkipReason; the caller logs the dryRun event.
+    } else if (provider?.has(GITHUB_TOKEN) === true) {
+      result.github = createGithubClient({
+        token: provider.get(GITHUB_TOKEN),
+        writeScopes: toClientWriteScopes(agent),
+      });
+    } else {
+      result.githubSkipReason = "GITHUB_TOKEN absent; write-scoped client not constructed";
+    }
+  }
+
+  return result;
+};
+
 /** Fallback delay used when a role declares only an event trigger — the
  *  event bus isn't wired yet, so the boot path falls back to a single
  *  delayed wake so the operator can still smoke-boot. */
@@ -302,7 +405,11 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   const registered: RegisteredAgent = registeredAgentFromLoadedIdentity(loaded, trigger);
 
-  const executor = new SubprocessExecutor({
+  // A provisional subprocess executor is used for the first-pass daemon
+  // (which only calls loadSecrets() before being discarded). The
+  // "effective" executor is selected AFTER secrets load so an LLM
+  // agent can get the InProcessExecutor with tokens already loaded.
+  const provisionalExecutor = new SubprocessExecutor({
     resolveCommand: (context): SubprocessCommand => {
       if (context.agentId.value !== registered.agentId) {
         throw new Error(`resolveCommand: unknown agent ${context.agentId.value}`);
@@ -349,7 +456,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   });
 
   const firstPassDaemon = new Daemon({
-    executor,
+    executor: provisionalExecutor,
     agents: [registered],
     signalAggregator: filesystemOnlyAggregator,
     runArtifactWriter,
@@ -390,49 +497,33 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const compositions: AgentComposition[] = [];
   const ollamaBaseUrl = process.env.OLLAMA_BASE_URL;
   for (const agent of agents) {
-    let llmClient: LLMClient | undefined;
-    if (agent.llm) {
-      const keyName = PROVIDER_SECRET_KEY[agent.llm.provider];
-      if (agent.llm.provider === "ollama") {
-        llmClient = createLLMClient({
-          provider: "ollama",
-          token: null,
-          ...(agent.llm.model !== undefined ? { model: agent.llm.model } : {}),
-          ...(ollamaBaseUrl !== undefined ? { baseUrl: ollamaBaseUrl } : {}),
-        });
-      } else if (keyName !== null && provider?.has(makeSecretKey(keyName)) === true) {
-        const token = provider.get(makeSecretKey(keyName));
-        llmClient = createLLMClient({
+    // Boot-time validation pass: build a throw-away client bag with
+    // NO cost builder so we just verify everything can be wired. The
+    // actual per-wake clients are constructed inside
+    // InProcessExecutor.resolveClients below, where the wake's own
+    // cost builder is available and can be bound into the LLM hook.
+    const validation = buildAgentClients({
+      agent,
+      provider,
+      dryRun,
+      ollamaBaseUrl,
+    });
+
+    if (agent.llm && validation.llmSkipReason) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ts: new Date().toISOString(),
+          level: "warn",
+          event: "daemon.compose.llm.skipped",
+          agentId: agent.agentId,
           provider: agent.llm.provider,
-          token,
-          ...(agent.llm.model !== undefined ? { model: agent.llm.model } : {}),
-        });
-      } else {
-        process.stdout.write(
-          `${JSON.stringify({
-            ts: new Date().toISOString(),
-            level: "warn",
-            event: "daemon.compose.llm.skipped",
-            agentId: agent.agentId,
-            provider: agent.llm.provider,
-            reason: "provider api key missing from secrets",
-          })}\n`,
-        );
-      }
+          reason: validation.llmSkipReason,
+        })}\n`,
+      );
     }
 
-    let agentGithub: GithubClient | undefined;
     if (hasAnyWriteScope(agent)) {
       if (dryRun) {
-        // Dry-run: construct the client WITHOUT writeScopes so every
-        // mutation default-denies at the client layer per ADR-0017 §4.
-        // The client is still constructed (and logged) so the operator
-        // can see what the composition would look like, but any actual
-        // commit attempt gets a GithubWriteScopeError before leaving
-        // the process.
-        if (provider?.has(GITHUB_TOKEN) === true) {
-          agentGithub = createGithubClient({ token: provider.get(GITHUB_TOKEN) });
-        }
         process.stdout.write(
           `${JSON.stringify({
             ts: new Date().toISOString(),
@@ -447,19 +538,14 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
             enforced: "default-deny (dry-run)",
           })}\n`,
         );
-      } else if (provider?.has(GITHUB_TOKEN) === true) {
-        agentGithub = createGithubClient({
-          token: provider.get(GITHUB_TOKEN),
-          writeScopes: toClientWriteScopes(agent),
-        });
-      } else {
+      } else if (validation.githubSkipReason) {
         process.stdout.write(
           `${JSON.stringify({
             ts: new Date().toISOString(),
             level: "warn",
             event: "daemon.compose.github.skipped",
             agentId: agent.agentId,
-            reason: "GITHUB_TOKEN absent; write-scoped client not constructed",
+            reason: validation.githubSkipReason,
           })}\n`,
         );
       }
@@ -469,8 +555,8 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
     compositions.push({
       agentId: agent.agentId,
-      ...(llmClient ? { llm: llmClient } : {}),
-      ...(agentGithub ? { github: agentGithub } : {}),
+      ...(validation.llm ? { llm: validation.llm } : {}),
+      ...(validation.github ? { github: validation.github } : {}),
       budgetCeiling,
     });
 
@@ -484,10 +570,10 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
           ? {
               provider: agent.llm.provider,
               model: agent.llm.model ?? null,
-              instantiated: llmClient !== undefined,
+              instantiated: validation.llm !== undefined,
             }
           : null,
-        githubWriteScoped: agentGithub !== undefined,
+        githubWriteScoped: validation.github !== undefined,
         budgetCeiling:
           budgetCeiling === null
             ? null
@@ -500,22 +586,79 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     );
   }
 
+  // -------------------------------------------------------------------
+  // Effective executor selection (Phase 2D8)
+  //
+  // If the registered agent declares an LLM pin, swap to the
+  // InProcessExecutor so per-wake LLM + GitHub clients can be
+  // constructed with the cost hook bound to the wake's builder.
+  // Otherwise (hello-world and any other non-LLM agent) keep the
+  // subprocess executor that was used for the first-pass daemon.
+  //
+  // Runner resolution: by convention the agent's runner module lives
+  // at `<rootDir>/agents/<agentDir>/runner.mjs` and exposes a
+  // default export that is an `AgentRunner<ResearchAgentClients>`.
+  // Dynamic import keeps core + cli dep-free of specific agent code.
+  // -------------------------------------------------------------------
+
+  const effectiveExecutor: AgentExecutor = registered.llm
+    ? new InProcessExecutor<ResearchAgentClients>({
+        resolveRunner: async ({ agentId }) => {
+          if (agentId !== registered.agentId) {
+            throw new Error(`resolveRunner: unknown agent ${agentId}`);
+          }
+          const runnerPath = resolve(exampleRoot, "agents", agentDir, "runner.mjs");
+          const mod = (await import(pathToFileURL(runnerPath).href)) as {
+            default?: unknown;
+            runWake?: unknown;
+          };
+          const candidate: unknown = mod.default ?? mod.runWake;
+          if (typeof candidate !== "function") {
+            throw new Error(
+              `runner at ${runnerPath} must export a default function or a named \`runWake\` function`,
+            );
+          }
+          return candidate as AgentRunner<ResearchAgentClients>;
+        },
+        resolveClients: ({ costBuilder }) => {
+          const wakeClients = buildAgentClients({
+            agent: registered,
+            provider,
+            costBuilder,
+            dryRun,
+            ollamaBaseUrl,
+          });
+          return {
+            ...(wakeClients.llm ? { llm: wakeClients.llm } : {}),
+            ...(wakeClients.github ? { github: wakeClients.github } : {}),
+          };
+        },
+      })
+    : provisionalExecutor;
+
   // Second pass: if we got a github client, rebuild the daemon with
   // an upgraded aggregator. DaemonConfig fields are readonly by
   // design (preventing mid-run mutation), so rebuilding is cheap
   // and honest.
-  const effectiveDaemon: Daemon = githubClient
+  // Always rebuild the effective daemon when the executor changes
+  // (LLM agents) or when a github client becomes available. Only
+  // keep the first-pass daemon if neither condition applies — which
+  // is the hello-world / no-token path.
+  const needsRebuild = effectiveExecutor !== provisionalExecutor || githubClient !== undefined;
+  const effectiveDaemon: Daemon = needsRebuild
     ? new Daemon({
-        executor,
+        executor: effectiveExecutor,
         agents: [registered],
-        signalAggregator: new DefaultSignalAggregator({
-          rootDir: exampleRoot,
-          github: githubClient,
-          // No scopes configured by default — adopters set this via
-          // real murmuration config. Hello-world leaves it empty so
-          // the aggregator exercises filesystem sources only.
-          githubScopes: [],
-        }),
+        signalAggregator: githubClient
+          ? new DefaultSignalAggregator({
+              rootDir: exampleRoot,
+              github: githubClient,
+              // No scopes configured by default — adopters set this via
+              // real murmuration config. Hello-world leaves it empty so
+              // the aggregator exercises filesystem sources only.
+              githubScopes: [],
+            })
+          : filesystemOnlyAggregator,
         runArtifactWriter,
         ...(secretsBlock ? { secrets: secretsBlock } : {}),
       })
