@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
 
 import { makeAgentId } from "../execution/index.js";
 import { GovernanceStateStore, NoOpGovernancePlugin, type GovernanceStateGraph } from "./index.js";
@@ -193,5 +197,65 @@ describe("NoOpGovernancePlugin", () => {
       store,
     );
     expect(decisions).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Durable persistence
+// ---------------------------------------------------------------------------
+
+describe("GovernanceStateStore persistence", () => {
+  let persistDir = "";
+
+  afterEach(async () => {
+    if (persistDir) await rm(persistDir, { recursive: true, force: true });
+  });
+
+  it("persists items to disk and restores them on load()", async () => {
+    persistDir = await mkdtemp(join(tmpdir(), "gov-persist-"));
+    const AGENT = makeAgentId("01-research");
+
+    // Write phase
+    const store1 = new GovernanceStateStore({ persistDir });
+    store1.registerGraph(S3_TENSION);
+    const item = store1.create("tension", AGENT, { topic: "pricing" });
+    store1.transition(item.id, "deliberating", AGENT.value, "needs discussion");
+    await store1.flush();
+
+    // Verify file exists
+    const contents = await readFile(join(persistDir, "items.jsonl"), "utf8");
+    expect(contents.trim().length).toBeGreaterThan(0);
+
+    // Read phase — new store, same persistDir
+    const store2 = new GovernanceStateStore({ persistDir });
+    store2.registerGraph(S3_TENSION);
+    const loaded = await store2.load();
+    expect(loaded).toBe(1);
+
+    const restored = store2.get(item.id);
+    expect(restored).toBeDefined();
+    expect(restored?.currentState).toBe("deliberating");
+    expect(restored?.history).toHaveLength(1);
+    expect(restored?.history[0]?.reason).toBe("needs discussion");
+  });
+
+  it("load returns 0 when no file exists", async () => {
+    persistDir = await mkdtemp(join(tmpdir(), "gov-persist-"));
+    const store = new GovernanceStateStore({ persistDir });
+    const loaded = await store.load();
+    expect(loaded).toBe(0);
+  });
+
+  it("load skips malformed lines gracefully", async () => {
+    persistDir = await mkdtemp(join(tmpdir(), "gov-persist-"));
+    const { writeFile: wf } = await import("node:fs/promises");
+    await wf(
+      join(persistDir, "items.jsonl"),
+      '{"id":"good","kind":"tension","currentState":"open","payload":{},"createdBy":{"value":"x"},"createdAt":"2026-01-01T00:00:00.000Z","reviewAt":null,"history":[]}\nnot valid json\n',
+      "utf8",
+    );
+    const store = new GovernanceStateStore({ persistDir });
+    const loaded = await store.load();
+    expect(loaded).toBe(1); // good line loaded, bad line skipped
   });
 });

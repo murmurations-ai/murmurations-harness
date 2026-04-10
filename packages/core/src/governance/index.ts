@@ -169,6 +169,7 @@ export class GovernanceStateStore {
   readonly #graphs = new Map<string, GovernanceStateGraph>();
   readonly #now: () => Date;
   readonly #persistDir: string | undefined;
+  #persistPending: Promise<void> | null = null;
 
   public constructor(options: { readonly now?: () => Date; readonly persistDir?: string } = {}) {
     this.#now = options.now ?? ((): Date => new Date());
@@ -255,7 +256,7 @@ export class GovernanceStateStore {
       history: [],
     };
     this.#items.set(item.id, item);
-    void this.#persist(item);
+    this.#persistPending = this.#persist(item);
     return item;
   }
 
@@ -351,6 +352,12 @@ export class GovernanceStateStore {
   /** How many items are tracked (for logging). */
   public size(): number {
     return this.#items.size;
+  }
+
+  /** Wait for any pending persistence writes to complete. Tests use
+   *  this to ensure the file is flushed before reading it back. */
+  public async flush(): Promise<void> {
+    if (this.#persistPending) await this.#persistPending;
   }
 
   /**
