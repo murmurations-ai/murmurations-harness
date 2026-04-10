@@ -195,17 +195,21 @@ interface AgentComposition {
   readonly budgetCeiling: BudgetCeiling | null;
 }
 
-/** Fallback delay used when a role declares a cron wake but the scheduler
- *  doesn't yet support cron triggers. See `triggerFromFrontmatter`. */
-const CRON_FALLBACK_DELAY_MS = 2000;
+/** Fallback delay used when a role declares only an event trigger — the
+ *  event bus isn't wired yet, so the boot path falls back to a single
+ *  delayed wake so the operator can still smoke-boot. */
+const EVENT_FALLBACK_DELAY_MS = 2000;
 
 /**
  * Build a {@link WakeTrigger} from a role.md `wake_schedule` block. The
- * identity loader already validates the schema (Zod), so this helper
- * only chooses a shape based on which field is present. `cron` triggers
- * currently warn and fall back to a single delayed wake because the
- * Phase 1A TimerScheduler's cron path is a stub — real cron parsing
- * is a separate scheduler task. Events are not yet supported either.
+ * identity loader already validates the schema (Zod) and the cron
+ * expression (via cron-parser), so this helper only chooses a shape
+ * based on which field is present.
+ *
+ * Precedence when multiple fields are set: `cron` > `intervalMs` >
+ * `delayMs` > `events`. In practice a role should set exactly one,
+ * but the precedence is deterministic and documented here so it
+ * can't silently change.
  */
 const triggerFromFrontmatter = (
   wakeSchedule: {
@@ -216,26 +220,14 @@ const triggerFromFrontmatter = (
   },
   agentId: string,
 ): WakeTrigger => {
-  if (wakeSchedule.delayMs !== undefined) {
-    return { kind: "delay-once", delayMs: wakeSchedule.delayMs };
+  if (wakeSchedule.cron !== undefined) {
+    return { kind: "cron", expression: wakeSchedule.cron };
   }
   if (wakeSchedule.intervalMs !== undefined) {
     return { kind: "interval", intervalMs: wakeSchedule.intervalMs };
   }
-  if (wakeSchedule.cron !== undefined) {
-    process.stdout.write(
-      `${JSON.stringify({
-        ts: new Date().toISOString(),
-        level: "warn",
-        event: "daemon.boot.cron.fallback",
-        agentId,
-        cron: wakeSchedule.cron,
-        reason:
-          "cron triggers are not yet executed by the TimerScheduler; falling back to single delay-once wake for this session",
-        fallbackDelayMs: CRON_FALLBACK_DELAY_MS,
-      })}\n`,
-    );
-    return { kind: "delay-once", delayMs: CRON_FALLBACK_DELAY_MS };
+  if (wakeSchedule.delayMs !== undefined) {
+    return { kind: "delay-once", delayMs: wakeSchedule.delayMs };
   }
   if (wakeSchedule.events && wakeSchedule.events.length > 0) {
     process.stdout.write(
@@ -247,10 +239,10 @@ const triggerFromFrontmatter = (
         events: wakeSchedule.events,
         reason:
           "event triggers are not yet wired to a dispatch bus; falling back to single delay-once wake for this session",
-        fallbackDelayMs: CRON_FALLBACK_DELAY_MS,
+        fallbackDelayMs: EVENT_FALLBACK_DELAY_MS,
       })}\n`,
     );
-    return { kind: "delay-once", delayMs: CRON_FALLBACK_DELAY_MS };
+    return { kind: "delay-once", delayMs: EVENT_FALLBACK_DELAY_MS };
   }
   // Schema would have caught this, but be explicit.
   throw new Error(`role ${agentId} declares no valid wake_schedule trigger`);
@@ -300,7 +292,11 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   // Build the wake trigger from role.md frontmatter. Hello-world has
   // `delayMs: 2000`; the research-agent example has `cron: "0 18 * * 0"`
   // (warn-and-fallback until scheduler lands cron).
-  const wakeSchedule = loaded.frontmatter.wake_schedule ?? { delayMs: CRON_FALLBACK_DELAY_MS };
+  // Schema-wise `wake_schedule` is optional; if an agent declares none,
+  // fall back to a single delayed wake so the daemon still has something
+  // to fire. This preserves the Phase 1A hello-world behavior for any
+  // role.md that omits wake_schedule entirely.
+  const wakeSchedule = loaded.frontmatter.wake_schedule ?? { delayMs: EVENT_FALLBACK_DELAY_MS };
   const trigger: WakeTrigger = triggerFromFrontmatter(wakeSchedule, loaded.agentId.value);
 
   const registered: RegisteredAgent = registeredAgentFromLoadedIdentity(loaded, trigger);

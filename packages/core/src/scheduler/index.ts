@@ -1,10 +1,22 @@
 /**
  * Scheduler — fires agent wakes on cron + event triggers.
  *
- * Phase 1A scope: a single `TimerScheduler` that supports one-shot
- * delayed wakes (hello-world fires after N milliseconds) plus repeated
- * interval wakes. Real cron parsing and event triggers land in Phase 1B
- * per PHASE-1-PLAN.md step B3.
+ * `TimerScheduler` supports four trigger kinds:
+ *
+ *   - `delay-once`  — one-shot setTimeout after N ms
+ *   - `interval`    — setInterval repeating every N ms
+ *   - `cron`        — compute the next fire time via cron-parser,
+ *                     setTimeout to that delta, and re-arm on fire
+ *   - `event`       — still a stub (Phase 3 event bus)
+ *
+ * Cron support landed in Phase 2D step 2D4. Expressions are parsed
+ * with `tz: "UTC"` always — `0 18 * * 0` means Sunday 18:00 UTC
+ * regardless of the operator's local timezone. This matches the
+ * ADR-0016 role template convention and makes wake timings
+ * deterministic across machines and CI. Per-role timezone overrides
+ * (the EP manifest's `tz: "America/Vancouver"` pattern) are a
+ * follow-up that will land with a `wake_schedule.tz` field on
+ * the role template.
  *
  * Not pluggable — core component per spec §4.1.
  *
@@ -12,6 +24,8 @@
  */
 
 import { randomUUID } from "node:crypto";
+
+import cronParser from "cron-parser";
 
 import type { AgentId, WakeId, WakeReason } from "../execution/index.js";
 import { makeWakeId } from "../execution/index.js";
@@ -23,15 +37,14 @@ import { makeWakeId } from "../execution/index.js";
 /**
  * When and how a scheduled agent should wake.
  *
- * Phase 1A supports `delay-once` and `interval`. `cron` and
- * `event` are placeholders that will be filled out in Phase 1B (B3).
+ * `delay-once`, `interval`, and `cron` are fully implemented. `event`
+ * is still a stub pending the Phase 3 event bus.
  */
 export type WakeTrigger =
   | { readonly kind: "delay-once"; readonly delayMs: number }
   | { readonly kind: "interval"; readonly intervalMs: number }
-  // TODO(B3): real cron parser
   | { readonly kind: "cron"; readonly expression: string }
-  // TODO(B3): event bus wiring
+  // TODO(phase-3): event bus wiring
   | { readonly kind: "event"; readonly eventType: string };
 
 // ---------------------------------------------------------------------------
@@ -167,10 +180,12 @@ export class TimerScheduler implements Scheduler {
         break;
       }
       case "cron": {
-        // TODO(B3): real cron parser. For Phase 1A, log and skip.
-        console.warn(
-          `[scheduler] cron triggers not yet supported (agent=${entry.agentId.value}, expr=${entry.trigger.expression})`,
-        );
+        // Compute the next fire time from *now*, setTimeout to the
+        // delta, then on fire re-arm recursively. Each re-arm is a
+        // fresh setTimeout so the scheduler never accumulates drift
+        // from accumulated setTimeout lateness — cron-parser always
+        // recomputes from the current wall clock.
+        this.#armCron(entry);
         break;
       }
       case "event": {
@@ -181,6 +196,60 @@ export class TimerScheduler implements Scheduler {
         break;
       }
     }
+  }
+
+  /**
+   * Arm (or re-arm) a cron-triggered entry. Computes the next fire
+   * time from `new Date()` via cron-parser, setTimeout to the delta,
+   * and on fire recursively re-arms itself. If the entry has been
+   * unscheduled or the scheduler stopped between arm and fire, the
+   * timeout callback exits without firing.
+   *
+   * Malformed expressions should have been caught at frontmatter
+   * parse time (the identity loader validates cron strings via the
+   * same cron-parser library), but if a caller bypasses the loader
+   * and schedules a bad expression directly, the catch logs the
+   * error and leaves the entry un-armed — the scheduler continues
+   * running for other agents.
+   */
+  #armCron(entry: ScheduledEntry): void {
+    if (entry.trigger.kind !== "cron") return;
+    const expression = entry.trigger.expression;
+
+    let delayMs: number;
+    try {
+      const parsed = cronParser.parseExpression(expression, {
+        currentDate: new Date(),
+        tz: "UTC",
+      });
+      const next = parsed.next();
+      // cron-parser returns a CronDate whose `getTime()` is the next
+      // fire epoch-ms.
+      const nextMs = next.getTime();
+      delayMs = Math.max(0, nextMs - Date.now());
+    } catch (error) {
+      console.error(
+        `[scheduler] failed to compute next fire time for agent ${entry.agentId.value} (expr=${expression}):`,
+        error,
+      );
+      return;
+    }
+
+    entry.timerHandle = setTimeout(() => {
+      entry.timerHandle = undefined;
+      // If the scheduler was stopped or this entry unscheduled during
+      // the wait, #running/the entry map will catch it in #fire and
+      // the re-arm below.
+      void (async (): Promise<void> => {
+        await this.#fire(entry, {
+          kind: "scheduled",
+          cronExpression: expression,
+        });
+        if (this.#running && this.#entries.get(entry.agentId.value) === entry) {
+          this.#armCron(entry);
+        }
+      })();
+    }, delayMs);
   }
 
   async #fire(entry: ScheduledEntry, wakeReason: WakeReason): Promise<void> {

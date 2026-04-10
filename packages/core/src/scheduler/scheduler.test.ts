@@ -177,4 +177,132 @@ describe("TimerScheduler", () => {
 
     await scheduler.stop();
   });
+
+  // -------------------------------------------------------------------
+  // Cron (2D4)
+  // -------------------------------------------------------------------
+
+  it("cron — fires at the next matching minute, then re-arms", async () => {
+    // Anchor the test clock at 2026-04-09 12:00:00 UTC so the cron
+    // deltas are deterministic and don't depend on whatever day the
+    // CI machine is on.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-09T12:00:00.000Z"));
+
+    const scheduler = new TimerScheduler();
+    const agentId = makeAgentId("cron-every-minute");
+
+    const fired: ScheduledWakeEvent[] = [];
+    scheduler.onWake((event) => {
+      fired.push(event);
+    });
+
+    // `* * * * *` — every minute, at second 0.
+    scheduler.schedule(agentId, { kind: "cron", expression: "* * * * *" });
+    scheduler.start();
+
+    // Before the next minute rolls, nothing should have fired.
+    expect(fired).toHaveLength(0);
+
+    // Advance to the first minute boundary (60s from now).
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.wakeReason).toEqual({
+      kind: "scheduled",
+      cronExpression: "* * * * *",
+    });
+
+    // Re-arm kicks the next timeout. Advance another full minute.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fired).toHaveLength(2);
+
+    // And a third, to prove the re-arm loop keeps going.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fired).toHaveLength(3);
+
+    await scheduler.stop();
+  });
+
+  it("cron — respects the parsed next-fire time when expression has larger cadence", async () => {
+    // Anchor at 2026-04-09 17:45:00 UTC (a Thursday). The research-agent
+    // example uses `0 18 * * 0` (Sunday 18:00 UTC). Next fire after
+    // Thursday 17:45 is Sunday 2026-04-12 18:00 — that's 3 days + 15m:
+    //   72h * 3600s * 1000ms + 15m * 60s * 1000ms = 260_100_000 ms.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-09T17:45:00.000Z"));
+
+    const scheduler = new TimerScheduler();
+    const agentId = makeAgentId("cron-weekly");
+
+    const fired: ScheduledWakeEvent[] = [];
+    scheduler.onWake((event) => {
+      fired.push(event);
+    });
+
+    scheduler.schedule(agentId, { kind: "cron", expression: "0 18 * * 0" });
+    scheduler.start();
+
+    // Nothing fires in the first hour.
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+    expect(fired).toHaveLength(0);
+
+    // Advance to just before Sunday 18:00 UTC — one ms shy of the
+    // 260_100_000 ms delta, minus the hour we already advanced.
+    const TOTAL_DELTA_MS = 260_100_000;
+    await vi.advanceTimersByTimeAsync(TOTAL_DELTA_MS - 60 * 60 * 1000 - 1);
+    expect(fired).toHaveLength(0);
+
+    // One more ms lands us on the boundary.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fired).toHaveLength(1);
+
+    await scheduler.stop();
+  });
+
+  it("cron — stop clears the pending timer", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-09T12:00:00.000Z"));
+
+    const scheduler = new TimerScheduler();
+    const agentId = makeAgentId("cron-stop");
+
+    const fired: ScheduledWakeEvent[] = [];
+    scheduler.onWake((event) => {
+      fired.push(event);
+    });
+
+    scheduler.schedule(agentId, { kind: "cron", expression: "* * * * *" });
+    scheduler.start();
+    await scheduler.stop();
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(fired).toHaveLength(0);
+  });
+
+  it("cron — unschedule prevents the re-arm loop from continuing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-09T12:00:00.000Z"));
+
+    const scheduler = new TimerScheduler();
+    const agentId = makeAgentId("cron-unsub");
+
+    const fired: ScheduledWakeEvent[] = [];
+    scheduler.onWake((event) => {
+      fired.push(event);
+    });
+
+    scheduler.schedule(agentId, { kind: "cron", expression: "* * * * *" });
+    scheduler.start();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fired).toHaveLength(1);
+
+    scheduler.unschedule(agentId);
+
+    // Nothing fires in the next 5 minutes because the entry is gone.
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(fired).toHaveLength(1);
+
+    await scheduler.stop();
+  });
 });
