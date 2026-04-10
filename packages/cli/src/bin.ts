@@ -15,6 +15,7 @@
  */
 
 import { bootDaemon } from "./boot.js";
+import { runInit } from "./init.js";
 
 const argv = process.argv.slice(2);
 const command = argv[0];
@@ -66,10 +67,10 @@ const usage = (): string =>
 murmuration — Murmuration Harness CLI
 
 Usage:
-  murmuration start [options]   Boot the daemon (Phase 2D)
-  murmuration status            (Phase 1B) Print daemon status
-  murmuration stop              (Phase 1B) Send SIGTERM to a running daemon
-  murmuration init              (Phase 6) Run /init-murmuration interview
+  murmuration start [options]   Boot the daemon
+  murmuration init [dir]        Create a new murmuration (interactive)
+  murmuration status            (future) Print daemon status
+  murmuration stop              (future) Send SIGTERM to a running daemon
 
 start options:
   --root <path>    Identity root directory (default: bundled hello-world example)
@@ -114,9 +115,12 @@ const main = async (): Promise<void> => {
       process.stdout.write("murmuration 0.0.0 (phase-2d)\n");
       break;
     }
-    case "status":
-    case "stop":
     case "init": {
+      await runInit(argv[1]);
+      break;
+    }
+    case "status":
+    case "stop": {
       process.stderr.write(`murmuration: \`${command}\` is not yet implemented.\n`);
       process.stderr.write(usage());
       process.exit(2);
