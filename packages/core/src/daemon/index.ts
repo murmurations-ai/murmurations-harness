@@ -44,7 +44,11 @@ import {
   type WakeTrigger,
 } from "../scheduler/index.js";
 import type { SignalAggregator } from "../signals/index.js";
-import { NoOpGovernancePlugin, type GovernancePlugin } from "../governance/index.js";
+import {
+  GovernanceStateStore,
+  NoOpGovernancePlugin,
+  type GovernancePlugin,
+} from "../governance/index.js";
 
 // ---------------------------------------------------------------------------
 // Agent registry (Phase 1A: hardcoded inline; Phase 1B: loaded from disk)
@@ -364,6 +368,7 @@ export class Daemon {
   readonly #signalAggregator: SignalAggregator | undefined;
   readonly #runArtifactWriter: RunArtifactWriter | DispatchRunArtifactWriter | undefined;
   readonly #governance: GovernancePlugin;
+  readonly #governanceStore: GovernanceStateStore;
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
 
@@ -377,6 +382,7 @@ export class Daemon {
     this.#signalAggregator = config.signalAggregator;
     this.#runArtifactWriter = config.runArtifactWriter;
     this.#governance = config.governance ?? new NoOpGovernancePlugin();
+    this.#governanceStore = new GovernanceStateStore();
   }
 
   /**
@@ -413,10 +419,13 @@ export class Daemon {
     if (this.#running) return;
     this.#running = true;
 
-    // Governance plugin lifecycle — fire-and-forget so a slow plugin
-    // doesn't block the daemon from registering agents.
+    // Register the plugin's state graphs so the store can validate
+    // transitions, then fire the plugin's onDaemonStart hook.
+    for (const graph of this.#governance.stateGraphs()) {
+      this.#governanceStore.registerGraph(graph);
+    }
     if (this.#governance.onDaemonStart) {
-      void this.#governance.onDaemonStart().catch((err: unknown) => {
+      void this.#governance.onDaemonStart(this.#governanceStore).catch((err: unknown) => {
         this.#logger.error("daemon.governance.start.failed", {
           plugin: this.#governance.name,
           error: err instanceof Error ? err.message : String(err),
@@ -527,11 +536,14 @@ export class Daemon {
       // operator visibility and plugin testing.
       if (result.governanceEvents.length > 0) {
         try {
-          const decisions = await this.#governance.onEventsEmitted({
-            wakeId: result.wakeId,
-            agentId: result.agentId,
-            events: result.governanceEvents,
-          });
+          const decisions = await this.#governance.onEventsEmitted(
+            {
+              wakeId: result.wakeId,
+              agentId: result.agentId,
+              events: result.governanceEvents,
+            },
+            this.#governanceStore,
+          );
           if (decisions.length > 0) {
             this.#logger.info("daemon.governance.routed", {
               wakeId: result.wakeId.value,

@@ -1,38 +1,304 @@
 /**
  * Governance plugin interface — the pluggable boundary for decision
- * lifecycle, event routing, and action authorization.
+ * lifecycle, event routing, action authorization, and state tracking.
  *
  * The interface is governance-model-agnostic. It does not assume S3
  * (Sociocracy 3.0), command-and-control, consensus, meritocratic, or
  * any other specific governance model. Instead it exposes generic
- * lifecycle hooks that any model can implement:
+ * primitives that any model can implement:
  *
- *   - `onEventsEmitted` — after a wake, the daemon hands the plugin
+ *   - **Event routing** — after a wake, the daemon hands the plugin
  *     the emitted governance events and asks "where should these go?"
- *   - `evaluateAction` — before a consequential action, the daemon
- *     asks the plugin "should this agent proceed?"
+ *   - **Action authorization** — before a consequential action, the
+ *     daemon asks the plugin "should this agent proceed?"
+ *   - **State machine** — governance items (tensions, directives,
+ *     proposals, motions) are tracked through model-defined states
+ *     with a full audit trail and review dates. The harness manages
+ *     the machine; the plugin defines the graph.
  *
  * Plugins are **decision-makers, not actors.** They return routing
- * decisions and go/no-go rulings; the daemon executes them. This
- * keeps plugins free of infrastructure dependencies (no GitHub
- * clients, no signal aggregators, no network calls).
+ * decisions, go/no-go rulings, and state transitions; the daemon
+ * executes them. This keeps plugins free of infrastructure deps.
  *
- * The harness ships a `NoOpGovernancePlugin` that allows everything
- * and discards all events — the Phase 1/2 default. Concrete models
- * are supplied as separate packages or examples:
+ * Every governance model follows the same universal flow, just with
+ * different states and transitions:
  *
- *   - S3 (teal): `examples/governance-s3/` — consent rounds, tensions,
- *     circle-based routing
- *   - Command-and-control (amber): orchestrator → sub-agent hierarchy,
- *     approval chains, directives
- *   - Meritocratic (orange): weighted voting, track-record-based
- *     authority, performance-gated autonomy
- *   - Flat consensus (green): unanimous or supermajority agreement
+ *   Problem → Planning/Deliberation → Decision → Execution → Review
+ *
+ * The state machine formalizes this: each `kind` has a declared graph
+ * of states and valid transitions, and every item carries a
+ * `reviewAt` date so decisions can be revisited on cadence.
  *
  * @see https://github.com/murmurations-ai/murmurations-harness/issues/2
  */
 
+import { randomUUID } from "node:crypto";
+
 import type { AgentId, WakeId, EmittedGovernanceEvent } from "../execution/index.js";
+
+// ---------------------------------------------------------------------------
+// State machine — governance items tracked through model-defined states
+// ---------------------------------------------------------------------------
+
+/**
+ * Declares the valid states and transitions for one governance item
+ * kind. The plugin registers its graphs at `onDaemonStart`; the
+ * harness validates every transition attempt against the graph.
+ *
+ * Examples:
+ *   S3 tension:  open → deliberating → consent-round → resolved | withdrawn
+ *   C&C directive: drafted → submitted → approved → executing → completed
+ *   Meritocratic: open → review → scored → accepted | rejected
+ *   Consensus:    proposed → discussion → voting → passed | failed
+ */
+export interface GovernanceStateGraph {
+  readonly kind: string;
+  readonly initialState: string;
+  readonly terminalStates: readonly string[];
+  readonly transitions: readonly GovernanceTransitionRule[];
+  /**
+   * Default review interval for items of this kind, in days. When an
+   * item reaches a terminal state, `reviewAt` is set to
+   * `finishedAt + defaultReviewDays`. Plugins can override per-item.
+   * If absent, terminal items have no automatic review date.
+   */
+  readonly defaultReviewDays?: number;
+}
+
+/** A single valid state transition in the graph. */
+export interface GovernanceTransitionRule {
+  readonly from: string;
+  readonly to: string;
+  /**
+   * What triggers this transition. Free-form string so plugins can
+   * define their own triggers. Well-known values:
+   *   - `"agent-action"` — an agent explicitly advances the item
+   *   - `"timeout"` — a deadline elapsed
+   *   - `"vote-threshold"` — enough votes accumulated
+   *   - `"approval"` — an authority approved
+   *   - `"auto"` — harness-driven (e.g. review date reached)
+   */
+  readonly trigger: string;
+  /** If set, the harness auto-fires this transition after N ms in
+   *  the `from` state. Used for timeouts and escalation deadlines. */
+  readonly timeoutMs?: number;
+}
+
+/**
+ * A tracked governance item — the central persistence object. Created
+ * when an agent emits a governance event that the plugin maps to a
+ * new item, and tracked through states until it reaches a terminal
+ * state. Terminal items persist for audit + review.
+ */
+export interface GovernanceItem {
+  readonly id: string;
+  readonly kind: string;
+  readonly currentState: string;
+  readonly payload: unknown;
+  readonly createdBy: AgentId;
+  readonly createdAt: Date;
+  /**
+   * When this governance decision should be reviewed. Set
+   * automatically from the graph's `defaultReviewDays` when the item
+   * reaches a terminal state, or overridden per-item by the plugin.
+   * `null` means no scheduled review.
+   *
+   * The harness surfaces items past their review date as governance
+   * signals on the next wake so the responsible agent (or Source)
+   * can re-evaluate whether the decision is still valid.
+   */
+  readonly reviewAt: Date | null;
+  readonly history: readonly GovernanceStateTransition[];
+}
+
+/** One state transition in an item's audit trail. */
+export interface GovernanceStateTransition {
+  readonly from: string;
+  readonly to: string;
+  readonly triggeredBy: string; // agentId, "system", "timeout"
+  readonly at: Date;
+  readonly reason?: string;
+}
+
+/**
+ * The record the harness writes when a governance item reaches a
+ * terminal state. This is the durable artifact agents can reference
+ * to know what was decided. In a GitHub-backed murmuration, the
+ * daemon writes this as an issue comment or a file in a governance
+ * decisions directory. The format is deliberately simple so it can
+ * be rendered as markdown, JSON, or YAML.
+ */
+export interface GovernanceDecisionRecord {
+  readonly itemId: string;
+  readonly kind: string;
+  readonly finalState: string;
+  readonly decidedAt: Date;
+  readonly reviewAt: Date | null;
+  readonly summary: string;
+  readonly payload: unknown;
+  readonly history: readonly GovernanceStateTransition[];
+  readonly createdBy: string; // agentId value
+}
+
+// ---------------------------------------------------------------------------
+// State store — in-memory for Phase 2, durable for Phase 3
+// ---------------------------------------------------------------------------
+
+/** Filter for querying governance items. All fields are optional (&& logic). */
+export interface GovernanceItemFilter {
+  readonly state?: string;
+  readonly kind?: string;
+  readonly createdBy?: string; // agentId value
+  /** If true, return only items whose reviewAt is in the past. */
+  readonly reviewDue?: boolean;
+}
+
+/**
+ * In-memory governance state store. The daemon owns one instance;
+ * the plugin reads and writes through it. Phase 3 replaces this with
+ * a durable store (SQLite, filesystem, or external).
+ */
+export class GovernanceStateStore {
+  readonly #items = new Map<string, GovernanceItem>();
+  readonly #graphs = new Map<string, GovernanceStateGraph>();
+  readonly #now: () => Date;
+
+  public constructor(options: { readonly now?: () => Date } = {}) {
+    this.#now = options.now ?? ((): Date => new Date());
+  }
+
+  /** Register a state graph. Call once per kind at plugin init. */
+  public registerGraph(graph: GovernanceStateGraph): void {
+    this.#graphs.set(graph.kind, graph);
+  }
+
+  /** All registered state graphs. */
+  public graphs(): readonly GovernanceStateGraph[] {
+    return [...this.#graphs.values()];
+  }
+
+  /**
+   * Create a new governance item in the graph's initial state.
+   * Throws if the `kind` has no registered graph.
+   */
+  public create(
+    kind: string,
+    createdBy: AgentId,
+    payload: unknown,
+    options: { readonly reviewAt?: Date } = {},
+  ): GovernanceItem {
+    const graph = this.#graphs.get(kind);
+    if (!graph) {
+      throw new Error(`governance: no state graph registered for kind "${kind}"`);
+    }
+    const now = this.#now();
+    const item: GovernanceItem = {
+      id: randomUUID(),
+      kind,
+      currentState: graph.initialState,
+      payload,
+      createdBy,
+      createdAt: now,
+      reviewAt: options.reviewAt ?? null,
+      history: [],
+    };
+    this.#items.set(item.id, item);
+    return item;
+  }
+
+  /**
+   * Transition an item to a new state. Validates against the
+   * registered graph — throws if the transition is not allowed.
+   * Returns the updated item.
+   */
+  public transition(
+    itemId: string,
+    to: string,
+    triggeredBy: string,
+    reason?: string,
+  ): GovernanceItem {
+    const item = this.#items.get(itemId);
+    if (!item) throw new Error(`governance: item "${itemId}" not found`);
+
+    const graph = this.#graphs.get(item.kind);
+    if (!graph) throw new Error(`governance: no graph for kind "${item.kind}"`);
+
+    const valid = graph.transitions.some((t) => t.from === item.currentState && t.to === to);
+    if (!valid) {
+      throw new Error(
+        `governance: transition "${item.currentState}" → "${to}" is not valid for kind "${item.kind}"`,
+      );
+    }
+
+    const now = this.#now();
+    const transition: GovernanceStateTransition = {
+      from: item.currentState,
+      to,
+      triggeredBy,
+      at: now,
+      ...(reason !== undefined ? { reason } : {}),
+    };
+
+    // Compute reviewAt when reaching a terminal state.
+    const isTerminal = graph.terminalStates.includes(to);
+    const reviewAt =
+      isTerminal && graph.defaultReviewDays !== undefined
+        ? new Date(now.getTime() + graph.defaultReviewDays * 86_400_000)
+        : item.reviewAt;
+
+    const updated: GovernanceItem = {
+      ...item,
+      currentState: to,
+      reviewAt,
+      history: [...item.history, transition],
+    };
+    this.#items.set(itemId, updated);
+    return updated;
+  }
+
+  /** Look up a single item by id. */
+  public get(itemId: string): GovernanceItem | undefined {
+    return this.#items.get(itemId);
+  }
+
+  /** Query items matching the filter. */
+  public query(filter: GovernanceItemFilter = {}): readonly GovernanceItem[] {
+    const now = this.#now();
+    const results: GovernanceItem[] = [];
+    for (const item of this.#items.values()) {
+      if (filter.state !== undefined && item.currentState !== filter.state) continue;
+      if (filter.kind !== undefined && item.kind !== filter.kind) continue;
+      if (filter.createdBy !== undefined && item.createdBy.value !== filter.createdBy) continue;
+      if (filter.reviewDue === true) {
+        if (item.reviewAt === null || item.reviewAt.getTime() > now.getTime()) continue;
+      }
+      results.push(item);
+    }
+    return results;
+  }
+
+  /** Build a decision record for a terminal item (for durable persistence). */
+  public buildDecisionRecord(itemId: string, summary: string): GovernanceDecisionRecord {
+    const item = this.#items.get(itemId);
+    if (!item) throw new Error(`governance: item "${itemId}" not found`);
+    return {
+      itemId: item.id,
+      kind: item.kind,
+      finalState: item.currentState,
+      decidedAt: this.#now(),
+      reviewAt: item.reviewAt,
+      summary,
+      payload: item.payload,
+      history: item.history,
+      createdBy: item.createdBy.value,
+    };
+  }
+
+  /** How many items are tracked (for logging). */
+  public size(): number {
+    return this.#items.size;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Event routing
@@ -76,9 +342,21 @@ export type GovernanceDecision =
 
 /**
  * The governance plugin contract. Implement this interface to provide
- * a governance model to the harness. The daemon calls the lifecycle
- * hooks at well-defined points; the plugin returns decisions
- * synchronously or asynchronously without performing side effects.
+ * a governance model to the harness.
+ *
+ * The daemon calls lifecycle hooks at well-defined points; the plugin
+ * returns decisions without performing side effects. The daemon also
+ * provides a {@link GovernanceStateStore} at init time so the plugin
+ * can register its state graphs, create items, and advance them
+ * through states.
+ *
+ * Universal governance flow (model-agnostic):
+ *   Problem → Planning/Deliberation → Decision → Execution → Review
+ *
+ * The state machine formalizes this per governance model. Each plugin
+ * declares its own state graphs (kinds + states + transitions) and
+ * the harness tracks items through those states with a full audit
+ * trail and automatic review-date enforcement.
  */
 export interface GovernancePlugin {
   /** Human-readable name for logging (e.g. "s3", "command-and-control"). */
@@ -87,31 +365,48 @@ export interface GovernancePlugin {
   readonly version: string;
 
   /**
-   * Called after every wake that produces governance events. The
-   * plugin inspects the events and returns routing instructions.
-   * The daemon dispatches according to those instructions.
+   * Declare the state graphs this governance model uses. Called once
+   * at daemon start. Each graph defines the valid states and
+   * transitions for one governance item kind.
    *
-   * If the plugin returns an empty array, all events are implicitly
-   * discarded.
+   * The harness registers these graphs with the
+   * {@link GovernanceStateStore} and validates every subsequent
+   * transition against them.
    */
-  onEventsEmitted(batch: GovernanceEventBatch): Promise<readonly GovernanceRoutingDecision[]>;
+  stateGraphs(): readonly GovernanceStateGraph[];
 
   /**
-   * Called when an agent (or the daemon itself) needs a go/no-go
-   * ruling before a consequential action. The `action` string is a
-   * free-form identifier (e.g. `"publish-article"`,
-   * `"commit-to-main"`, `"spend-above-threshold"`). The `context`
-   * carries model-specific metadata the plugin can interpret.
-   *
-   * S3 might run a consent round. Command-and-control might check
-   * the approval chain. Meritocratic might consult track records.
-   * Flat consensus might poll all agents. The harness doesn't care
-   * which — it just awaits the decision.
+   * Called after every wake that produces governance events. The
+   * plugin inspects the events and returns routing instructions.
+   * It may also create or advance governance items in the store.
    */
-  evaluateAction(agentId: AgentId, action: string, context: unknown): Promise<GovernanceDecision>;
+  onEventsEmitted(
+    batch: GovernanceEventBatch,
+    store: GovernanceStateStore,
+  ): Promise<readonly GovernanceRoutingDecision[]>;
+
+  /**
+   * Go/no-go ruling before a consequential action. The plugin may
+   * consult the state store (e.g. "is there an approved governance
+   * item for this action?") or apply model-specific logic.
+   */
+  evaluateAction(
+    agentId: AgentId,
+    action: string,
+    context: unknown,
+    store: GovernanceStateStore,
+  ): Promise<GovernanceDecision>;
+
+  /**
+   * Optional notification when a governance item transitions to a
+   * new state. Called after the store has been updated. The plugin
+   * can use this to trigger side-effect-free logging or to update
+   * its own internal state.
+   */
+  onTransition?(item: GovernanceItem, transition: GovernanceStateTransition): void;
 
   /** Optional hook called once when the daemon starts. */
-  onDaemonStart?(): Promise<void>;
+  onDaemonStart?(store: GovernanceStateStore): Promise<void>;
 
   /** Optional hook called once when the daemon stops. */
   onDaemonStop?(): Promise<void>;
@@ -122,18 +417,22 @@ export interface GovernancePlugin {
 // ---------------------------------------------------------------------------
 
 /**
- * No-op governance plugin. Allows every action and discards every
- * event. This is the default when no governance plugin is configured,
- * preserving the Phase 1/2 behavior where governance events are
- * collected and counted in logs but not routed or enforced.
+ * No-op governance plugin. Allows every action, discards every event,
+ * declares no state graphs. This is the default when no governance
+ * plugin is configured, preserving Phase 1/2 behavior.
  */
 export class NoOpGovernancePlugin implements GovernancePlugin {
   public readonly name = "no-op";
   public readonly version = "1.0.0";
 
+  public stateGraphs(): readonly GovernanceStateGraph[] {
+    return [];
+  }
+
   // eslint-disable-next-line @typescript-eslint/require-await
   public async onEventsEmitted(
     _batch: GovernanceEventBatch,
+    _store: GovernanceStateStore,
   ): Promise<readonly GovernanceRoutingDecision[]> {
     return [];
   }
@@ -143,6 +442,7 @@ export class NoOpGovernancePlugin implements GovernancePlugin {
     _agentId: AgentId,
     _action: string,
     _context: unknown,
+    _store: GovernanceStateStore,
   ): Promise<GovernanceDecision> {
     return { allow: true };
   }
