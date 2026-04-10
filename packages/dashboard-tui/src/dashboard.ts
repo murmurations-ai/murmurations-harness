@@ -1,17 +1,7 @@
 /**
- * Murmuration Dashboard — TUI with four panels + system overview bar.
+ * Murmuration Dashboard — TUI with compact panels + system overview.
  *
- * Uses @mariozechner/pi-tui for differential rendering. Reads the
- * .murmuration/ directory tree for all data. Auto-refreshes every
- * 30s. Press [q] or Ctrl+C to quit, [r] to force refresh.
- *
- * UX improvements from Design Agent (#11) review:
- *   1. ANSI color-coded status markers (green ok, red fail, yellow review-due)
- *   2. System Overview bar — first 3 seconds of operator attention
- *   3. Structured activity log with outcome annotations
- *   4. Cost panel sorted by highest-cost first + ASCII bar chart
- *   5. Reassuring empty states
- *
+ * UX polished from two rounds of Design Agent (#11) review.
  * Spec §13: read-only in v0.1.
  */
 
@@ -40,7 +30,6 @@ const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
 const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
-// const WHITE = "\x1b[37m"; // reserved for future use
 
 const green = (s: string): string => `${GREEN}${s}${RESET}`;
 const red = (s: string): string => `${RED}${s}${RESET}`;
@@ -49,8 +38,11 @@ const cyan = (s: string): string => `${CYAN}${s}${RESET}`;
 const bold = (s: string): string => `${BOLD}${s}${RESET}`;
 const dim = (s: string): string => `${DIM}${s}${RESET}`;
 
+const HR = dim("────────────────────────────────────────────────────────────────");
+const formatUsd = (micros: number): string => `$${(micros / 1_000_000).toFixed(4)}`;
+
 // ---------------------------------------------------------------------------
-// System Overview bar — the "first 3 seconds" view
+// System Overview — the "first 3 seconds" view
 // ---------------------------------------------------------------------------
 
 const renderOverview = (
@@ -67,41 +59,37 @@ const renderOverview = (
     status = red(`CRITICAL (${String(failCount)} failed)`);
   } else if (staleCount > 0 || reviewDue > 0) {
     const parts: string[] = [];
-    if (staleCount > 0) parts.push(`${String(staleCount)} stale`);
-    if (reviewDue > 0) parts.push(`${String(reviewDue)} review-due`);
-    status = yellow(`ATTENTION (${parts.join(", ")})`);
+    if (staleCount > 0) parts.push(red(`${String(staleCount)} stale`));
+    if (reviewDue > 0) parts.push(yellow(`${String(reviewDue)} review-due`));
+    status = yellow("ATTENTION") + ` (${parts.join(", ")})`;
   } else {
     status = green("ALL SYSTEMS OK");
   }
 
   const activeCount = agents.filter((a) => a.outcome === "completed").length;
-  const todayCost = formatUsd(cost.todayMicros);
-
-  return [
-    `  ${bold("Status:")} ${status}    ${bold("Agents:")} ${String(activeCount)}/${String(agents.length)} active    ${bold("Today:")} ${todayCost} (${String(cost.todayWakes)} wakes)`,
-    "",
-  ].join("\n");
+  return `  ${bold("Status:")} ${status}  ${dim("|")}  ${bold("Agents:")} ${String(activeCount)}/${String(agents.length)} active  ${dim("|")}  ${bold("Today:")} ${formatUsd(cost.todayMicros)} (${String(cost.todayWakes)} wakes)\n`;
 };
 
 // ---------------------------------------------------------------------------
-// Panel renderers — ANSI colored, no box-drawing
+// Agents panel — combined pipeline + cost, inactive agents collapsed
 // ---------------------------------------------------------------------------
 
-const HR = dim("────────────────────────────────────────────────────");
-
-const renderPipeline = (agents: readonly AgentStatus[], cost: CostSummary): string => {
+const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string => {
   const lines = [` ${bold("Agents")}`, ` ${HR}`];
   if (agents.length === 0) {
     lines.push(`  ${dim("No agents discovered. Run: murmuration start --root <dir>")}`);
     return lines.join("\n");
   }
 
-  // Build a cost lookup from the cost summary for total per agent
   const costMap = new Map(cost.perAgent.map((a) => [a.agentId, a]));
   const maxCost = Math.max(...cost.perAgent.map((a) => a.totalMicros), 1);
   const BAR_WIDTH = 8;
 
-  for (const a of agents) {
+  // Split active (have woken) vs inactive (never woken)
+  const active = agents.filter((a) => a.lastWake !== null);
+  const inactive = agents.filter((a) => a.lastWake === null);
+
+  for (const a of active) {
     let marker: string;
     if (a.outcome === "completed") marker = green("[ok]");
     else if (a.outcome === "failed") marker = red("[FAIL]");
@@ -109,38 +97,73 @@ const renderPipeline = (agents: readonly AgentStatus[], cost: CostSummary): stri
     else if (a.outcome === "killed") marker = red("[KILL]");
     else marker = dim("[--]");
 
-    const staleFlag = a.stale ? yellow(" !") : "";
-    const time = a.lastWake ? a.lastWake.toISOString().slice(11, 16) : dim("--:--");
-    const next = a.nextWakeCountdown !== "--" ? a.nextWakeCountdown.padEnd(7) : dim("--".padEnd(7));
+    const time = a.lastWake!.toISOString().slice(11, 16);
+    const next = a.nextWakeCountdown !== "--" ? a.nextWakeCountdown.padEnd(8) : dim("--".padEnd(8));
 
-    // Cost bar from aggregate total
     const agentCost = costMap.get(a.agentId);
     const totalCost = agentCost ? formatUsd(agentCost.totalMicros) : dim("$0.0000");
-    const wakes = agentCost ? String(agentCost.wakes).padStart(2) : dim(" 0");
+    const wakes = agentCost ? String(agentCost.wakes) : "0";
     const barLen = agentCost ? Math.max(0, Math.round((agentCost.totalMicros / maxCost) * BAR_WIDTH)) : 0;
-    const bar = barLen > 0 ? cyan("█".repeat(barLen)) + dim("░".repeat(BAR_WIDTH - barLen)) : dim("░".repeat(BAR_WIDTH));
+    const bar = barLen > 0
+      ? cyan("█".repeat(barLen)) + dim("░".repeat(BAR_WIDTH - barLen))
+      : dim("░".repeat(BAR_WIDTH));
 
-    lines.push(`  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time} ${dim("next")} ${next} ${totalCost} ${bar} ${dim(`${wakes}w`)}${staleFlag}`);
+    lines.push(`  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w`);
   }
+
+  // Collapse inactive agents into a summary
+  if (inactive.length > 0) {
+    const nextWakes = inactive
+      .filter((a) => a.nextWakeCountdown !== "--")
+      .map((a) => a.nextWakeCountdown)
+      .sort();
+    const soonest = nextWakes.length > 0 ? `  soonest: ${nextWakes[0]}` : "";
+    lines.push(`  ${dim(`[--]  ${String(inactive.length)} agents awaiting first wake${soonest}`)}`);
+  }
+
   return lines.join("\n");
 };
 
-const renderActivity = (entries: readonly ActivityEntry[]): string => {
-  const lines = [` ${bold("Agent Activity")}`, ` ${HR}`];
-  if (entries.length === 0) {
-    lines.push(`  ${dim("Waiting for agent activity. Start the daemon to see wakes here.")}`);
-    return lines.join("\n");
+// ---------------------------------------------------------------------------
+// Cost & Wakes — compact summary + sparkline
+// ---------------------------------------------------------------------------
+
+const renderCostSummary = (cost: CostSummary): string => {
+  const lines = [` ${bold("Cost & Wakes")}`, ` ${HR}`];
+  lines.push(
+    `  Today: ${bold(formatUsd(cost.todayMicros))} (${String(cost.todayWakes)}w)  ${dim("|")}  Week: ${formatUsd(cost.weekMicros)} (${String(cost.weekWakes)}w)  ${dim("|")}  Month: ${formatUsd(cost.monthMicros)} (${String(cost.monthWakes)}w)`,
+  );
+
+  // Sparkline (last 7 days) with day count labels
+  const sparkChars = " ▁▂▃▄▅▆▇█";
+  const days: number[] = [];
+  const dayLabels: string[] = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getTime() - i * 86_400_000);
+    dayLabels.push(d.toISOString().slice(8, 10));
+    days.push(0);
   }
-  for (const e of entries.slice(-12)) {
-    const timeStr = dim(e.ts);
-    let eventStr: string;
-    if (e.event === "completed") eventStr = green(e.event.padEnd(12));
-    else if (e.event === "failed" || e.event === "error") eventStr = red(e.event.padEnd(12));
-    else eventStr = cyan(e.event.padEnd(12));
-    lines.push(`  ${timeStr}  ${e.agentId.padEnd(24)} ${eventStr}`);
+  if (cost.weekWakes > 0) {
+    const otherDays = cost.weekWakes - cost.todayWakes;
+    const perDay = otherDays > 0 ? Math.round(otherDays / 6) : 0;
+    for (let i = 0; i < 6; i++) days[i] = perDay;
+    days[6] = cost.todayWakes;
   }
+  const maxDay = Math.max(...days, 1);
+  const spark = days
+    .map((d) => sparkChars[Math.round((d / maxDay) * (sparkChars.length - 1))])
+    .join("");
+  const counts = days.map((d) => (d > 0 ? String(d).padStart(2) : dim(" 0"))).join(" ");
+
+  lines.push(`  Wakes/day: ${cyan(spark)}   ${dim(dayLabels.join(" "))}`);
+  lines.push(`             ${counts}`);
   return lines.join("\n");
 };
+
+// ---------------------------------------------------------------------------
+// Governance — pending + recent with counts in headers
+// ---------------------------------------------------------------------------
 
 const renderGovernance = (items: readonly GovernanceEntry[]): string => {
   const lines = [` ${bold("Governance")}`, ` ${HR}`];
@@ -149,34 +172,32 @@ const renderGovernance = (items: readonly GovernanceEntry[]): string => {
     return lines.join("\n");
   }
 
-  // Split into pending (active) and decided (terminal)
   const pending = items.filter((i) => !i.isTerminal);
   const decided = items.filter((i) => i.isTerminal);
 
   if (pending.length > 0) {
-    lines.push(`  ${bold("Pending")}`);
+    lines.push(`  ${bold(`Pending (${String(pending.length)})`)}`);
     for (const item of pending.slice(0, 5)) {
       const dueStr = item.reviewDue ? yellow(" [REVIEW DUE]") : "";
-      const stateStr = item.state === "open" || item.state === "deliberating"
-        ? cyan(item.state.padEnd(14))
-        : item.state.padEnd(14);
+      const stateStr = cyan(item.state.padEnd(14));
       const summaryStr = item.summary ? dim(` ${item.summary}`) : "";
       lines.push(`  ${dim(item.id)}  ${item.kind.padEnd(12)} ${stateStr}${dueStr}${summaryStr}`);
     }
+    if (pending.length > 5) lines.push(`  ${dim(`... and ${String(pending.length - 5)} more`)}`);
   }
 
   if (decided.length > 0) {
-    lines.push(`  ${bold("Recent Decisions")}`);
-    // Show most recent first (by lastTransitionAt)
-    const sorted = [...decided].sort((a, b) =>
-      (b.lastTransitionAt?.getTime() ?? 0) - (a.lastTransitionAt?.getTime() ?? 0),
+    const sorted = [...decided].sort(
+      (a, b) => (b.lastTransitionAt?.getTime() ?? 0) - (a.lastTransitionAt?.getTime() ?? 0),
     );
-    for (const item of sorted.slice(0, 4)) {
-      const stateStr = item.state === "resolved" || item.state === "ratified"
-        ? green(item.state.padEnd(14))
-        : item.state === "rejected"
-          ? red(item.state.padEnd(14))
-          : item.state.padEnd(14);
+    lines.push(`  ${bold(`Recent Decisions (${String(decided.length)})`)}`);
+    for (const item of sorted.slice(0, 3)) {
+      const stateStr =
+        item.state === "resolved" || item.state === "ratified"
+          ? green(item.state.padEnd(14))
+          : item.state === "rejected"
+            ? red(item.state.padEnd(14))
+            : item.state.padEnd(14);
       const when = item.lastTransitionAt
         ? dim(item.lastTransitionAt.toISOString().slice(5, 16).replace("T", " "))
         : "";
@@ -192,38 +213,25 @@ const renderGovernance = (items: readonly GovernanceEntry[]): string => {
   return lines.join("\n");
 };
 
-const formatUsd = (micros: number): string => `$${(micros / 1_000_000).toFixed(4)}`;
+// ---------------------------------------------------------------------------
+// Agent Activity — compact, truncated
+// ---------------------------------------------------------------------------
 
-/** Compact cost + wakes sparkline — per-agent cost is in the Agents panel now. */
-const renderCostSummary = (cost: CostSummary): string => {
-  const lines = [` ${bold("Cost & Wakes")}`, ` ${HR}`];
-  lines.push(`  Today: ${bold(formatUsd(cost.todayMicros))} (${String(cost.todayWakes)}w)    Week: ${formatUsd(cost.weekMicros)} (${String(cost.weekWakes)}w)    Month: ${formatUsd(cost.monthMicros)} (${String(cost.monthWakes)}w)`);
-
-  // Wakes-per-day sparkline (last 7 days)
-  const sparkChars = " ▁▂▃▄▅▆▇█";
-  const days: number[] = [];
-  const dayLabels: string[] = [];
-  const now = new Date();
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(now.getTime() - i * 86_400_000);
-    dayLabels.push(d.toISOString().slice(8, 10));
-    days.push(0);
+const renderActivity = (entries: readonly ActivityEntry[]): string => {
+  const lines = [` ${bold("Activity")}`, ` ${HR}`];
+  if (entries.length === 0) {
+    lines.push(`  ${dim("Waiting for agent activity. Start the daemon to see wakes here.")}`);
+    return lines.join("\n");
   }
-  // Approximate: today's wakes in the last bucket, rest spread evenly.
-  // Proper per-day breakdown needs daily aggregation from index.jsonl
-  // which the shared dashboard-data layer will provide.
-  if (cost.weekWakes > 0) {
-    const otherDays = cost.weekWakes - cost.todayWakes;
-    const perDay = otherDays > 0 ? Math.round(otherDays / 6) : 0;
-    for (let i = 0; i < 6; i++) days[i] = perDay;
-    days[6] = cost.todayWakes;
+  for (const e of entries.slice(-10)) {
+    const timeStr = dim(e.ts);
+    let eventStr: string;
+    if (e.event === "completed") eventStr = green("ok");
+    else if (e.event === "failed" || e.event === "error") eventStr = red("FAIL");
+    else eventStr = cyan(e.event.slice(0, 6));
+    const detail = e.detail ? dim(` ${e.detail.slice(0, 50)}`) : "";
+    lines.push(`  ${timeStr}  ${e.agentId.padEnd(20)} ${eventStr}${detail}`);
   }
-  const maxDay = Math.max(...days, 1);
-  const spark = days
-    .map((d) => sparkChars[Math.round((d / maxDay) * (sparkChars.length - 1))])
-    .join("");
-
-  lines.push(`  Wakes/day: ${cyan(spark)}  ${dim(dayLabels.join(" "))}`);
   return lines.join("\n");
 };
 
@@ -250,7 +258,7 @@ export const startDashboard = async (rootDir: string): Promise<void> => {
     const header = `  ${bold("Murmuration Dashboard")} ${dim("—")} ${dim(root)}  ${dim("[q] quit  [r] refresh")}\n`;
     const overview = renderOverview(pipeline, governance, cost);
     const panels = [
-      renderPipeline(pipeline, cost),
+      renderAgents(pipeline, cost),
       renderCostSummary(cost),
       renderGovernance(governance),
       renderActivity(activity),
@@ -279,7 +287,5 @@ export const startDashboard = async (rootDir: string): Promise<void> => {
 
   tui.start();
 
-  await new Promise<void>(() => {
-    // Never resolves — the input listener handles exit.
-  });
+  await new Promise<void>(() => {});
 };
