@@ -240,3 +240,39 @@ llm_cost_usd: ${costDisplay}
 ${result.wakeSummary}
 `;
 };
+
+// ---------------------------------------------------------------------------
+// Dispatch writer for multi-agent daemons
+// ---------------------------------------------------------------------------
+
+/**
+ * Routes `record()` calls to per-agent {@link RunArtifactWriter}
+ * instances based on the result's `agentId`. The Daemon still sees a
+ * single writer; DispatchRunArtifactWriter resolves per-agent writers
+ * internally. If no writer is registered for an agentId, the call is
+ * silently dropped with a logger warning.
+ */
+export class DispatchRunArtifactWriter {
+  readonly #writers: ReadonlyMap<string, RunArtifactWriter>;
+
+  public constructor(writers: ReadonlyMap<string, RunArtifactWriter>) {
+    this.#writers = writers;
+  }
+
+  public async record(
+    result: AgentResult,
+    costRecord: WakeCostRecord | undefined,
+    logger?: RunArtifactLogger,
+  ): Promise<void> {
+    const writer = this.#writers.get(result.agentId.value);
+    if (!writer) {
+      logger?.warn("daemon.runs.dispatch.unknown", {
+        agentId: result.agentId.value,
+        wakeId: result.wakeId.value,
+        reason: "no run artifact writer registered for this agent",
+      });
+      return;
+    }
+    await writer.record(result, costRecord, logger);
+  }
+}

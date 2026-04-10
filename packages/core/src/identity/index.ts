@@ -16,7 +16,7 @@
  * (https://github.com/murmurations-ai/murmurations-harness/issues/6).
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import cronParser from "cron-parser";
@@ -303,6 +303,37 @@ export class IdentityLoader {
     this.#murmurationSoulPath = config.murmurationSoulPath ?? "murmuration/soul.md";
     this.#agentsDir = config.agentsDir ?? "agents";
     this.#circlesDir = config.circlesDir ?? "governance/circles";
+  }
+
+  /**
+   * Discover all agent directories under `<rootDir>/agents/` that
+   * contain a `role.md` file. Returns the directory names sorted
+   * lexicographically (so `01-research` comes before `02-content`).
+   * Directories without a `role.md` are silently skipped — they may
+   * be scaffolding, templates, or WIP that isn't ready to load.
+   */
+  public async discover(): Promise<readonly string[]> {
+    const agentsRoot = join(this.#rootDir, this.#agentsDir);
+    let entries: string[];
+    try {
+      entries = await readdir(agentsRoot);
+    } catch {
+      return [];
+    }
+    const results: string[] = [];
+    for (const entry of entries.sort()) {
+      try {
+        const entryPath = join(agentsRoot, entry);
+        const info = await stat(entryPath);
+        if (!info.isDirectory()) continue;
+        const rolePath = join(entryPath, "role.md");
+        await stat(rolePath); // throws ENOENT if missing
+        results.push(entry);
+      } catch {
+        // not a valid agent directory — skip
+      }
+    }
+    return results;
   }
 
   /**

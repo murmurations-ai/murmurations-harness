@@ -27,6 +27,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   Daemon,
+  DispatchExecutor,
+  DispatchRunArtifactWriter,
   IdentityLoader,
   InProcessExecutor,
   RunArtifactWriter,
@@ -443,10 +445,32 @@ export interface BootDaemonOptions {
  */
 export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void> => {
   const exampleRoot = options.rootDir ? resolve(options.rootDir) : resolveHelloWorldRoot();
-  const agentDir = options.agentDir ?? "hello-world";
   const dryRun = options.dryRun === true;
   const once = options.once === true;
-  const agentScriptPath = resolve(exampleRoot, "agent.mjs");
+
+  const loader = new IdentityLoader({ rootDir: exampleRoot });
+
+  // -------------------------------------------------------------------
+  // Agent discovery: when --agent is set, boot one; when omitted, boot
+  // every agent found in <root>/agents/*/role.md.
+  // -------------------------------------------------------------------
+
+  let agentDirs: readonly string[];
+  if (options.agentDir !== undefined) {
+    agentDirs = [options.agentDir];
+  } else if (options.rootDir !== undefined) {
+    // Explicit --root without --agent → discover all agents.
+    agentDirs = await loader.discover();
+    if (agentDirs.length === 0) {
+      process.stderr.write(
+        `murmuration: no agents found in ${resolve(exampleRoot, "agents")}/*/ (looking for role.md)\n`,
+      );
+      process.exit(78);
+    }
+  } else {
+    // No --root, no --agent → default hello-world example.
+    agentDirs = ["hello-world"];
+  }
 
   process.stdout.write(
     `${JSON.stringify({
@@ -454,33 +478,28 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       level: "info",
       event: "daemon.boot.config",
       rootDir: exampleRoot,
-      agentDir,
+      agentDirs,
       dryRun,
     })}\n`,
   );
 
-  const loader = new IdentityLoader({ rootDir: exampleRoot });
-  const loaded = await loader.load(agentDir);
-
-  // Build the wake trigger from role.md frontmatter. Hello-world has
-  // `delayMs: 2000`; the research-agent example has `cron: "0 18 * * 0"`
-  // (warn-and-fallback until scheduler lands cron).
-  // Schema-wise `wake_schedule` is optional; if an agent declares none,
-  // fall back to a single delayed wake so the daemon still has something
-  // to fire. This preserves the Phase 1A hello-world behavior for any
-  // role.md that omits wake_schedule entirely.
-  const wakeSchedule = loaded.frontmatter.wake_schedule ?? { delayMs: EVENT_FALLBACK_DELAY_MS };
-  const trigger: WakeTrigger = triggerFromFrontmatter(wakeSchedule, loaded.agentId.value);
-
-  const registered: RegisteredAgent = registeredAgentFromLoadedIdentity(loaded, trigger);
+  // Load identities + build triggers for every agent.
+  const allRegistered: RegisteredAgent[] = [];
+  for (const agentDir of agentDirs) {
+    const loaded = await loader.load(agentDir);
+    const wakeSchedule = loaded.frontmatter.wake_schedule ?? { delayMs: EVENT_FALLBACK_DELAY_MS };
+    const trigger: WakeTrigger = triggerFromFrontmatter(wakeSchedule, loaded.agentId.value);
+    allRegistered.push(registeredAgentFromLoadedIdentity(loaded, trigger));
+  }
 
   // A provisional subprocess executor is used for the first-pass daemon
-  // (which only calls loadSecrets() before being discarded). The
-  // "effective" executor is selected AFTER secrets load so an LLM
-  // agent can get the InProcessExecutor with tokens already loaded.
+  // (which only calls loadSecrets() before being discarded). It accepts
+  // any registered agentId and spawns `<root>/agent.mjs`.
+  const agentScriptPath = resolve(exampleRoot, "agent.mjs");
+  const registeredIds = new Set(allRegistered.map((a) => a.agentId));
   const provisionalExecutor = new SubprocessExecutor({
     resolveCommand: (context): SubprocessCommand => {
-      if (context.agentId.value !== registered.agentId) {
+      if (!registeredIds.has(context.agentId.value)) {
         throw new Error(`resolveCommand: unknown agent ${context.agentId.value}`);
       }
       return {
@@ -499,23 +518,28 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     ? new DotenvSecretsProvider({ envPath })
     : undefined;
 
-  // Unioned declaration across every registered agent, per ADR-0010 /
+  // Unioned declaration across ALL registered agents, per ADR-0010 /
   // ADR-0016. For hello-world this collapses to `{ required: [],
   // optional: [GITHUB_TOKEN] }` — identical to the pre-2D behavior.
-  const agents: readonly RegisteredAgent[] = [registered];
-  const declaration = buildSecretDeclaration(agents);
+  const declaration = buildSecretDeclaration(allRegistered);
 
   const secretsBlock: DaemonConfig["secrets"] | undefined = provider
     ? { provider, declaration }
     : undefined;
 
-  // Per-agent run artifact writer (2D5). Artifacts land under
-  // `<rootDir>/.murmuration/runs/<agentDir>/` so they travel with
-  // the murmuration, not with the harness install. The writer is
-  // agent-scoped — dual-run fairness rests on per-agent isolation.
-  const runArtifactWriter = new RunArtifactWriter({
-    rootDir: resolve(exampleRoot, ".murmuration", "runs", agentDir),
-  });
+  // Per-agent run artifact writers (2D5). Each agent gets its own
+  // writer at `<rootDir>/.murmuration/runs/<agentId>/`.
+  const writerMap = new Map<string, RunArtifactWriter>();
+  for (const agent of allRegistered) {
+    writerMap.set(
+      agent.agentId,
+      new RunArtifactWriter({
+        rootDir: resolve(exampleRoot, ".murmuration", "runs", agent.agentId),
+      }),
+    );
+  }
+  const runArtifactWriter =
+    writerMap.size === 1 ? [...writerMap.values()][0]! : new DispatchRunArtifactWriter(writerMap);
 
   // First pass: construct a daemon with the filesystem-only aggregator
   // and load secrets. If GITHUB_TOKEN is present after load, rebuild
@@ -526,7 +550,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   const firstPassDaemon = new Daemon({
     executor: provisionalExecutor,
-    agents: [registered],
+    agents: allRegistered,
     signalAggregator: filesystemOnlyAggregator,
     runArtifactWriter,
     ...(secretsBlock ? { secrets: secretsBlock } : {}),
@@ -565,12 +589,11 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   const compositions: AgentComposition[] = [];
   const ollamaBaseUrl = process.env.OLLAMA_BASE_URL;
-  for (const agent of agents) {
+  const executorMap = new Map<string, AgentExecutor>();
+
+  for (const agent of allRegistered) {
     // Boot-time validation pass: build a throw-away client bag with
-    // NO cost builder so we just verify everything can be wired. The
-    // actual per-wake clients are constructed inside
-    // InProcessExecutor.resolveClients below, where the wake's own
-    // cost builder is available and can be bound into the LLM hook.
+    // NO cost builder so we just verify everything can be wired.
     const validation = buildAgentClients({
       agent,
       provider,
@@ -653,65 +676,69 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               },
       })}\n`,
     );
+
+    // -------------------------------------------------------------------
+    // Per-agent executor selection
+    //
+    // LLM agents get an InProcessExecutor with per-wake client
+    // construction; non-LLM agents share the provisional subprocess
+    // executor. When multiple agents exist, DispatchExecutor routes
+    // spawn/waitForCompletion/kill by agentId.
+    // -------------------------------------------------------------------
+
+    if (agent.llm) {
+      // Capture the agent reference for the closure — the loop
+      // variable `agent` would be stale by the time resolveRunner runs.
+      const capturedAgent = agent;
+      const capturedAgentDir = agentDirs[allRegistered.indexOf(agent)]!;
+      executorMap.set(
+        agent.agentId,
+        new InProcessExecutor<InProcessRunnerClients>({
+          resolveRunner: async ({ agentId }) => {
+            if (agentId !== capturedAgent.agentId) {
+              throw new Error(`resolveRunner: unknown agent ${agentId}`);
+            }
+            const runnerPath = resolve(exampleRoot, "agents", capturedAgentDir, "runner.mjs");
+            const mod = (await import(pathToFileURL(runnerPath).href)) as {
+              default?: unknown;
+              runWake?: unknown;
+            };
+            const candidate: unknown = mod.default ?? mod.runWake;
+            if (typeof candidate !== "function") {
+              throw new Error(
+                `runner at ${runnerPath} must export a default function or a named \`runWake\` function`,
+              );
+            }
+            return candidate as AgentRunner<InProcessRunnerClients>;
+          },
+          resolveClients: ({ costBuilder }) => {
+            const wakeClients = buildAgentClients({
+              agent: capturedAgent,
+              provider,
+              costBuilder,
+              dryRun,
+              ollamaBaseUrl,
+            });
+            const firstBranchScope = capturedAgent.githubWriteScopes.branchCommits[0];
+            const targetRepo = firstBranchScope ? parseRepoKey(firstBranchScope.repo) : undefined;
+            return {
+              ...(wakeClients.llm ? { llm: wakeClients.llm } : {}),
+              ...(wakeClients.github ? { github: wakeClients.github } : {}),
+              ...(targetRepo ? { targetRepo } : {}),
+              targetBranch: "main",
+            };
+          },
+        }),
+      );
+    } else {
+      executorMap.set(agent.agentId, provisionalExecutor);
+    }
   }
 
-  // -------------------------------------------------------------------
-  // Effective executor selection (Phase 2D8)
-  //
-  // If the registered agent declares an LLM pin, swap to the
-  // InProcessExecutor so per-wake LLM + GitHub clients can be
-  // constructed with the cost hook bound to the wake's builder.
-  // Otherwise (hello-world and any other non-LLM agent) keep the
-  // subprocess executor that was used for the first-pass daemon.
-  //
-  // Runner resolution: by convention the agent's runner module lives
-  // at `<rootDir>/agents/<agentDir>/runner.mjs` and exposes a
-  // default export that is an `AgentRunner<InProcessRunnerClients>`.
-  // Dynamic import keeps core + cli dep-free of specific agent code.
-  // -------------------------------------------------------------------
-
-  const effectiveExecutor: AgentExecutor = registered.llm
-    ? new InProcessExecutor<InProcessRunnerClients>({
-        resolveRunner: async ({ agentId }) => {
-          if (agentId !== registered.agentId) {
-            throw new Error(`resolveRunner: unknown agent ${agentId}`);
-          }
-          const runnerPath = resolve(exampleRoot, "agents", agentDir, "runner.mjs");
-          const mod = (await import(pathToFileURL(runnerPath).href)) as {
-            default?: unknown;
-            runWake?: unknown;
-          };
-          const candidate: unknown = mod.default ?? mod.runWake;
-          if (typeof candidate !== "function") {
-            throw new Error(
-              `runner at ${runnerPath} must export a default function or a named \`runWake\` function`,
-            );
-          }
-          return candidate as AgentRunner<InProcessRunnerClients>;
-        },
-        resolveClients: ({ costBuilder }) => {
-          const wakeClients = buildAgentClients({
-            agent: registered,
-            provider,
-            costBuilder,
-            dryRun,
-            ollamaBaseUrl,
-          });
-          // Derive the target repo for the digest commit from the
-          // agent's branchCommits write scope. If the agent has no
-          // branchCommits declared, `targetRepo` is absent and the
-          // runner will degrade to "digest-only" mode.
-          const firstBranchScope = registered.githubWriteScopes.branchCommits[0];
-          const targetRepo = firstBranchScope ? parseRepoKey(firstBranchScope.repo) : undefined;
-          return {
-            ...(wakeClients.llm ? { llm: wakeClients.llm } : {}),
-            ...(wakeClients.github ? { github: wakeClients.github } : {}),
-            ...(targetRepo ? { targetRepo } : {}),
-            targetBranch: "main",
-          };
-        },
-      })
-    : provisionalExecutor;
+  // Build the effective executor: single executor if only one agent,
+  // DispatchExecutor if multiple.
+  const effectiveExecutor: AgentExecutor =
+    executorMap.size === 1 ? [...executorMap.values()][0]! : new DispatchExecutor(executorMap);
 
   // Second pass: if we got a github client, rebuild the daemon with
   // an upgraded aggregator. DaemonConfig fields are readonly by
@@ -721,27 +748,28 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   // (LLM agents) or when a github client becomes available. Only
   // keep the first-pass daemon if neither condition applies — which
   // is the hello-world / no-token path.
-  // Map the agent's signal scopes from role.md into the shape the
-  // DefaultSignalAggregator expects. `sinceDays` becomes a `since`
-  // Date relative to now (approximation — good enough for the 7-day
-  // window the Research Agent role declares).
-  const githubSignalScopes =
-    registered.signalScopes?.githubScopes?.map((scope) => ({
-      repo: makeRepoCoordinate(scope.owner, scope.repo),
-      filter: {
-        state: scope.filter.state,
-        ...(scope.filter.labels !== undefined ? { labels: scope.filter.labels } : {}),
-        ...(scope.filter.sinceDays !== undefined
-          ? { since: new Date(Date.now() - scope.filter.sinceDays * 86_400_000) }
-          : {}),
-      },
-    })) ?? [];
+  // Merge signal scopes from ALL agents into a single aggregator
+  // config. Duplicate repos are OK — the aggregator deduplicates at
+  // the fetch level (same URL = same cache entry).
+  const githubSignalScopes = allRegistered.flatMap(
+    (agent) =>
+      agent.signalScopes?.githubScopes?.map((scope) => ({
+        repo: makeRepoCoordinate(scope.owner, scope.repo),
+        filter: {
+          state: scope.filter.state,
+          ...(scope.filter.labels !== undefined ? { labels: scope.filter.labels } : {}),
+          ...(scope.filter.sinceDays !== undefined
+            ? { since: new Date(Date.now() - scope.filter.sinceDays * 86_400_000) }
+            : {}),
+        },
+      })) ?? [],
+  );
 
   const needsRebuild = effectiveExecutor !== provisionalExecutor || githubClient !== undefined;
   const effectiveDaemon: Daemon = needsRebuild
     ? new Daemon({
         executor: effectiveExecutor,
-        agents: [registered],
+        agents: allRegistered,
         signalAggregator: githubClient
           ? new DefaultSignalAggregator({
               rootDir: exampleRoot,
@@ -780,23 +808,30 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   effectiveDaemon.start();
 
   if (once) {
-    // --once mode: wait for the first wake to produce a run artifact,
-    // then stop the daemon and exit. We detect completion by polling
-    // the index.jsonl that RunArtifactWriter appends to after every
-    // wake — this avoids any daemon internals changes and is correct
-    // because the artifact is written AFTER the wake completes.
-    const indexPath = resolve(exampleRoot, ".murmuration", "runs", agentDir, "index.jsonl");
+    // --once mode: wait for ANY agent's first wake to produce a run
+    // artifact, then stop the daemon and exit. We detect completion by
+    // polling each agent's index.jsonl.
+    const indexPaths = allRegistered.map((a) =>
+      resolve(exampleRoot, ".murmuration", "runs", a.agentId, "index.jsonl"),
+    );
     const pollIntervalMs = 2000;
     const maxWaitMs = 300_000; // 5 minutes hard ceiling
     const startedAt = Date.now();
     while (Date.now() - startedAt < maxWaitMs) {
       await new Promise((r) => setTimeout(r, pollIntervalMs));
-      try {
-        const contents = await readFile(indexPath, "utf8");
-        if (contents.trim().length > 0) break;
-      } catch {
-        // file not written yet
+      let anyArtifact = false;
+      for (const p of indexPaths) {
+        try {
+          const contents = await readFile(p, "utf8");
+          if (contents.trim().length > 0) {
+            anyArtifact = true;
+            break;
+          }
+        } catch {
+          // file not written yet
+        }
       }
+      if (anyArtifact) break;
     }
     process.stdout.write(
       `${JSON.stringify({

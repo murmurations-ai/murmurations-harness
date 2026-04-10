@@ -13,6 +13,7 @@
 export * from "./execution/index.js";
 export * from "./execution/subprocess.js";
 export * from "./execution/in-process.js";
+export * from "./execution/dispatch.js";
 export * from "./scheduler/index.js";
 export * from "./signals/index.js";
 export * from "./governance/index.js";

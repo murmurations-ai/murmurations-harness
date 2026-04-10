@@ -66,17 +66,17 @@ Usage:
 
 start options:
   --root <path>    Identity root directory (default: bundled hello-world example)
-  --agent <id>     Agent dir under <root>/agents/ (default: "hello-world")
+  --agent <id>     Agent dir under <root>/agents/ (default: all agents when
+                   --root is set, "hello-world" when --root is omitted)
   --dry-run        Construct every GithubClient without writeScopes so
                    all mutations default-deny at the client layer
-  --once           Exit cleanly after the first wake completes. Designed
-                   for cron-triggered single-shot wakes (launchd / crontab)
+  --once           Exit cleanly after the first wake of any agent completes
 
 Examples:
-  murmuration start
-  murmuration start --root ../test-murmuration --agent 01-research
-  murmuration start --root ../test-murmuration --agent 01-research --dry-run
-  murmuration start --root ../test-murmuration --agent 01-research --once
+  murmuration start                                          # hello-world only
+  murmuration start --root ../my-murmuration                 # all agents
+  murmuration start --root ../my-murmuration --agent my-bot  # one agent
+  murmuration start --root ../my-murmuration --dry-run       # all, no writes
 `.trimStart();
 
 const main = async (): Promise<void> => {

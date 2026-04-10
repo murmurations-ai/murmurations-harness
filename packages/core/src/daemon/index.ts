@@ -12,7 +12,7 @@
  */
 
 import { formatUSDMicros } from "../cost/usd.js";
-import { RunArtifactWriter } from "./runs.js";
+import { RunArtifactWriter, DispatchRunArtifactWriter } from "./runs.js";
 import {
   isCompleted,
   isFailed,
@@ -329,7 +329,7 @@ export interface DaemonConfig {
    * wake summary + cost record land on disk under the configured
    * run root. See Phase 2D step 2D5 and `./runs.ts`.
    */
-  readonly runArtifactWriter?: RunArtifactWriter;
+  readonly runArtifactWriter?: RunArtifactWriter | DispatchRunArtifactWriter;
 }
 
 export interface DaemonLogger {
@@ -355,7 +355,7 @@ export class Daemon {
     | { readonly provider: SecretsProvider; readonly declaration: SecretDeclaration }
     | undefined;
   readonly #signalAggregator: SignalAggregator | undefined;
-  readonly #runArtifactWriter: RunArtifactWriter | undefined;
+  readonly #runArtifactWriter: RunArtifactWriter | DispatchRunArtifactWriter | undefined;
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
 
@@ -738,5 +738,5 @@ export { makeWakeId };
 
 // Re-export the run-artifact writer surface so the CLI boot path can
 // construct one without reaching into internal module paths.
-export { RunArtifactWriter } from "./runs.js";
+export { RunArtifactWriter, DispatchRunArtifactWriter } from "./runs.js";
 export type { RunArtifactWriterConfig, RunArtifactIndexEntry, RunArtifactLogger } from "./runs.js";
