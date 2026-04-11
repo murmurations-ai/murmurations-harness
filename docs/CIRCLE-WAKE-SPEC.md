@@ -311,6 +311,109 @@ This also closes the loop on the cadence governance round we tried to run manual
 
 ---
 
+## Circle Retrospectives + Pluggable Strategy Framework
+
+Circles need to reflect collectively — not just individual agents. After delivering milestones or completing sprint-like cycles, the circle should pause and ask: "What worked? What didn't? What do we change?"
+
+### Circle Retrospectives
+
+A retrospective is a special **operational circle wake** triggered after a milestone or on a regular cadence (e.g., end of each sprint/week). The facilitator prompts each member:
+
+```
+What went well this cycle?
+What didn't go well?
+What should we change?
+What tension should we file?
+```
+
+Each member contributes from their role's perspective. The facilitator synthesizes into:
+- **Keep doing** — practices that worked
+- **Stop doing** — things that wasted effort or caused problems  
+- **Start doing** — new practices to try next cycle
+- **Tensions filed** — any structural issues elevated to governance
+
+Retrospective output is persisted as a circle artifact and fed into the next cycle's planning wake.
+
+### Pluggable Strategy & Measurement Framework
+
+Different murmurations measure success differently. The harness shouldn't bake in one framework — it should provide a **pluggable strategy interface** analogous to the pluggable governance interface:
+
+```ts
+interface StrategyPlugin {
+  readonly name: string;       // "okr", "kpi", "north-star", "none"
+  readonly version: string;
+
+  /** Declare the measurement structure (objectives, metrics, etc.) */
+  measurementSchema(): readonly MeasurementDefinition[];
+
+  /** Called at circle retrospective — evaluate progress against goals */
+  evaluateProgress(
+    circleId: string,
+    measurements: readonly Measurement[],
+  ): Promise<StrategyEvaluation>;
+
+  /** Called at planning wake — suggest priorities based on strategy */
+  suggestPriorities(
+    circleId: string,
+    backlog: readonly BacklogItem[],
+    measurements: readonly Measurement[],
+  ): Promise<readonly PrioritySuggestion[]>;
+}
+```
+
+**Example strategy plugins:**
+
+| Plugin | How it guides | Measurement shape |
+|---|---|---|
+| **OKR** | Objectives + Key Results per circle per quarter. Retrospectives score KR progress (0.0-1.0). Planning prioritizes backlog items that advance the lowest-scoring KRs. | `{ objective, keyResult, target, current, score }` |
+| **North Star** | One murmuration-wide metric + circle-level input metrics. Retrospectives check whether inputs are driving the north star. | `{ northStar, inputMetric, value, trend }` |
+| **KPI** | Key Performance Indicators per agent/circle. Retrospectives flag KPIs below threshold. | `{ kpi, threshold, actual, status }` |
+| **None** | No measurement framework — circles self-organize without quantitative goals. | (empty) |
+
+### How strategy flows through the system
+
+```
+Source sets strategy (OKRs, North Star, etc.)
+  ↓
+Strategy plugin provides measurement schema
+  ↓ 
+Each circle's operational wake evaluates: "Are we on track?"
+  ↓
+Circle retrospective reflects: "Why or why not? What do we change?"
+  ↓
+Planning wake uses suggestPriorities: "Given where we are, what should we work on next?"
+  ↓
+Individual agents work their assigned items
+  ↓
+Next retrospective measures progress
+  ↓ back to top
+```
+
+### Alignment across circles
+
+The strategy plugin operates at two levels:
+
+1. **Murmuration-wide** — Source declares top-level objectives. Every circle can see them.
+2. **Per-circle** — each circle has its own objectives/KRs that roll up to the murmuration level.
+
+During circle operational wakes, the facilitator checks: "Is our work aligned with the murmuration's objectives?" If drift is detected, it surfaces as a tension → governance queue.
+
+This keeps all agents focused within their circles, and all circles aligned with the murmuration's purpose — without Source needing to micromanage. Source sets the direction; the strategy plugin measures progress; the circles self-correct through retrospectives and governance.
+
+### Strategy in the dashboard
+
+The TUI/web dashboard gains a fifth panel (or integrates into the existing overview):
+
+```
+Strategy: OKR Q2 2026
+  O1: Launch first course           KR1: 0.3  KR2: 0.7  KR3: 0.1
+  O2: Grow audience to 1000         KR1: 0.5  KR2: 0.2
+  Content Circle: on track (0.5 avg)
+  Intelligence Circle: behind (0.2 avg) — tension filed
+```
+
+---
+
 ## Implementation phases
 
 ### Phase A — Source Directives (smallest, unblocks everything)
@@ -344,6 +447,21 @@ This also closes the loop on the cadence governance round we tried to run manual
 - GitHub issue reading filtered by circle label
 - Prioritization during operational circle wakes
 - Assignment via issue comments/labels
+
+### Phase F — Circle Retrospectives
+- Retrospective as a special operational circle wake kind
+- Triggered after milestones or on cadence (weekly/biweekly)
+- Keep/stop/start/tension output format
+- Retrospective artifacts persisted + fed into next planning wake
+
+### Phase G — Strategy Plugin Interface
+- `StrategyPlugin` interface in `@murmuration/core`
+- OKR plugin as the first implementation (in `examples/strategy-okr/`)
+- `NoOpStrategyPlugin` as default (no measurement framework)
+- Integration with circle operational wakes (evaluateProgress)
+  and planning wakes (suggestPriorities)
+- Dashboard strategy panel showing progress per objective
+- Alignment check: circle drift detection → tension filing
 
 ---
 
