@@ -14,6 +14,7 @@
  *                   client layer per ADR-0017 §4 (Phase 2C6 gate)
  */
 
+import { runBacklog } from "./backlog.js";
 import { bootDaemon } from "./boot.js";
 import { runCircleWakeCommand } from "./circle-wake.js";
 import { runDirective } from "./directive.js";
@@ -74,6 +75,7 @@ Usage:
   murmuration directive [options] "msg" Send a directive to agents/circles
   murmuration directive --list          Show all directives and responses
   murmuration circle-wake [options]     Convene a circle meeting (on demand)
+  murmuration backlog [options]         View/refresh a circle's GitHub work queue
   murmuration status                    (future) Print daemon status
   murmuration stop                      (future) Send SIGTERM to a running daemon
 
@@ -122,6 +124,12 @@ const main = async (): Promise<void> => {
     }
     case "init": {
       await runInit(argv[1]);
+      break;
+    }
+    case "backlog": {
+      const rootIdxB = argv.indexOf("--root");
+      const rootDirB = (rootIdxB >= 0 ? argv[rootIdxB + 1] : undefined) ?? ".";
+      await runBacklog(argv.slice(1), rootDirB);
       break;
     }
     case "circle-wake": {
