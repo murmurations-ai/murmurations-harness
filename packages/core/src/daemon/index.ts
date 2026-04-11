@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { formatUSDMicros } from "../cost/usd.js";
 import { RunArtifactWriter, DispatchRunArtifactWriter } from "./runs.js";
+import { DirectiveStore } from "../directives/index.js";
 import {
   isCompleted,
   isFailed,
@@ -349,6 +350,12 @@ export interface DaemonConfig {
    * daemon restart. Typically `<rootDir>/.murmuration/governance/`.
    */
   readonly governancePersistDir?: string;
+  /**
+   * Directive store for Source → agent communication. If present,
+   * the daemon injects pending directives into agent signal bundles
+   * before each wake. See `directives/index.ts`.
+   */
+  readonly directiveStore?: DirectiveStore;
 }
 
 export interface DaemonLogger {
@@ -385,6 +392,7 @@ export class Daemon {
    * store (#33).
    */
   readonly #governanceInbox = new Map<string, EmittedGovernanceEvent[]>();
+  readonly #directiveStore: DirectiveStore | undefined;
   readonly #governanceTimers = new Map<string, NodeJS.Timeout>();
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
@@ -399,6 +407,7 @@ export class Daemon {
     this.#signalAggregator = config.signalAggregator;
     this.#runArtifactWriter = config.runArtifactWriter;
     this.#governance = config.governance ?? new NoOpGovernancePlugin();
+    this.#directiveStore = config.directiveStore;
     this.#governanceStore = new GovernanceStateStore({
       ...(config.governancePersistDir ? { persistDir: config.governancePersistDir } : {}),
     });
@@ -579,6 +588,38 @@ export class Daemon {
       };
     }
 
+    // Inject pending Source directives into the signal bundle.
+    if (this.#directiveStore) {
+      try {
+        const circleIds = agent.circleMemberships;
+        const directives = await this.#directiveStore.pending(agent.agentId, circleIds);
+        if (directives.length > 0) {
+          const directiveSignals = directives.map((d) => ({
+            kind: "custom" as const,
+            sourceId: "source-directive",
+            data: { directiveId: d.id, kind: d.kind, body: d.body, scope: d.scope },
+            id: `dir-${d.id}`,
+            trust: "trusted" as const,
+            fetchedAt: new Date(),
+          }));
+          context = {
+            ...context,
+            signals: {
+              ...context.signals,
+              signals: [...context.signals.signals, ...directiveSignals],
+            },
+          };
+          this.#logger.info("daemon.directive.injected", {
+            agentId: agent.agentId,
+            directiveCount: directives.length,
+            directiveIds: directives.map((d) => d.id),
+          });
+        }
+      } catch {
+        // Directive read is best-effort
+      }
+    }
+
     this.#logger.info("daemon.wake.fire", {
       agentId: agent.agentId,
       wakeId: event.wakeId.value,
@@ -593,6 +634,22 @@ export class Daemon {
       this.#logResult(result);
       if (this.#runArtifactWriter) {
         await this.#runArtifactWriter.record(result, result.costRecord, this.#logger);
+      }
+      // Mark any directives that were injected as responded.
+      if (this.#directiveStore) {
+        for (const sig of context.signals.signals) {
+          if (sig.kind === "custom" && "sourceId" in sig && sig.sourceId === "source-directive") {
+            const data = sig.data as { directiveId?: string } | undefined;
+            if (data?.directiveId) {
+              void this.#directiveStore.recordResponse(
+                data.directiveId,
+                result.agentId.value,
+                result.wakeId.value,
+                result.wakeSummary.slice(0, 200),
+              );
+            }
+          }
+        }
       }
       // Governance event routing — hand emitted events to the plugin,
       // then dispatch each routing decision.

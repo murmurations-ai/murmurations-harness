@@ -27,6 +27,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   Daemon,
+  DirectiveStore,
   DispatchExecutor,
   DispatchRunArtifactWriter,
   IdentityLoader,
@@ -592,6 +593,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     ...(secretsBlock ? { secrets: secretsBlock } : {}),
     ...(governancePlugin ? { governance: governancePlugin } : {}),
     governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
+    directiveStore: new DirectiveStore(exampleRoot),
   });
 
   let githubClient: GithubClient | undefined;
@@ -820,6 +822,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         ...(secretsBlock ? { secrets: secretsBlock } : {}),
         ...(governancePlugin ? { governance: governancePlugin } : {}),
         governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
+    directiveStore: new DirectiveStore(exampleRoot),
       })
     : firstPassDaemon;
 

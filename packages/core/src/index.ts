@@ -21,3 +21,4 @@ export * from "./identity/index.js";
 export * from "./secrets/index.js";
 export * from "./cost/index.js";
 export * from "./daemon/index.js";
+export * from "./directives/index.js";

@@ -15,6 +15,7 @@
  */
 
 import { bootDaemon } from "./boot.js";
+import { runDirective } from "./directive.js";
 import { runInit } from "./init.js";
 
 const argv = process.argv.slice(2);
@@ -67,10 +68,12 @@ const usage = (): string =>
 murmuration — Murmuration Harness CLI
 
 Usage:
-  murmuration start [options]   Boot the daemon
-  murmuration init [dir]        Create a new murmuration (interactive)
-  murmuration status            (future) Print daemon status
-  murmuration stop              (future) Send SIGTERM to a running daemon
+  murmuration start [options]           Boot the daemon
+  murmuration init [dir]                Create a new murmuration (interactive)
+  murmuration directive [options] "msg" Send a directive to agents/circles
+  murmuration directive --list          Show all directives and responses
+  murmuration status                    (future) Print daemon status
+  murmuration stop                      (future) Send SIGTERM to a running daemon
 
 start options:
   --root <path>    Identity root directory (default: bundled hello-world example)
@@ -117,6 +120,12 @@ const main = async (): Promise<void> => {
     }
     case "init": {
       await runInit(argv[1]);
+      break;
+    }
+    case "directive": {
+      const rootIdx = argv.indexOf("--root");
+      const rootDir = (rootIdx >= 0 ? argv[rootIdx + 1] : undefined) ?? ".";
+      await runDirective(argv.slice(1), rootDir);
       break;
     }
     case "status":
