@@ -159,7 +159,24 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
   console.log(result.synthesis);
   console.log("");
 
-  console.log(`${"─".repeat(60)}`);
+  // Print consent round tallies for governance meetings
+  if (result.tallies.length > 0) {
+    console.log(`\n--- Consent Round Tallies ---\n`);
+    for (const tally of result.tallies) {
+      const rec = tally.recommendation === "ratify"
+        ? "\x1b[32mRATIFY\x1b[0m"
+        : tally.recommendation === "amend"
+          ? "\x1b[33mAMEND\x1b[0m"
+          : "\x1b[31mESCALATE\x1b[0m";
+      console.log(`  Item ${tally.itemId}: ${String(tally.consents)} consent, ${String(tally.concerns)} concern, ${String(tally.objections)} objection → ${rec}`);
+      for (const p of tally.positions) {
+        const posColor = p.position === "consent" ? "\x1b[32m" : p.position === "objection" ? "\x1b[31m" : "\x1b[33m";
+        console.log(`    ${p.agentId}: ${posColor}${p.position}\x1b[0m — ${p.reasoning.slice(0, 60)}`);
+      }
+    }
+  }
+
+  console.log(`\n${"─".repeat(60)}`);
   console.log(`Tokens: ${String(result.totalInputTokens)} in / ${String(result.totalOutputTokens)} out`);
   console.log(`Cost: ~$${(((result.totalInputTokens * 0.15 + result.totalOutputTokens * 0.6) / 1_000_000)).toFixed(4)}`);
 
@@ -178,6 +195,14 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
     "",
     ...result.contributions.map((c) => `## ${c.agentId}\n\n${c.content}\n`),
     `## Facilitator Synthesis\n\n${result.synthesis}`,
+    ...(result.tallies.length > 0
+      ? [
+          "\n## Consent Round Tallies\n",
+          ...result.tallies.map((t) =>
+            `### Item ${t.itemId}\n- Consent: ${String(t.consents)}, Concern: ${String(t.concerns)}, Objection: ${String(t.objections)}\n- Recommendation: **${t.recommendation.toUpperCase()}**\n${t.positions.map((p) => `  - ${p.agentId}: ${p.position}${p.reasoning ? ` — ${p.reasoning}` : ""}`).join("\n")}`,
+          ),
+        ]
+      : []),
   ].join("\n");
   await wf(join(meetingDir, `${meetingId}.md`), minutes, "utf8");
   console.log(`\nMeeting minutes: .murmuration/runs/circle-${circleId}/${dayUtc}/${meetingId}.md`);

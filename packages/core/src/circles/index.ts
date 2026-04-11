@@ -55,6 +55,26 @@ export interface MemberContribution {
   readonly outputTokens: number;
 }
 
+/** Parsed position from a member's governance contribution. */
+export interface ConsentPosition {
+  readonly agentId: string;
+  readonly itemId: string;
+  readonly position: "consent" | "concern" | "objection";
+  readonly reasoning: string;
+  readonly harm?: string;
+  readonly amendment?: string;
+}
+
+/** Tally of positions for a single governance item. */
+export interface ConsentTally {
+  readonly itemId: string;
+  readonly consents: number;
+  readonly concerns: number;
+  readonly objections: number;
+  readonly positions: readonly ConsentPosition[];
+  readonly recommendation: "ratify" | "amend" | "escalate";
+}
+
 export interface CircleWakeResult {
   readonly circleId: string;
   readonly kind: CircleWakeKind;
@@ -63,6 +83,8 @@ export interface CircleWakeResult {
   readonly totalInputTokens: number;
   readonly totalOutputTokens: number;
   readonly governanceEvents: readonly { kind: string; payload: unknown }[];
+  /** Consent round tallies, one per governance item (governance meetings only). */
+  readonly tallies: readonly ConsentTally[];
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +148,17 @@ export const runCircleWake = async (
 
 You are ${memberId}, a member of the ${context.circleId} circle. Provide your contribution to this ${context.kind} meeting.
 
-${context.kind === "governance" ? "For each governance item: state your position (consent / concern / objection) with reasoning." : "Share your perspective on the circle's current priorities, what's working, and what needs attention."}
+${context.kind === "governance"
+        ? `For EACH governance item, respond in this EXACT format:
+
+ITEM: [item id]
+POSITION: consent / concern / objection
+REASONING: [one sentence]
+
+If POSITION is "objection", also include:
+HARM: [what harm would adopting this cause]
+AMENDMENT: [what change would resolve your objection]`
+        : "Share your perspective on the circle's current priorities, what's working, and what needs attention."}
 
 Keep your contribution focused and concise (3-5 paragraphs).`;
 
@@ -186,6 +218,47 @@ End with a one-paragraph meeting summary.`;
   totalInput += synthesis.inputTokens;
   totalOutput += synthesis.outputTokens;
 
+  // Parse consent round tallies from member contributions (governance only)
+  const tallies: ConsentTally[] = [];
+  if (context.kind === "governance" && context.governanceQueue.length > 0) {
+    for (const item of context.governanceQueue) {
+      const itemId = item.id.slice(0, 8);
+      const positions: ConsentPosition[] = [];
+
+      for (const c of contributions) {
+        // Parse structured responses from each member's contribution
+        const itemPattern = new RegExp(
+          `ITEM:\\s*${itemId}[\\s\\S]*?POSITION:\\s*(consent|concern|objection)(?:[\\s\\S]*?REASONING:\\s*(.+))?(?:[\\s\\S]*?HARM:\\s*(.+))?(?:[\\s\\S]*?AMENDMENT:\\s*(.+))?`,
+          "i",
+        );
+        const match = itemPattern.exec(c.content);
+        if (match) {
+          positions.push({
+            agentId: c.agentId,
+            itemId,
+            position: match[1]!.toLowerCase() as "consent" | "concern" | "objection",
+            reasoning: match[2]?.trim() ?? "",
+            ...(match[3] ? { harm: match[3].trim() } : {}),
+            ...(match[4] ? { amendment: match[4].trim() } : {}),
+          });
+        }
+      }
+
+      const consents = positions.filter((p) => p.position === "consent").length;
+      const concerns = positions.filter((p) => p.position === "concern").length;
+      const objections = positions.filter((p) => p.position === "objection").length;
+
+      let recommendation: ConsentTally["recommendation"];
+      if (objections > 0) {
+        recommendation = objections > 1 ? "escalate" : "amend";
+      } else {
+        recommendation = "ratify";
+      }
+
+      tallies.push({ itemId, consents, concerns, objections, positions, recommendation });
+    }
+  }
+
   return {
     circleId: context.circleId,
     kind: context.kind,
@@ -193,6 +266,7 @@ End with a one-paragraph meeting summary.`;
     synthesis: synthesis.content,
     totalInputTokens: totalInput,
     totalOutputTokens: totalOutput,
-    governanceEvents: [], // populated by the caller based on synthesis parsing
+    governanceEvents: [],
+    tallies,
   };
 };
