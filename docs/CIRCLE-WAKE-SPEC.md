@@ -258,6 +258,59 @@ Or simpler: circle wakes are scheduled on the circle config, not on individual a
 
 ---
 
+## Agent Self-Reflection + Tension Filing
+
+Every agent should periodically reflect on its own effectiveness and, when something isn't working, file a tension or proposal to its circle's governance queue — without Source needing to prompt it.
+
+### How it works
+
+At the end of each wake, the runner asks the agent a self-reflection question as part of its output contract:
+
+```
+## Self-Reflection
+
+EFFECTIVENESS: [high / medium / low]
+OBSERVATION: [one sentence — what went well or what's not working]
+TENSION: [none / filed]
+```
+
+If the agent reports `TENSION: filed`, it also emits a governance event:
+
+```
+::governance::tension:: {"topic": "...", "driver": "...", "proposedAction": "..."}
+```
+
+This flows through the existing governance dispatch:
+1. The S3 plugin receives the tension in `onEventsEmitted`
+2. Creates a `GovernanceItem` in the state store (kind: "tension", state: "open")
+3. Routes it to Source + the agent's circle
+4. The tension sits in the governance queue until the next **governance circle wake** processes it
+
+If the agent has enough context to draft a proposal (not just name the tension), it can emit a proposal directly:
+
+```
+::governance::proposal-opened:: {"title": "...", "driver": "...", "proposal": "...", "reviewPeriod": "90d"}
+```
+
+This creates a proposal item in the state store, ready for the next governance meeting's consent round.
+
+### What agents can self-reflect on
+
+- **Signal quality** — "I received 0 useful signals this wake; my signal scopes may need adjustment"
+- **Upstream dependency** — "My upstream agent hasn't produced output in 3 days; I'm running on stale data"
+- **Budget utilization** — "I used 95% of my budget ceiling; either the ceiling is too low or I'm doing too much"
+- **Output utility** — "My last 3 digests look similar; I may not be adding value at my current cadence"
+- **Role fit** — "I'm being asked to do work outside my declared accountabilities"
+- **Pipeline bottleneck** — "I complete in 5 seconds but wait 23 hours for upstream; the cadence is mismatched"
+
+### Why this matters
+
+In S3, tensions are the **sole driver of governance change**. If agents can't sense and file tensions themselves, Source has to notice everything manually. An agent sensing "my cadence is wrong" and filing a tension to its circle's governance queue is exactly how a self-organizing murmuration is supposed to work — the system evolves from within, not from Source micromanaging.
+
+This also closes the loop on the cadence governance round we tried to run manually: instead of Source asking "how often should you run?", the agent notices "my runs are idle because upstream only produces weekly" and files a tension: "propose reducing my cadence to weekly to match upstream." The circle processes it in their next governance meeting.
+
+---
+
 ## Implementation phases
 
 ### Phase A — Source Directives (smallest, unblocks everything)
@@ -266,20 +319,27 @@ Or simpler: circle wakes are scheduled on the circle config, not on individual a
 - Daemon injects pending directives into signal bundle
 - No code changes to runners — directives appear as signals
 
-### Phase B — Circle Wake Runner
+### Phase B — Agent Self-Reflection + Tension Filing
+- Add self-reflection prompt to the shared runner's output contract
+- Agents emit governance events when they sense a tension
+- S3 plugin creates governance items from agent-filed tensions
+- Tensions queue for the next governance circle wake
+- Agents can also file proposals directly (not just tensions)
+
+### Phase C — Circle Wake Runner
 - `CircleWakeRunner` in `@murmuration/core`
 - Circle config schema (members, facilitator, backlog label)
 - Daemon schedules circle wakes from circle configs
 - Member round + facilitator synthesis
 - Meeting minutes artifact
 
-### Phase C — Governance Meeting Protocol
+### Phase D — Governance Meeting Protocol
 - Governance wake variant of CircleWakeRunner
 - Consent round tallying (consent/concern/objection per member)
 - State machine advancement based on tally
 - Decision record generation
 
-### Phase D — Circle Work Queue
+### Phase E — Circle Work Queue
 - `murmuration backlog --circle content` command
 - GitHub issue reading filtered by circle label
 - Prioritization during operational circle wakes
