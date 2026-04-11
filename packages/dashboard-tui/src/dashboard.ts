@@ -103,12 +103,17 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
     const agentCost = costMap.get(a.agentId);
     const totalCost = agentCost ? formatUsd(agentCost.totalMicros) : dim("$0.0000");
     const wakes = agentCost ? String(agentCost.wakes) : "0";
-    const barLen = agentCost ? Math.max(0, Math.round((agentCost.totalMicros / maxCost) * BAR_WIDTH)) : 0;
-    const bar = barLen > 0
-      ? cyan("█".repeat(barLen)) + dim("░".repeat(BAR_WIDTH - barLen))
-      : dim("░".repeat(BAR_WIDTH));
+    const barLen = agentCost
+      ? Math.max(0, Math.round((agentCost.totalMicros / maxCost) * BAR_WIDTH))
+      : 0;
+    const bar =
+      barLen > 0
+        ? cyan("█".repeat(barLen)) + dim("░".repeat(BAR_WIDTH - barLen))
+        : dim("░".repeat(BAR_WIDTH));
 
-    lines.push(`  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w`);
+    lines.push(
+      `  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w`,
+    );
   }
 
   // Collapse inactive agents into a summary
@@ -117,7 +122,7 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
       .filter((a) => a.nextWakeCountdown !== "--")
       .map((a) => a.nextWakeCountdown)
       .sort();
-    const soonest = nextWakes.length > 0 ? `  soonest: ${nextWakes[0]}` : "";
+    const soonest = nextWakes.length > 0 ? `  soonest: ${nextWakes[0] ?? ""}` : "";
     lines.push(`  ${dim(`[--]  ${String(inactive.length)} agents awaiting first wake${soonest}`)}`);
   }
 
@@ -287,5 +292,7 @@ export const startDashboard = async (rootDir: string): Promise<void> => {
 
   tui.start();
 
-  await new Promise<void>(() => {});
+  await new Promise<void>((_resolve) => {
+    /* keep process alive */
+  });
 };

@@ -117,8 +117,7 @@ export class DirectiveStore {
       if (d.status !== "pending") return false;
       if (d.scope.kind === "all") return true;
       if (d.scope.kind === "agent") return d.scope.agentId === agentId;
-      if (d.scope.kind === "circle") return circleIds.includes(d.scope.circleId);
-      return false;
+      return circleIds.includes(d.scope.circleId);
     });
   }
 
