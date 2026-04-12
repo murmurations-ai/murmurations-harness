@@ -28,7 +28,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   AgentStateStore,
   Daemon,
-  DirectiveStore,
   DispatchExecutor,
   DispatchRunArtifactWriter,
   IdentityLoader,
@@ -594,7 +593,6 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     ...(secretsBlock ? { secrets: secretsBlock } : {}),
     ...(governancePlugin ? { governance: governancePlugin } : {}),
     governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
-    directiveStore: new DirectiveStore(exampleRoot),
     agentStateStore: new AgentStateStore({ persistDir: resolve(exampleRoot, ".murmuration", "agents") }),
   });
 
@@ -824,7 +822,6 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         ...(secretsBlock ? { secrets: secretsBlock } : {}),
         ...(governancePlugin ? { governance: governancePlugin } : {}),
         governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
-    directiveStore: new DirectiveStore(exampleRoot),
     agentStateStore: new AgentStateStore({ persistDir: resolve(exampleRoot, ".murmuration", "agents") }),
       })
     : firstPassDaemon;

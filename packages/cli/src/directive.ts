@@ -1,96 +1,159 @@
 /**
- * `murmuration directive` — Source → murmuration communication.
+ * `murmuration directive` — Source → murmuration communication via GitHub issues.
+ *
+ * Directives are GitHub issues with the `source-directive` label + scope labels.
+ * Agents see them through the existing signal aggregator (listIssues).
+ * Responses are issue comments.
  *
  * Usage:
- *   murmuration directive --agent 01-research "Validate this topic"
- *   murmuration directive --circle content "Should this circle hold meetings?"
- *   murmuration directive --all "Propose your ideal wake cadence"
- *   murmuration directive --list                    # show all directives
- *   murmuration directive --list --status pending   # show pending only
+ *   murmuration directive --root ../my-murmuration --agent 01-research "Validate this topic"
+ *   murmuration directive --root ../my-murmuration --circle content "Should this circle hold meetings?"
+ *   murmuration directive --root ../my-murmuration --all "Propose your ideal wake cadence"
+ *   murmuration directive --root ../my-murmuration --list
  */
 
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { resolve, join } from "node:path";
 
-import { DirectiveStore, type DirectiveScope } from "@murmuration/core";
+import { makeSecretKey } from "@murmuration/core";
+import {
+  createGithubClient,
+  makeRepoCoordinate,
+} from "@murmuration/github";
+import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
+
+const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
+
+/** Read the default repo from the first agent's signal scopes. */
+const findDefaultRepo = async (rootDir: string): Promise<{ owner: string; repo: string } | null> => {
+  const { readdir, readFile } = await import("node:fs/promises");
+  try {
+    const agentsDir = join(rootDir, "agents");
+    const entries = await readdir(agentsDir);
+    for (const e of entries.sort()) {
+      try {
+        const content = await readFile(join(agentsDir, e, "role.md"), "utf8");
+        const ownerMatch = /owner:\s*"?([^"\n]+)"?/.exec(content);
+        const repoMatch = /repo:\s*"?([^"\n]+)"?/.exec(content);
+        if (ownerMatch?.[1] && repoMatch?.[1]) {
+          return { owner: ownerMatch[1].trim(), repo: repoMatch[1].trim() };
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* skip */ }
+  return null;
+};
 
 export const runDirective = async (
   args: readonly string[],
   rootDir: string,
 ): Promise<void> => {
-  const store = new DirectiveStore(resolve(rootDir));
+  const root = resolve(rootDir);
 
-  // Parse args
+  // Load GitHub client
+  const envPath = join(root, ".env");
+  if (!existsSync(envPath)) {
+    console.error("murmuration directive: .env not found (need GITHUB_TOKEN)");
+    process.exit(1);
+  }
+  const provider = new DotenvSecretsProvider({ envPath });
+  await provider.load({ required: [GITHUB_TOKEN], optional: [] });
+
+  // Find the target repo
+  const repoInfo = await findDefaultRepo(root);
+  if (!repoInfo) {
+    console.error("murmuration directive: could not determine target repo from agent role.md files");
+    process.exit(1);
+  }
+  const repoKey = `${repoInfo.owner}/${repoInfo.repo}`;
+  const repo = makeRepoCoordinate(repoInfo.owner, repoInfo.repo);
+  const gh = createGithubClient({
+    token: provider.get(GITHUB_TOKEN),
+    writeScopes: {
+      issueComments: [repoKey],
+      branchCommits: [],
+      labels: [],
+      issues: [repoKey],
+    },
+  });
+
+  // --list mode
   if (args.includes("--list")) {
-    const statusIdx = args.indexOf("--status");
-    const statusFilter = statusIdx >= 0 ? args[statusIdx + 1] : undefined;
-    const all = await store.list();
-    const filtered = statusFilter ? all.filter((d) => d.status === statusFilter) : all;
-    if (filtered.length === 0) {
+    const result = await gh.listIssues(repo, {
+      state: "all",
+      labels: ["source-directive"],
+      perPage: 20,
+    });
+    if (!result.ok) {
+      console.error(`GitHub error: ${result.error.code}`);
+      process.exit(1);
+    }
+    if (result.value.length === 0) {
       console.log("No directives found.");
       return;
     }
-    for (const d of filtered) {
-      const scopeStr =
-        d.scope.kind === "all"
-          ? "all"
-          : d.scope.kind === "agent"
-            ? `agent:${d.scope.agentId}`
-            : `circle:${d.scope.circleId}`;
-      const responses = d.responses?.length ?? 0;
-      console.log(
-        `  ${d.id}  ${d.status.padEnd(10)} ${scopeStr.padEnd(20)} ${d.kind.padEnd(12)} ${String(responses)} responses`,
-      );
-      console.log(`    "${d.body.slice(0, 80)}${d.body.length > 80 ? "..." : ""}"`);
-      if (d.responses && d.responses.length > 0) {
-        for (const r of d.responses) {
-          console.log(`    └─ ${r.agentId}: ${r.excerpt.slice(0, 60)}...`);
-        }
-      }
+    for (const issue of result.value) {
+      const state = issue.state === "open" ? "pending" : "responded";
+      const scope = issue.labels.find((l) => l.startsWith("scope:")) ?? "scope:?";
+      console.log(`  #${String(issue.number.value).padEnd(5)} ${state.padEnd(10)} ${scope.padEnd(20)} ${issue.title.slice(0, 60)}`);
     }
     return;
   }
 
   // Determine scope
-  let scope: DirectiveScope;
   const agentIdx = args.indexOf("--agent");
   const circleIdx = args.indexOf("--circle");
   const allFlag = args.includes("--all");
 
+  let scopeLabel: string;
+  let scopeDesc: string;
   if (agentIdx >= 0 && args[agentIdx + 1]) {
-    scope = { kind: "agent", agentId: args[agentIdx + 1]! };
+    scopeLabel = `scope:agent:${args[agentIdx + 1]}`;
+    scopeDesc = `agent ${args[agentIdx + 1]}`;
   } else if (circleIdx >= 0 && args[circleIdx + 1]) {
-    scope = { kind: "circle", circleId: args[circleIdx + 1]! };
+    scopeLabel = `scope:circle:${args[circleIdx + 1]}`;
+    scopeDesc = `circle ${args[circleIdx + 1]}`;
   } else if (allFlag) {
-    scope = { kind: "all" };
+    scopeLabel = "scope:all";
+    scopeDesc = "all agents";
   } else {
-    console.error(
-      "murmuration directive: specify --agent <id>, --circle <id>, or --all",
-    );
+    console.error("murmuration directive: specify --agent <id>, --circle <id>, or --all");
     process.exit(2);
     return;
   }
 
-  // The body is the last positional argument (not a flag value)
-  const body = args.filter((a) => !a.startsWith("--")).pop()
-    ?? args[args.length - 1];
-
+  // Body is the last positional argument
+  const body = args.filter((a) => !a.startsWith("--")).pop();
   if (!body || body.startsWith("--")) {
-    console.error('murmuration directive: provide a message body as the last argument');
+    console.error("murmuration directive: provide a message body as the last argument");
     process.exit(2);
     return;
   }
 
-  const directive = await store.create(scope, "question", body);
-  const scopeStr =
-    scope.kind === "all"
-      ? "all agents"
-      : scope.kind === "agent"
-        ? `agent ${scope.agentId}`
-        : `circle ${scope.circleId}`;
+  // Create GitHub issue
+  const issueResult = await gh.createIssue(repo, {
+    title: `[DIRECTIVE] ${body.slice(0, 80)}`,
+    labels: ["source-directive", scopeLabel],
+    body: [
+      `**From:** Source`,
+      `**Scope:** ${scopeDesc}`,
+      `**Kind:** question`,
+      ``,
+      body,
+      ``,
+      `---`,
+      `_Created by \`murmuration directive\`. Agents will respond as issue comments on their next wake._`,
+    ].join("\n"),
+  });
 
-  console.log(`Directive created: ${directive.id}`);
-  console.log(`  Scope: ${scopeStr}`);
-  console.log(`  Body: "${body}"`);
-  console.log(`  Status: pending`);
-  console.log(`\nAgents will receive this directive on their next wake.`);
+  if (!issueResult.ok) {
+    console.error(`GitHub error: ${issueResult.error.code} — ${issueResult.error.message}`);
+    process.exit(1);
+  }
+
+  console.log(`Directive created: #${String(issueResult.value.number.value)}`);
+  console.log(`  URL: ${issueResult.value.htmlUrl}`);
+  console.log(`  Scope: ${scopeDesc}`);
+  console.log(`  Labels: source-directive, ${scopeLabel}`);
+  console.log(`\nAgents will see this issue as a signal on their next wake.`);
 };
