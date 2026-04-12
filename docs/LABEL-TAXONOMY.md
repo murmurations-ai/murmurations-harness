@@ -1,8 +1,11 @@
 # GitHub Label Taxonomy
 
-Canonical label set for the Murmuration Harness. All collaborative
-state tracked via GitHub issues uses these labels for categorization,
-state tracking, and scoping.
+Label conventions for the Murmuration Harness. The harness uses a
+small set of **structural labels** that have built-in semantics.
+Everything else is operator-defined — each murmuration adds labels
+for its own circles, agents, governance states, and pipeline stages.
+
+**Operators extend, the harness doesn't prescribe.**
 
 ## Source Directives
 
@@ -23,30 +26,27 @@ state tracking, and scoping.
 
 ## Governance State (state machine via label swaps)
 
-| Label | State |
+The `state:*` labels map to the governance plugin's state graph.
+These are **operator-defined** based on the governance model in use.
+
+**Self-Organizing (S3) example:**
+`state:open`, `state:deliberating`, `state:consent-round`, `state:resolved`, `state:withdrawn`, `state:ratified`, `state:rejected`
+
+**Chain of Command example:**
+`state:drafted`, `state:submitted`, `state:approved`, `state:executing`, `state:completed`, `state:rejected`
+
+**Parliamentary example:**
+`state:motion`, `state:seconded`, `state:debate`, `state:vote`, `state:passed`, `state:failed`, `state:tabled`
+
+The governance plugin's `stateGraphs()` method declares the valid states. The harness creates `state:*` labels from those declarations.
+
+## Circles / Domains
+
+| Pattern | Use |
 |---|---|
-| `state:open` | Newly created, not yet deliberated |
-| `state:deliberating` | Under active discussion |
-| `state:consent-round` | Formal consent round in progress |
-| `state:resolved` | Tension resolved (terminal) |
-| `state:withdrawn` | Withdrawn by filer (terminal) |
-| `state:ratified` | Proposal ratified by consent (terminal) |
-| `state:rejected` | Proposal rejected (terminal) |
+| `circle:<id>` | Associates an issue with a circle/domain |
 
-## Circles
-
-| Label | Circle |
-|---|---|
-| `circle:content` | Content circle |
-| `circle:intelligence` | Intelligence circle |
-| `circle:publishing` | Publishing circle |
-| `circle:community` | Community circle |
-| `circle:sales-marketing` | Sales & Marketing circle |
-| `circle:design-visual` | Design & Visual circle |
-| `circle:finance-legal` | Finance & Legal circle |
-| `circle:quality` | Quality circle |
-
-_Operators add labels for their own circles._
+_Operator-defined. Each murmuration creates labels for its own circles. Examples: `circle:content`, `circle:engineering`, `circle:operations`._
 
 ## Meetings
 
@@ -61,16 +61,13 @@ _Operators add labels for their own circles._
 |---|---|
 | `agent:<id>` | Targets or was filed by a specific agent (e.g. `agent:01-research`) |
 
-## Content Pipeline (operator-defined)
+## Pipeline / Workflow (operator-defined)
 
-These are examples — each murmuration defines its own pipeline labels:
+Each murmuration defines its own workflow labels. Examples:
 
-| Label | Use |
-|---|---|
-| `type:content-idea` | A content idea for validation |
-| `type:research-digest` | A research digest issue |
-| `stage:research` | Content in the research stage |
-| `stage:editorial-planning` | Content being planned for editorial |
+- Content pipeline: `type:content-idea`, `stage:research`, `stage:editorial`
+- Software pipeline: `type:feature`, `type:bug`, `stage:review`, `stage:deploy`
+- Research pipeline: `type:hypothesis`, `stage:experiment`, `stage:analysis`
 
 ## Usage Rules
 
