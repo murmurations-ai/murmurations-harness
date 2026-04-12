@@ -343,4 +343,45 @@ describe("DefaultSignalAggregator", () => {
       }
     }
   });
+
+  it("partitions action items assigned to the waking agent into actionItems", async () => {
+    const issues = [
+      fakeIssue({ n: 259, title: "Action: do something", labels: ["action-item", "assigned:07-wren"] }),
+      fakeIssue({ n: 260, title: "Action: other thing", labels: ["action-item", "assigned:02-content"] }),
+      fakeIssue({ n: 100, title: "Regular issue", labels: ["bug"] }),
+    ];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("07-wren"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.bundle.signals).toHaveLength(3);
+      // Only #259 is assigned to 07-wren
+      expect(result.bundle.actionItems).toHaveLength(1);
+      const item = result.bundle.actionItems[0];
+      expect(item?.kind).toBe("github-issue");
+      if (item?.kind === "github-issue") {
+        expect((item as unknown as { number: number }).number).toBe(259);
+      }
+    }
+  });
+
+  it("returns empty actionItems when no action items are assigned", async () => {
+    const issues = [
+      fakeIssue({ n: 1, title: "Bug", labels: ["bug"] }),
+    ];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("07-wren"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.bundle.actionItems).toHaveLength(0);
+    }
+  });
 });

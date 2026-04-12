@@ -105,6 +105,32 @@ describe("AgentStateStore", () => {
     expect(() => store.transition("ghost", "idle")).toThrow(/unknown agentId "ghost"/);
   });
 
+  it("tracks totalArtifacts and idleWakes", () => {
+    const store = new AgentStateStore();
+    store.register("agent", 120000);
+    store.transition("agent", "idle");
+
+    // Productive wake (3 artifacts)
+    store.transition("agent", "waking", "w1");
+    store.transition("agent", "running", "w1");
+    store.recordWakeOutcome("w1", "success", { artifactCount: 3 });
+    expect(store.getAgent("agent")?.totalArtifacts).toBe(3);
+    expect(store.getAgent("agent")?.idleWakes).toBe(0);
+
+    // Idle wake (0 artifacts)
+    store.transition("agent", "waking", "w2");
+    store.transition("agent", "running", "w2");
+    store.recordWakeOutcome("w2", "success", { artifactCount: 0 });
+    expect(store.getAgent("agent")?.totalArtifacts).toBe(3);
+    expect(store.getAgent("agent")?.idleWakes).toBe(1);
+
+    // Failed wake doesn't count as idle
+    store.transition("agent", "waking", "w3");
+    store.transition("agent", "running", "w3");
+    store.recordWakeOutcome("w3", "failure");
+    expect(store.getAgent("agent")?.idleWakes).toBe(1); // still 1
+  });
+
   it("getAllAgents returns all registered agents", () => {
     const store = new AgentStateStore();
     store.register("a", 1000);

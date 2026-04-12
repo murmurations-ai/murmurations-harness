@@ -201,6 +201,25 @@ describe("NoOpGovernancePlugin", () => {
 });
 
 // ---------------------------------------------------------------------------
+// GovernanceTerminology + DEFAULT_TERMINOLOGY
+// ---------------------------------------------------------------------------
+
+describe("GovernanceTerminology", () => {
+  it("NoOpGovernancePlugin has no terminology (uses defaults)", () => {
+    const plugin = new NoOpGovernancePlugin();
+    expect(plugin.terminology).toBeUndefined();
+  });
+
+  it("DEFAULT_TERMINOLOGY uses generic terms", async () => {
+    const { DEFAULT_TERMINOLOGY } = await import("./index.js");
+    expect(DEFAULT_TERMINOLOGY.group).toBe("group");
+    expect(DEFAULT_TERMINOLOGY.groupPlural).toBe("groups");
+    expect(DEFAULT_TERMINOLOGY.governanceItem).toBe("item");
+    expect(DEFAULT_TERMINOLOGY.governanceEvent).toBe("governance event");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Sync callbacks (#49)
 // ---------------------------------------------------------------------------
 

@@ -98,4 +98,15 @@ Done.`;
     expect(actions).toHaveLength(1);
     expect(actions[0]?.issueNumber).toBe(10);
   });
+
+  it("parses removeLabel for state transition label swaps", () => {
+    const text = `\`\`\`actions
+[{"kind": "label-issue", "issueNumber": 42, "label": "state:ratified", "removeLabel": "state:deliberating"}]
+\`\`\``;
+
+    const actions = parseMeetingActions(text);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]?.label).toBe("state:ratified");
+    expect(actions[0]?.removeLabel).toBe("state:deliberating");
+  });
 });

@@ -266,4 +266,33 @@ describe("validateWake", () => {
     expect(v.actionItemsAddressed).toBe(0);
     expect(v.reason).toContain("none addressed");
   });
+
+  it("counts governance events as artifacts", () => {
+    const result = { ...emptyResult, governanceEvents: [{ kind: "tension", payload: {} }] };
+    const v = validateWake({ actionItems: [] }, result, []);
+    expect(v.productive).toBe(true);
+    expect(v.artifactCount).toBe(1);
+  });
+
+  it("handles mixed addressed and unaddressed action items", () => {
+    const actionItems = [
+      { kind: "github-issue" as const, id: "a", trust: "trusted" as const, fetchedAt: new Date(), number: 10, title: "A", url: "x", labels: ["action-item", "assigned:x"], excerpt: "" },
+      { kind: "github-issue" as const, id: "b", trust: "trusted" as const, fetchedAt: new Date(), number: 20, title: "B", url: "x", labels: ["action-item", "assigned:x"], excerpt: "" },
+    ];
+    const result = { ...emptyResult, wakeSummary: "Addressed #10 but not the other." };
+    const v = validateWake({ actionItems }, result, []);
+    expect(v.actionItemsAssigned).toBe(2);
+    expect(v.actionItemsAddressed).toBe(1);
+    expect(v.productive).toBe(true);
+  });
+
+  it("commit-file without fileContent is invalid", () => {
+    const text = '```actions\n[{"kind": "commit-file", "filePath": "a.md"}]\n```';
+    expect(parseWakeActions(text)).toHaveLength(0);
+  });
+
+  it("commit-file without filePath is invalid", () => {
+    const text = '```actions\n[{"kind": "commit-file", "fileContent": "hello"}]\n```';
+    expect(parseWakeActions(text)).toHaveLength(0);
+  });
 });
