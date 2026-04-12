@@ -84,25 +84,38 @@ export interface MemberContribution {
   readonly outputTokens: number;
 }
 
-/** Parsed position from a member's governance contribution. */
-export interface ConsentPosition {
+/**
+ * A member's position on a governance item. The position string is
+ * governance-model-defined — S3 uses "consent"/"concern"/"objection",
+ * Chain of Command uses "approve"/"reject", Parliamentary uses "aye"/"nay".
+ * The harness treats these as opaque strings.
+ */
+export interface GovernancePosition {
   readonly agentId: string;
   readonly itemId: string;
-  readonly position: "consent" | "concern" | "objection";
+  readonly position: string;
   readonly reasoning: string;
-  readonly harm?: string;
-  readonly amendment?: string;
+  /** Model-specific fields (e.g. S3 "harm"/"amendment" on objections). */
+  readonly details?: Readonly<Record<string, string>>;
 }
 
-/** Tally of positions for a single governance item. */
-export interface ConsentTally {
+/**
+ * Tally of positions for a single governance item. Position counts
+ * are keyed by the model-defined position strings. The recommendation
+ * is produced by the governance plugin's tally logic, not hardcoded.
+ */
+export interface GovernanceTally {
   readonly itemId: string;
-  readonly consents: number;
-  readonly concerns: number;
-  readonly objections: number;
-  readonly positions: readonly ConsentPosition[];
-  readonly recommendation: "ratify" | "amend" | "escalate";
+  /** Count per position string (e.g. { consent: 3, objection: 1 }). */
+  readonly counts: Readonly<Record<string, number>>;
+  readonly positions: readonly GovernancePosition[];
+  /** Plugin-determined recommendation (e.g. "ratify", "approve", "pass"). */
+  readonly recommendation: string;
 }
+
+// Legacy aliases for backwards compatibility with existing tests/consumers
+export type ConsentPosition = GovernancePosition;
+export type ConsentTally = GovernanceTally;
 
 export interface CircleWakeResult {
   readonly circleId: string;
@@ -116,8 +129,8 @@ export interface CircleWakeResult {
   readonly totalInputTokens: number;
   readonly totalOutputTokens: number;
   readonly governanceEvents: readonly { kind: string; payload: unknown }[];
-  /** Consent round tallies, one per governance item (governance meetings only). */
-  readonly tallies: readonly ConsentTally[];
+  /** Position tallies, one per governance item (governance meetings only). */
+  readonly tallies: readonly GovernanceTally[];
 }
 
 // ---------------------------------------------------------------------------
@@ -183,8 +196,44 @@ const isValidMeetingAction = (item: unknown): item is MeetingAction => {
 };
 
 // ---------------------------------------------------------------------------
+// Default governance prompts (generic — not tied to any governance model)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_GOV_MEMBER_INSTRUCTIONS = `For EACH governance item, state your position and reasoning.
+
+ITEM: [item id]
+POSITION: [your position — e.g. approve, reject, support, object, defer]
+REASONING: [one sentence explaining your position]
+
+Add any additional context relevant to your position.`;
+
+const DEFAULT_GOV_FACILITATOR_INSTRUCTIONS = `For each governance item:
+- Summarize the positions from all members
+- Count positions by type
+- Produce a clear recommendation based on the positions
+- State whether the item should advance, be amended, or be tabled`;
+
+// ---------------------------------------------------------------------------
 // Circle Wake Runner
 // ---------------------------------------------------------------------------
+
+/**
+ * Governance-model-specific prompt templates for governance meetings.
+ * The plugin provides these so the harness doesn't hardcode S3 terms.
+ * If not provided, the runner uses generic defaults.
+ */
+export interface GovernanceMeetingPrompts {
+  /** Prompt instructions for each member's governance contribution.
+   *  Should tell the member what positions are valid and what format to use. */
+  readonly memberInstructions: string;
+  /** Prompt instructions for the facilitator's governance synthesis.
+   *  Should tell the facilitator how to tally and what recommendations to produce. */
+  readonly facilitatorInstructions: string;
+  /** Parse positions from a member's contribution text. Returns positions for all items. */
+  readonly parsePositions: (content: string, governanceQueue: readonly GovernanceItem[]) => GovernancePosition[];
+  /** Tally positions across all members and produce recommendations. */
+  readonly tallyPositions: (positions: readonly GovernancePosition[], governanceQueue: readonly GovernanceItem[]) => GovernanceTally[];
+}
 
 export interface CircleWakeRunnerDeps {
   /** Call an LLM with system prompt + user prompt, return the response text + token counts. */
@@ -194,6 +243,8 @@ export interface CircleWakeRunnerDeps {
     agentId: string;
     signal?: AbortSignal | undefined;
   }) => Promise<{ content: string; inputTokens: number; outputTokens: number }>;
+  /** Governance-model-specific prompts and parsing. If omitted, a generic default is used. */
+  readonly governancePrompts?: GovernanceMeetingPrompts;
 }
 
 /**
@@ -244,15 +295,7 @@ export const runCircleWake = async (
 You are ${memberId}, a member of the ${context.circleId} circle. Provide your contribution to this ${context.kind} meeting.
 
 ${context.kind === "governance"
-        ? `For EACH governance item, respond in this EXACT format:
-
-ITEM: [item id]
-POSITION: consent / concern / objection
-REASONING: [one sentence]
-
-If POSITION is "objection", also include:
-HARM: [what harm would adopting this cause]
-AMENDMENT: [what change would resolve your objection]`
+        ? (deps.governancePrompts?.memberInstructions ?? DEFAULT_GOV_MEMBER_INSTRUCTIONS)
         : "Share your perspective on the circle's current priorities, what's working, and what needs attention."}
 
 Keep your contribution focused and concise (3-5 paragraphs).`;
@@ -291,15 +334,11 @@ ${allContributions}
 You are ${context.facilitator}, the facilitator of the ${context.circleId} circle. Synthesize all member contributions into a meeting summary.
 
 ${context.kind === "governance"
-    ? `For each governance item:
-- Tally positions: how many consent, how many concern, how many objection
-- If all consent (no objections): recommend RATIFY
-- If objections exist: summarize each objection and recommend AMEND or ESCALATE
-- Produce a clear decision recommendation for each item`
+    ? (deps.governancePrompts?.facilitatorInstructions ?? DEFAULT_GOV_FACILITATOR_INSTRUCTIONS)
     : `Produce:
 1. KEY DECISIONS — what the circle agreed on
 2. ACTION ITEMS — who does what by when (each becomes a GitHub issue)
-3. TENSIONS — any new tensions to file for governance
+3. TENSIONS — any new governance items to file
 4. NEXT MEETING — what to revisit`}
 
 End with a one-paragraph meeting summary.
@@ -332,45 +371,20 @@ Only reference issue numbers from the Open Issues list above. Do not invent issu
   totalInput += synthesis.inputTokens;
   totalOutput += synthesis.outputTokens;
 
-  // Parse consent round tallies from member contributions (governance only)
-  const tallies: ConsentTally[] = [];
-  if (context.kind === "governance" && context.governanceQueue.length > 0) {
-    for (const item of context.governanceQueue) {
-      const itemId = item.id.slice(0, 8);
-      const positions: ConsentPosition[] = [];
-
-      for (const c of contributions) {
-        // Parse structured responses from each member's contribution
-        const itemPattern = new RegExp(
-          `ITEM:\\s*${itemId}[\\s\\S]*?POSITION:\\s*(consent|concern|objection)(?:[\\s\\S]*?REASONING:\\s*(.+))?(?:[\\s\\S]*?HARM:\\s*(.+))?(?:[\\s\\S]*?AMENDMENT:\\s*(.+))?`,
-          "i",
-        );
-        const match = itemPattern.exec(c.content);
-        if (match) {
-          positions.push({
-            agentId: c.agentId,
-            itemId,
-            position: match[1]!.toLowerCase() as "consent" | "concern" | "objection",
-            reasoning: match[2]?.trim() ?? "",
-            ...(match[3] ? { harm: match[3].trim() } : {}),
-            ...(match[4] ? { amendment: match[4].trim() } : {}),
-          });
-        }
+  // Parse governance positions from member contributions (governance only).
+  // The governance plugin provides the parser + tally logic. If none is
+  // provided, positions are left empty — the facilitator's prose synthesis
+  // is the authoritative output.
+  let tallies: GovernanceTally[] = [];
+  if (context.kind === "governance" && context.governanceQueue.length > 0 && deps.governancePrompts) {
+    const allPositions: GovernancePosition[] = [];
+    for (const c of contributions) {
+      const parsed = deps.governancePrompts.parsePositions(c.content, context.governanceQueue);
+      for (const p of parsed) {
+        allPositions.push({ ...p, agentId: c.agentId });
       }
-
-      const consents = positions.filter((p) => p.position === "consent").length;
-      const concerns = positions.filter((p) => p.position === "concern").length;
-      const objections = positions.filter((p) => p.position === "objection").length;
-
-      let recommendation: ConsentTally["recommendation"];
-      if (objections > 0) {
-        recommendation = objections > 1 ? "escalate" : "amend";
-      } else {
-        recommendation = "ratify";
-      }
-
-      tallies.push({ itemId, consents, concerns, objections, positions, recommendation });
     }
+    tallies = deps.governancePrompts.tallyPositions(allPositions, context.governanceQueue);
   }
 
   // Parse structured actions from the facilitator's synthesis

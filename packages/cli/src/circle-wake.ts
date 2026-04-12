@@ -302,7 +302,16 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
     });
     await store.load();
     const pending = store.query();
-    governanceQueue.push(...pending.filter((i) => !["resolved", "ratified", "rejected", "withdrawn", "completed"].includes(i.currentState)));
+    // Filter to non-terminal items. Terminal state names are governance-model-defined;
+    // the store's registered graphs declare them. If no graphs are registered (CLI
+    // standalone), fall back to checking if the state store's graphs can tell us.
+    const terminalStates = new Set(store.graphs().flatMap((g) => g.terminalStates));
+    if (terminalStates.size > 0) {
+      governanceQueue.push(...pending.filter((i) => !terminalStates.has(i.currentState)));
+    } else {
+      // No graphs registered — include all items and let the meeting decide
+      governanceQueue.push(...pending);
+    }
   }
 
   // Fetch the circle's GitHub issues backlog for context
@@ -389,19 +398,14 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
     console.log(`\n--- ${String(result.actions.length)} action(s) proposed but no GitHub access — skipped ---`);
   }
 
-  // Print consent round tallies for governance meetings
+  // Print governance position tallies
   if (result.tallies.length > 0) {
-    console.log(`\n--- Consent Round Tallies ---\n`);
+    console.log(`\n--- Governance Tallies ---\n`);
     for (const tally of result.tallies) {
-      const rec = tally.recommendation === "ratify"
-        ? "\x1b[32mRATIFY\x1b[0m"
-        : tally.recommendation === "amend"
-          ? "\x1b[33mAMEND\x1b[0m"
-          : "\x1b[31mESCALATE\x1b[0m";
-      console.log(`  Item ${tally.itemId}: ${String(tally.consents)} consent, ${String(tally.concerns)} concern, ${String(tally.objections)} objection → ${rec}`);
+      const countsStr = Object.entries(tally.counts).map(([k, v]) => `${String(v)} ${k}`).join(", ");
+      console.log(`  Item ${tally.itemId}: ${countsStr} → \x1b[1m${tally.recommendation.toUpperCase()}\x1b[0m`);
       for (const p of tally.positions) {
-        const posColor = p.position === "consent" ? "\x1b[32m" : p.position === "objection" ? "\x1b[31m" : "\x1b[33m";
-        console.log(`    ${p.agentId}: ${posColor}${p.position}\x1b[0m — ${p.reasoning.slice(0, 60)}`);
+        console.log(`    ${p.agentId}: \x1b[33m${p.position}\x1b[0m — ${p.reasoning.slice(0, 60)}`);
       }
     }
   }
@@ -440,9 +444,10 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
     ...(result.tallies.length > 0
       ? [
           "\n## Consent Round Tallies\n",
-          ...result.tallies.map((t) =>
-            `### Item ${t.itemId}\n- Consent: ${String(t.consents)}, Concern: ${String(t.concerns)}, Objection: ${String(t.objections)}\n- Recommendation: **${t.recommendation.toUpperCase()}**\n${t.positions.map((p) => `  - ${p.agentId}: ${p.position}${p.reasoning ? ` — ${p.reasoning}` : ""}`).join("\n")}`,
-          ),
+          ...result.tallies.map((t) => {
+            const countsStr = Object.entries(t.counts).map(([k, v]) => `${k}: ${String(v)}`).join(", ");
+            return `### Item ${t.itemId}\n- ${countsStr}\n- Recommendation: **${t.recommendation.toUpperCase()}**\n${t.positions.map((p) => `  - ${p.agentId}: ${p.position}${p.reasoning ? ` — ${p.reasoning}` : ""}`).join("\n")}`;
+          }),
         ]
       : []),
     "",
