@@ -146,26 +146,39 @@ const VALID_ACTION_KINDS = new Set(["label-issue", "create-issue", "close-issue"
  * in a ```actions or ```json fenced block, or a bare JSON array.
  * Returns empty array if no valid actions found (never throws).
  */
-export const parseMeetingActions = (text: string): MeetingAction[] => {
+/** Result of parsing meeting actions, including truncation detection. */
+export interface ParsedMeetingActions {
+  readonly actions: readonly MeetingAction[];
+  /** True if the actions block was truncated (maxOutputTokens hit). */
+  readonly truncated: boolean;
+}
+
+export const parseMeetingActions = (text: string): MeetingAction[] =>
+  parseMeetingActionsWithMeta(text).actions;
+
+/**
+ * Parse meeting actions with metadata (truncation detection).
+ * Use this when you need to know if output was truncated.
+ */
+export const parseMeetingActionsWithMeta = (text: string): ParsedMeetingActions => {
   // Try fenced code block first: ```actions\n[...]\n``` or ```json\n[...]\n```
   const fencedMatch = /```(?:actions|json)\s*\n(\[[\s\S]*?\])\s*\n```/.exec(text);
   const jsonStr = fencedMatch?.[1] ?? extractBareJsonArray(text);
   if (jsonStr) {
     try {
       const parsed: unknown = JSON.parse(jsonStr);
-      if (Array.isArray(parsed)) return parsed.filter(isValidMeetingAction);
+      if (Array.isArray(parsed)) return { actions: parsed.filter(isValidMeetingAction), truncated: false };
     } catch { /* fall through to truncation recovery */ }
   }
 
   // Truncation recovery: if the actions block was cut off mid-JSON,
   // extract individual complete JSON objects from the text.
-  // This handles the case where maxOutputTokens truncates the response.
   const truncatedMatch = /```(?:actions|json)\s*\n\[([\s\S]*)$/.exec(text);
   if (truncatedMatch?.[1]) {
-    return recoverTruncatedActions(truncatedMatch[1]);
+    return { actions: recoverTruncatedActions(truncatedMatch[1]), truncated: true };
   }
 
-  return [];
+  return { actions: [], truncated: false };
 };
 
 /** Extract complete JSON objects from a truncated array body. */
@@ -453,7 +466,23 @@ Only reference issue numbers from the Open Issues list above. Do not invent issu
   }
 
   // Parse structured actions from the facilitator's synthesis
-  const actions = parseMeetingActions(synthesis.content);
+  const parsed = parseMeetingActionsWithMeta(synthesis.content);
+  const actions = parsed.actions;
+
+  // Truncation creates a governance event — the system should know
+  // actions were lost and address it in a retrospective.
+  const governanceEvents: { kind: string; payload: unknown }[] = [];
+  if (parsed.truncated) {
+    governanceEvents.push({
+      kind: "output-truncated",
+      payload: {
+        groupId: context.groupId,
+        meetingKind: context.kind,
+        recoveredActions: actions.length,
+        description: `Facilitator output was truncated (maxOutputTokens hit). ${String(actions.length)} actions were recovered but some may have been lost. Consider increasing token limits or reducing meeting scope.`,
+      },
+    });
+  }
 
   return {
     groupId: context.groupId,
@@ -464,7 +493,7 @@ Only reference issue numbers from the Open Issues list above. Do not invent issu
     receipts: [], // populated by the caller after executing actions
     totalInputTokens: totalInput,
     totalOutputTokens: totalOutput,
-    governanceEvents: [],
+    governanceEvents,
     tallies,
   };
 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseMeetingActions } from "./index.js";
+import { parseMeetingActions, parseMeetingActionsWithMeta } from "./index.js";
 
 describe("parseMeetingActions", () => {
   it("parses actions from a fenced ```actions block", () => {
@@ -116,6 +116,21 @@ Done.`;
     expect(actions[0]?.issueNumber).toBe(275);
     expect(actions[1]?.kind).toBe("close-issue");
     expect(actions[1]?.issueNumber).toBe(275);
+  });
+
+  it("detects truncation and sets truncated flag", () => {
+    const text = "```actions\n[\n  {\"kind\": \"close-issue\", \"issueNumber\": 1},\n  {\"kind\": \"comment-issue\", \"issueNumber\": 2, \"body\": \"trun";
+    const result = parseMeetingActionsWithMeta(text);
+    expect(result.truncated).toBe(true);
+    expect(result.actions).toHaveLength(1); // only the complete close-issue
+    expect(result.actions[0]?.kind).toBe("close-issue");
+  });
+
+  it("sets truncated=false for complete output", () => {
+    const text = "```actions\n[{\"kind\": \"close-issue\", \"issueNumber\": 1}]\n```";
+    const result = parseMeetingActionsWithMeta(text);
+    expect(result.truncated).toBe(false);
+    expect(result.actions).toHaveLength(1);
   });
 
   it("parses removeLabel for state transition label swaps", () => {
