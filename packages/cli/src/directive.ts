@@ -15,7 +15,7 @@
 import { existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 
-import { makeSecretKey } from "@murmuration/core";
+import { makeSecretKey, IdentityLoader } from "@murmuration/core";
 import {
   createGithubClient,
   makeRepoCoordinate,
@@ -24,21 +24,20 @@ import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
-/** Read the default repo from the first agent's signal scopes. */
+/** Read the default repo from the first agent's signal scopes via IdentityLoader. */
 const findDefaultRepo = async (rootDir: string): Promise<{ owner: string; repo: string } | null> => {
-  const { readdir, readFile } = await import("node:fs/promises");
   try {
-    const agentsDir = join(rootDir, "agents");
-    const entries = await readdir(agentsDir);
-    for (const e of entries.sort()) {
+    const loader = new IdentityLoader({ rootDir });
+    const agentIds = await loader.discover();
+    for (const agentId of agentIds) {
       try {
-        const content = await readFile(join(agentsDir, e, "role.md"), "utf8");
-        const ownerMatch = /owner:\s*"?([^"\n]+)"?/.exec(content);
-        const repoMatch = /repo:\s*"?([^"\n]+)"?/.exec(content);
-        if (ownerMatch?.[1] && repoMatch?.[1]) {
-          return { owner: ownerMatch[1].trim(), repo: repoMatch[1].trim() };
+        const identity = await loader.load(agentId);
+        const scopes = identity.frontmatter.signals?.github_scopes;
+        if (scopes && scopes.length > 0) {
+          const scope = scopes[0]!;
+          return { owner: scope.owner, repo: scope.repo };
         }
-      } catch { /* skip */ }
+      } catch { /* skip agents that can't be loaded */ }
     }
   } catch { /* skip */ }
   return null;

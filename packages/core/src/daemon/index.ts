@@ -57,6 +57,9 @@ import {
   type GovernancePlugin,
 } from "../governance/index.js";
 
+/** Circuit breaker: skip wakes after this many consecutive failures. */
+const CIRCUIT_BREAKER_THRESHOLD = 3;
+
 // ---------------------------------------------------------------------------
 // Agent registry (Phase 1A: hardcoded inline; Phase 1B: loaded from disk)
 // ---------------------------------------------------------------------------
@@ -566,6 +569,20 @@ export class Daemon {
         wakeId: event.wakeId.value,
       });
       return;
+    }
+
+    // Circuit breaker: skip wakes for agents that have failed too many times in a row.
+    if (this.#agentStateStore) {
+      const record = this.#agentStateStore.getAgent(agent.agentId);
+      if (record && record.consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD) {
+        this.#logger.warn("daemon.wake.circuitBreaker", {
+          agentId: agent.agentId,
+          consecutiveFailures: record.consecutiveFailures,
+          threshold: CIRCUIT_BREAKER_THRESHOLD,
+          wakeId: event.wakeId.value,
+        });
+        return;
+      }
     }
 
     const p = this.#runWake(agent, event).finally(() => {
