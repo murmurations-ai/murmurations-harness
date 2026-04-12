@@ -85,14 +85,10 @@
 | 1.3 | **Meeting minutes → GitHub** | `packages/cli/src/circle-wake.ts` | TODO |
 | | Circle meetings create issues or commit files | | |
 | | Action items from meetings → separate issues | | |
-| 1.4 | **Agent outputs → committed files** | `test-murmuration/agents/shared-runner.mjs` | PARTIAL |
-| | Extend commitPathPrefix to all agents that produce artifacts | | |
-| | Research → `notes/weekly/` ✅ | | |
-| | Content Prod → `drafts/articles/` ✅ | | |
-| | Chronicler → `notes/daily/` TODO | | |
-| | Analytics → `analytics/reports/` TODO | | |
-| | Design → `designs/briefs/` TODO | | |
-| | CFO → `analytics/cost-summaries/` TODO | | |
+| 1.4 | **Agent outputs → committed files** | shared runner's `commitPathPrefix` option | PARTIAL |
+| | Each agent's role.md or runner config declares where it commits artifacts | | |
+| | The shared runner's `commitPathPrefix` already supports this — extend to all artifact-producing agents | | |
+| | The specific folder structure is an operator decision, not a harness decision — each murmuration chooses its own repo tree layout (see repo tree section in GITHUB-AS-SYSTEM-OF-RECORD.md) | | |
 | 1.5 | **Label taxonomy** | `docs/LABEL-TAXONOMY.md` | TODO |
 | | Publish the canonical label set | | |
 

@@ -101,6 +101,17 @@ Research Agent commits to `notes/weekly/`, Content Production commits to `drafts
 
 The GitHub repo tree is the murmuration's shared workspace. Issues coordinate work; the repo stores the artifacts. Every agent commits its work product to the appropriate directory, and issues reference files by path.
 
+**The specific folder structure is an operator decision.** Each murmuration chooses the layout that best serves its agents, circles, and Source. The harness provides the `commitPathPrefix` mechanism; the operator (or the murmuration itself via governance) decides the tree. Examples:
+
+- **By function:** `notes/`, `drafts/`, `designs/`, `analytics/`
+- **By circle:** `circles/content/`, `circles/intelligence/`
+- **By agent:** `agents/01-research/output/`, `agents/02-content/output/`
+- **PARA method:** `projects/`, `areas/`, `resources/`, `archives/`
+- **Custom:** whatever the murmuration decides
+
+A good first governance directive for any new murmuration: "What folder structure will best serve all agents, their roles, and Source?"
+
+**Example layout (not prescriptive):**
 ```
 my-murmuration/
   murmuration/soul.md                      ← identity
