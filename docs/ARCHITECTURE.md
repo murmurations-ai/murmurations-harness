@@ -1,6 +1,6 @@
 # Murmuration Harness Architecture
 
-**Status:** Living document — updated as the architecture evolves
+**Status:** Living document — updated 2026-04-17
 **Principle:** The harness exists to help agents do real work, not to facilitate governance theater.
 
 ---
@@ -148,6 +148,105 @@ The dashboard tracks **work output**, not **activity count**:
 | **Cost per artifact** | Efficiency |
 
 An agent that runs daily but produces no artifacts is not working — it's idling. The dashboard should make this visible.
+
+### Structured Actions (not prose)
+
+The harness enforces real work by requiring **structured action output** from every action type — not prose that describes what should happen, but machine-readable instructions that the harness executes against GitHub.
+
+#### MeetingAction
+
+Every circle meeting contribution (member round + facilitator synthesis) returns both prose (for the meeting record) and structured actions:
+
+```typescript
+interface MeetingAction {
+  kind: "label-issue" | "create-issue" | "close-issue" | "comment-issue";
+  issueNumber?: number;       // for label/close/comment
+  label?: string;             // for label-issue (e.g. "priority:high", "assigned:01-research")
+  removeLabel?: string;       // for label-issue (swap, e.g. remove "priority:low")
+  title?: string;             // for create-issue
+  body?: string;              // for create-issue or comment-issue
+  labels?: string[];          // for create-issue
+}
+
+interface MemberContribution {
+  content: string;            // prose — goes into meeting minutes
+  actions: MeetingAction[];   // work — executed against GitHub by the runner
+}
+```
+
+The facilitator's synthesis produces the **authoritative action list**. The runner executes every action, logs what succeeded, and includes the execution receipt in the meeting minutes.
+
+This means a circle meeting that says "we should prioritize issue #42" must emit `{ kind: "label-issue", issueNumber: 42, label: "priority:high" }`. If it only says it in prose, it didn't happen.
+
+#### Action Items → GitHub Issues
+
+Meetings, directives, and governance rounds frequently produce **action items** — concrete tasks that specific agents, circles, or Source must complete. These are not meeting notes. They are GitHub issues.
+
+Every action item must specify:
+- **Who** — an agent ID, circle ID, or "source"
+- **What** — a concrete, verifiable deliverable
+- **By when** — optional deadline (label or milestone)
+
+The runner creates a GitHub issue for each action item with:
+- Title: the deliverable
+- Labels: `action-item`, `assigned:<who>`, `circle:<circle>`, optionally `priority:<level>`
+- Body: context from the meeting, link back to the meeting minutes issue
+
+Agents see action items on their next wake as GitHub issue signals (labelled `assigned:<agentId>`). They appear in the agent's signal bundle alongside other work items. When the agent completes the work, it closes the issue.
+
+This closes the loop: meeting → action item issue → agent signal → agent work → issue closed.
+
+#### Wake Actions
+
+Individual agent wakes can also return structured actions alongside their digest output. An agent that analyzes the backlog might emit:
+
+```typescript
+interface WakeAction {
+  kind: "create-issue" | "label-issue" | "comment-issue" | "close-issue" | "commit-file";
+  // same fields as MeetingAction, plus:
+  filePath?: string;          // for commit-file
+  fileContent?: string;       // for commit-file
+}
+```
+
+The executor validates actions against the agent's write scopes (ADR-0017) before executing them. An agent can't label issues in a repo it doesn't have write access to.
+
+### "Did Work" Enforcement
+
+The harness tracks whether each action produced real artifacts:
+
+```
+Wake completed → count artifacts produced:
+  - GitHub API mutations executed (labels, issues, comments, commits)
+  - Files committed
+  - Governance state transitions
+
+If artifacts == 0:
+  → Log as "idle wake" (not "successful wake")
+  → Increment idle counter on AgentStateStore
+  → Dashboard shows idle wakes distinctly from productive wakes
+```
+
+The distinction matters: a "successful" wake that produces no artifacts is **not success** — it's an agent that ran, burned tokens, and changed nothing. The dashboard, the strategy plugin, and Source all need to see this difference.
+
+Over time, the idle-wake ratio per agent tells you which agents are producing value and which are governance theater.
+
+### Queryable Work Queue
+
+After a circle meeting executes its actions, the prioritized backlog is **queryable from GitHub**:
+
+```bash
+# What's highest priority for the engineering circle?
+gh issue list --label "circle:engineering" --label "priority:high" --state open
+
+# What action items are assigned to the research agent?
+gh issue list --label "assigned:01-research" --label "action-item" --state open
+
+# What did the content circle decide in its last meeting?
+gh issue list --label "circle-meeting" --label "circle:content" --state closed -L 1
+```
+
+If you can't answer "what should we work on tomorrow?" with a `gh issue list` command, the meeting didn't do its job.
 
 ---
 

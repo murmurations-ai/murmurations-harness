@@ -106,54 +106,105 @@ circle-meeting, governance-meeting
 type:content-idea, type:research-digest, stage:*
 ```
 
-### Phase 2 — Agent Self-Reflection + Self-Organizing Cadence
+### Phase 2 — Structured Actions: Agents Do Real Work (PRIORITY)
+
+**The most critical gap in the harness.** Currently, meetings and wakes produce prose. They need to produce structured actions that the harness executes against GitHub. Without this, everything is governance theater.
+
+**Principle:** If the only output is text, it didn't happen. Every action must produce queryable state changes in GitHub.
+
+| Step | What | Files | Status |
+|---|---|---|---|
+| 2.1 | **MeetingAction type + parser** | `packages/core/src/circles/index.ts` | TODO |
+| | Define `MeetingAction` interface (label-issue, create-issue, close-issue, comment-issue) | | |
+| | LLM prompt instructs facilitator to return JSON action block alongside prose | | |
+| | Parse actions from facilitator output (structured JSON block) | | |
+| 2.2 | **Action execution in circle-wake runner** | `packages/core/src/circles/index.ts`, `packages/cli/src/circle-wake.ts` | TODO |
+| | Runner receives GitHub client with write access | | |
+| | After facilitator synthesis, execute each MeetingAction against GitHub | | |
+| | Log execution receipts (success/failure per action) | | |
+| | Include receipts in meeting minutes issue | | |
+| 2.3 | **Action items → GitHub issues** | `packages/core/src/circles/index.ts` | TODO |
+| | Meetings create GitHub issues for each action item | | |
+| | Labels: `action-item`, `assigned:<agent-id>` or `assigned:<circle-id>` or `assigned:source` | | |
+| | Body links back to the meeting minutes issue | | |
+| | Agents see action items as signals on their next wake | | |
+| 2.4 | **WakeAction type + executor** | `packages/core/src/execution/in-process.ts` | TODO |
+| | Define `WakeAction` interface for individual agent wakes | | |
+| | Agent runners return `{ wakeSummary, actions? }` | | |
+| | InProcessExecutor validates actions against write scopes (ADR-0017) | | |
+| | Execute valid actions, reject scope violations | | |
+| 2.5 | **"Did Work" tracking** | `packages/core/src/agents/index.ts`, `packages/core/src/daemon/index.ts` | TODO |
+| | Count artifacts produced per wake (mutations, commits, state transitions) | | |
+| | AgentStateStore tracks `artifactCount` + `idleWakes` per agent | | |
+| | Dashboard distinguishes productive wakes from idle wakes | | |
+| | Strategy plugin (Phase 4) uses artifact rate as efficiency metric | | |
+| 2.6 | **Governance round actions** | `packages/core/src/circles/index.ts` | TODO |
+| | Governance meetings execute state transitions (label swaps on GitHub issues) | | |
+| | Consent round → ratified = issue closed + decision record committed | | |
+| | Positions posted as structured comments, not just prose | | |
+| 2.7 | **Queryable work queue** | Labels + conventions | TODO |
+| | After meetings, `gh issue list --label priority:high --label circle:X` returns work | | |
+| | `gh issue list --label action-item --label assigned:01-research` returns agent tasks | | |
+| | Document the query patterns in LABEL-TAXONOMY.md | | |
+
+**Label conventions for structured actions:**
+```
+priority:critical, priority:high, priority:medium, priority:low
+assigned:<agent-id>           (e.g. assigned:01-research)
+assigned:<circle-id>          (e.g. assigned:engineering)
+assigned:source
+action-item
+blocked
+```
+
+### Phase 3 — Agent Self-Reflection + Self-Organizing Cadence
 
 **Governance-model-agnostic.** The active governance plugin provides the flavor, language, and state machine for all governance interactions. The harness provides the plumbing (events, state store, GitHub sync); the plugin provides the semantics (what events are called, what states exist, how decisions are made). Agents don't need to know which governance model is active — they emit generic governance events and the plugin handles the rest.
 
 | Step | What | Status |
 |---|---|---|
-| 2.1 | **Self-reflection prompt** — at the end of each wake, the runner asks for: `EFFECTIVENESS` (high/medium/low), `OBSERVATION` (one sentence), `GOVERNANCE_EVENT` (none, or `{ kind, description }`). The `kind` is plugin-defined — S3 uses "tension", Chain of Command uses "report", Meritocratic uses "flag", etc. The runner doesn't know which model is active; it just emits the event. | DONE (in test-murmuration shared-runner.mjs, needs s/TENSION/GOVERNANCE_EVENT/ rename + validation) |
-| 2.2 | **Governance event → GitHub issues** — when an agent emits a governance event, the GovernancePlugin creates an item in the state store, and GovernanceGitHubSync creates a GitHub issue with labels from the plugin's state graph (`governance:<kind>`, `state:<initial>`, `agent:<id>`, `circle:<id>`). The issue labels and state transitions are defined by the governance model, not hardcoded. | Ready — Phase 1.2 GovernanceGitHubSync handles this |
-| 2.3 | **Cadence self-organization** — agents propose schedule changes via governance events, circles process them through whatever governance model is active (consent round for S3, approval chain for C&C, vote for Parliamentary, etc.). The harness provides the mechanism; the model provides the semantics. | TODO (Source decision pending on Monday switch) |
+| 3.1 | **Self-reflection prompt** — at the end of each wake, the runner asks for: `EFFECTIVENESS` (high/medium/low), `OBSERVATION` (one sentence), `GOVERNANCE_EVENT` (none, or `{ kind, description }`). The `kind` is plugin-defined — S3 uses "tension", Chain of Command uses "report", Meritocratic uses "flag", etc. The runner doesn't know which model is active; it just emits the event. | DONE (in test-murmuration shared-runner.mjs, needs s/TENSION/GOVERNANCE_EVENT/ rename + validation) |
+| 3.2 | **Governance event → GitHub issues** — when an agent emits a governance event, the GovernancePlugin creates an item in the state store, and GovernanceGitHubSync creates a GitHub issue with labels from the plugin's state graph (`governance:<kind>`, `state:<initial>`, `agent:<id>`, `circle:<id>`). The issue labels and state transitions are defined by the governance model, not hardcoded. | Ready — Phase 1.2 GovernanceGitHubSync handles this |
+| 3.3 | **Cadence self-organization** — agents propose schedule changes via governance events, circles process them through whatever governance model is active (consent round for S3, approval chain for C&C, vote for Parliamentary, etc.). The harness provides the mechanism; the model provides the semantics. | TODO (Source decision pending on Monday switch) |
 
-### Phase 3 — Circle Retrospectives + Strategy Plugin
+### Phase 4 — Circle Retrospectives + Strategy Plugin
 
 **Also governance-model-agnostic.** Retrospectives are a circle-wake kind, not tied to S3. Strategy plugins are separate from governance plugins.
 
 | Step | What | Status |
 |---|---|---|
-| 3.1 | **Circle retrospective** — special circle-wake kind with keep/stop/start output format. Retrospective findings that need structural change are filed as governance events (kind determined by the active plugin). | Specced in CIRCLE-WAKE-SPEC.md |
-| 3.2 | **StrategyPlugin interface** — separate from GovernancePlugin. Measures progress (OKR/KPI/North Star/None), suggests priorities, detects alignment drift. Pluggable — each murmuration chooses its measurement framework independently of its governance model. | Specced in CIRCLE-WAKE-SPEC.md |
-| 3.3 | OKR plugin example | Not started |
-| 3.4 | Dashboard strategy panel | Not started |
+| 4.1 | **Circle retrospective** — special circle-wake kind with keep/stop/start output format. Retrospective findings that need structural change are filed as governance events (kind determined by the active plugin). | Specced in CIRCLE-WAKE-SPEC.md |
+| 4.2 | **StrategyPlugin interface** — separate from GovernancePlugin. Measures progress (OKR/KPI/North Star/None), suggests priorities, detects alignment drift. Pluggable — each murmuration chooses its measurement framework independently of its governance model. | Specced in CIRCLE-WAKE-SPEC.md |
+| 4.3 | OKR plugin example | Not started |
+| 4.4 | Dashboard strategy panel | Not started |
 
-### Phase 4 — Web Dashboard
-
-| Step | What | Status |
-|---|---|---|
-| 4.1 | Extract shared dashboard-data package from dashboard-tui | TODO |
-| 4.2 | SSE endpoint on daemon for real-time activity feed | TODO |
-| 4.3 | pi-web-ui frontend (same 4 panels) | TODO |
-| 4.4 | Remote management (phone/laptop) | TODO |
-
-### Phase 5 — Multi-Instance Murmurations
+### Phase 5 — Web Dashboard
 
 | Step | What | Status |
 |---|---|---|
-| 5.1 | `murmuration/harness.yaml` — instance-to-agent assignments | Specced |
-| 5.2 | Daemon reads only its assigned agents | TODO |
-| 5.3 | Cross-instance signal visibility | TODO (GitHub handles this naturally) |
-| 5.4 | Cross-instance circle meetings | TODO |
+| 5.1 | Extract shared dashboard-data package from dashboard-tui | TODO |
+| 5.2 | SSE endpoint on daemon for real-time activity feed | TODO |
+| 5.3 | pi-web-ui frontend (same 4 panels) | TODO |
+| 5.4 | Remote management (phone/laptop) | TODO |
 
-### Phase 6 — Production Hardening
+### Phase 6 — Multi-Instance Murmurations
 
 | Step | What | Status |
 |---|---|---|
-| 6.1 | Streaming + tool use in `@murmuration/llm` | Not started |
-| 6.2 | Server deployment story (systemd / Docker / PM2) | Not started |
-| 6.3 | Package publishing (npm) | Not started |
-| 6.4 | Template repo for `murmuration init` | Not started |
-| 6.5 | CONTRIBUTING guide + first external adopter | Not started |
+| 6.1 | `murmuration/harness.yaml` — instance-to-agent assignments | Specced |
+| 6.2 | Daemon reads only its assigned agents | TODO |
+| 6.3 | Cross-instance signal visibility | TODO (GitHub handles this naturally) |
+| 6.4 | Cross-instance circle meetings | TODO |
+
+### Phase 7 — Production Hardening
+
+| Step | What | Status |
+|---|---|---|
+| 7.1 | Streaming + tool use in `@murmuration/llm` | Not started |
+| 7.2 | Server deployment story (systemd / Docker / PM2) | Not started |
+| 7.3 | Package publishing (npm) | Not started |
+| 7.4 | Template repo for `murmuration init` | Not started |
+| 7.5 | CONTRIBUTING guide + first external adopter | Not started |
 
 ---
 
