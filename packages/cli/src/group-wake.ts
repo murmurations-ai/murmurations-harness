@@ -401,7 +401,7 @@ export const runGroupWakeCommand = async (
         model,
         messages: [{ role: "user", content: userPrompt }],
         systemPromptOverride: systemPrompt,
-        maxOutputTokens: 8000,
+        maxOutputTokens: 16000,
         temperature: 0.3,
       });
       if (!r.ok) throw new Error(`LLM failed for ${agentId}: ${r.error.code}`);

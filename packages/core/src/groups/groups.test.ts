@@ -99,6 +99,25 @@ Done.`;
     expect(actions[0]?.issueNumber).toBe(10);
   });
 
+  it("recovers actions from truncated output (maxOutputTokens hit)", () => {
+    // Simulates LLM output that was cut off mid-array
+    const text = `Here is the synthesis.
+
+\`\`\`actions
+[
+  {"kind": "comment-issue", "issueNumber": 275, "body": "Resolved."},
+  {"kind": "close-issue", "issueNumber": 275},
+  {"kind": "comment-issue", "issueNumber": 259, "body": "This issue is a duplicate of #`;
+
+    const actions = parseMeetingActions(text);
+    // Should recover the 2 complete actions, skip the truncated 3rd
+    expect(actions).toHaveLength(2);
+    expect(actions[0]?.kind).toBe("comment-issue");
+    expect(actions[0]?.issueNumber).toBe(275);
+    expect(actions[1]?.kind).toBe("close-issue");
+    expect(actions[1]?.issueNumber).toBe(275);
+  });
+
   it("parses removeLabel for state transition label swaps", () => {
     const text = `\`\`\`actions
 [{"kind": "label-issue", "issueNumber": 42, "label": "state:ratified", "removeLabel": "state:deliberating"}]

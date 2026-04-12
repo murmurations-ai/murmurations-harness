@@ -150,15 +150,37 @@ export const parseMeetingActions = (text: string): MeetingAction[] => {
   // Try fenced code block first: ```actions\n[...]\n``` or ```json\n[...]\n```
   const fencedMatch = /```(?:actions|json)\s*\n(\[[\s\S]*?\])\s*\n```/.exec(text);
   const jsonStr = fencedMatch?.[1] ?? extractBareJsonArray(text);
-  if (!jsonStr) return [];
-
-  try {
-    const parsed: unknown = JSON.parse(jsonStr);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isValidMeetingAction);
-  } catch {
-    return [];
+  if (jsonStr) {
+    try {
+      const parsed: unknown = JSON.parse(jsonStr);
+      if (Array.isArray(parsed)) return parsed.filter(isValidMeetingAction);
+    } catch { /* fall through to truncation recovery */ }
   }
+
+  // Truncation recovery: if the actions block was cut off mid-JSON,
+  // extract individual complete JSON objects from the text.
+  // This handles the case where maxOutputTokens truncates the response.
+  const truncatedMatch = /```(?:actions|json)\s*\n\[([\s\S]*)$/.exec(text);
+  if (truncatedMatch?.[1]) {
+    return recoverTruncatedActions(truncatedMatch[1]);
+  }
+
+  return [];
+};
+
+/** Extract complete JSON objects from a truncated array body. */
+const recoverTruncatedActions = (body: string): MeetingAction[] => {
+  const actions: MeetingAction[] = [];
+  // Match individual {...} objects — greedy within braces, non-nested
+  const objectPattern = /\{[^{}]*\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = objectPattern.exec(body)) !== null) {
+    try {
+      const obj: unknown = JSON.parse(match[0]);
+      if (isValidMeetingAction(obj)) actions.push(obj);
+    } catch { /* skip malformed */ }
+  }
+  return actions;
 };
 
 /** Try to extract a bare JSON array from the text (last [...] block). */
