@@ -14,6 +14,7 @@ import { resolve, join } from "node:path";
 
 import {
   makeSecretKey,
+  IdentityLoader,
   runCircleWake,
   type CircleConfig,
   type CircleWakeContext,
@@ -24,24 +25,55 @@ import {
 import { createLLMClient, type LLMClient } from "@murmuration/llm";
 import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
 
-const GEMINI_KEY = makeSecretKey("GEMINI_API_KEY");
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
-/** Find the GitHub repo from the first available agent's role.md github_scopes. */
+/** Map LLM provider names to their env key names. */
+const PROVIDER_SECRET_KEY: Record<string, string | null> = {
+  gemini: "GEMINI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  ollama: null,
+};
+
+/** Find the GitHub repo from the first available agent's signal scopes via IdentityLoader. */
 const findRepoFromAgents = async (rootDir: string, memberIds: readonly string[]): Promise<{ owner: string; repo: string } | null> => {
-  const { readFile: rf } = await import("node:fs/promises");
-  for (const memberId of memberIds) {
-    try {
-      const content = await rf(join(rootDir, "agents", memberId, "role.md"), "utf8");
-      // Match the YAML github_scopes pattern: owner: "xxx" / repo: "yyy"
-      const ownerMatch = /owner:\s*"([^"]+)"/.exec(content);
-      const repoMatch = /repo:\s*"([^"]+)"/.exec(content);
-      if (ownerMatch?.[1] && repoMatch?.[1]) {
-        return { owner: ownerMatch[1], repo: repoMatch[1] };
-      }
-    } catch { /* skip */ }
-  }
+  try {
+    const loader = new IdentityLoader({ rootDir });
+    for (const memberId of memberIds) {
+      try {
+        const identity = await loader.load(memberId);
+        const scopes = identity.frontmatter.signals?.github_scopes;
+        if (scopes && scopes.length > 0) {
+          const scope = scopes[0]!;
+          return { owner: scope.owner, repo: scope.repo };
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* skip */ }
   return null;
+};
+
+/** Resolve LLM provider + model from the facilitator's role.md. */
+const resolveLLMConfig = async (rootDir: string, facilitatorId: string): Promise<{ provider: string; model: string } | null> => {
+  try {
+    const loader = new IdentityLoader({ rootDir });
+    const identity = await loader.load(facilitatorId);
+    const llm = identity.frontmatter.llm;
+    if (llm) {
+      return { provider: llm.provider, model: llm.model ?? getDefaultModel(llm.provider) };
+    }
+  } catch { /* skip */ }
+  return null;
+};
+
+const getDefaultModel = (provider: string): string => {
+  switch (provider) {
+    case "gemini": return "gemini-2.5-flash";
+    case "anthropic": return "claude-sonnet-4-20250514";
+    case "openai": return "gpt-4o";
+    case "ollama": return "llama3";
+    default: return "unknown";
+  }
 };
 
 /** Fetch the circle's GitHub issues backlog (by label). */
@@ -126,24 +158,43 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
   if (directiveBody) console.log(`  Directive: "${directiveBody}"`);
   console.log("");
 
+  // Resolve LLM provider from facilitator's role.md
+  const llmConfig = await resolveLLMConfig(root, config.facilitator);
+  if (!llmConfig) {
+    console.error(`murmuration circle-wake: could not read LLM config from facilitator "${config.facilitator}" role.md`);
+    process.exit(1);
+  }
+  console.log(`  LLM: ${llmConfig.provider}/${llmConfig.model}`);
+
   // Load secrets + clients
   const envPath = join(root, ".env");
   let llmClient: LLMClient | undefined;
   let secretsProvider: DotenvSecretsProvider | undefined;
+  const secretKeyName = PROVIDER_SECRET_KEY[llmConfig.provider];
   if (existsSync(envPath)) {
     secretsProvider = new DotenvSecretsProvider({ envPath });
-    await secretsProvider.load({ required: [], optional: [GEMINI_KEY, GITHUB_TOKEN] });
-    if (secretsProvider.has(GEMINI_KEY)) {
+    const optionalKeys = [GITHUB_TOKEN];
+    if (secretKeyName) optionalKeys.push(makeSecretKey(secretKeyName));
+    await secretsProvider.load({ required: [], optional: optionalKeys });
+    const tokenKey = secretKeyName ? makeSecretKey(secretKeyName) : null;
+    if (llmConfig.provider === "ollama") {
       llmClient = createLLMClient({
-        provider: "gemini",
-        token: secretsProvider.get(GEMINI_KEY),
-        model: "gemini-2.5-flash",
+        provider: "ollama",
+        token: null,
+        model: llmConfig.model,
+      });
+    } else if (tokenKey && secretsProvider.has(tokenKey)) {
+      const provider = llmConfig.provider as "gemini" | "anthropic" | "openai";
+      llmClient = createLLMClient({
+        provider,
+        token: secretsProvider.get(tokenKey),
+        model: llmConfig.model,
       });
     }
   }
 
   if (!llmClient) {
-    console.error("murmuration circle-wake: GEMINI_API_KEY not found in .env");
+    console.error(`murmuration circle-wake: ${secretKeyName ?? "LLM token"} not found in .env`);
     process.exit(1);
   }
 
@@ -185,11 +236,12 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
 
   // Run the circle wake
   const client = llmClient;
+  const model = llmConfig.model;
   const result = await runCircleWake(context, {
     callLLM: async ({ systemPrompt, userPrompt, agentId }) => {
       console.log(`  [${agentId}] contributing...`);
       const r = await client.complete({
-        model: "gemini-2.5-flash",
+        model,
         messages: [{ role: "user", content: userPrompt }],
         systemPromptOverride: systemPrompt,
         maxOutputTokens: 8000,
