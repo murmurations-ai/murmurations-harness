@@ -79,7 +79,7 @@ const SCOPES_ALL: GithubWriteScopes = {
   branchCommits: [
     { repo: "xeeban/emergent-praxis", paths: ["notes/weekly/**", "chronicles/**/*.md"] },
   ],
-  labels: [],
+  labels: ["xeeban/emergent-praxis"],
   issues: ["xeeban/emergent-praxis"],
 };
 
@@ -526,5 +526,76 @@ describe("GithubClient mutations (ADR-0017)", () => {
       expect(result.error).toBeInstanceOf(GithubMutationAbortedError);
       expect((result.error as GithubMutationAbortedError).phase).toBe("in-flight");
     }
+  });
+
+  // -- addLabels -------------------------------------------------------------
+  it("addLabels happy path", async () => {
+    const { fetch: f, calls } = makeFakeFetch([
+      {
+        status: 200,
+        body: [
+          { id: 1, name: "priority:high" },
+          { id: 2, name: "circle:content" },
+        ],
+      },
+    ]);
+    const client = createGithubClient({ token: TOKEN, fetch: f, writeScopes: SCOPES_ALL });
+    const result = await client.addLabels(REPO, makeIssueNumber(42), ["priority:high"]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toContain("priority:high");
+    }
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toContain("/issues/42/labels");
+  });
+
+  it("addLabels denied without label write scope", async () => {
+    const { fetch: f } = makeFakeFetch([]);
+    const client = createGithubClient({
+      token: TOKEN,
+      fetch: f,
+      writeScopes: { ...SCOPES_ALL, labels: [] },
+    });
+    const result = await client.addLabels(REPO, makeIssueNumber(1), ["priority:high"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(GithubWriteScopeError);
+  });
+
+  // -- removeLabel -----------------------------------------------------------
+  it("removeLabel happy path", async () => {
+    const { fetch: f, calls } = makeFakeFetch([{ status: 200, body: [] }]);
+    const client = createGithubClient({ token: TOKEN, fetch: f, writeScopes: SCOPES_ALL });
+    const result = await client.removeLabel(REPO, makeIssueNumber(42), "priority:low");
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe("DELETE");
+    expect(calls[0]?.url).toContain("/issues/42/labels/priority%3Alow");
+  });
+
+  // -- updateIssueState ------------------------------------------------------
+  it("updateIssueState closes an issue", async () => {
+    const { fetch: f, calls } = makeFakeFetch([
+      { status: 200, body: { id: 42, state: "closed" } },
+    ]);
+    const client = createGithubClient({ token: TOKEN, fetch: f, writeScopes: SCOPES_ALL });
+    const result = await client.updateIssueState(REPO, makeIssueNumber(42), "closed");
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe("PATCH");
+    const body = JSON.parse(calls[0]?.body ?? "{}") as { state: string };
+    expect(body.state).toBe("closed");
+  });
+
+  it("updateIssueState denied without issue write scope", async () => {
+    const { fetch: f } = makeFakeFetch([]);
+    const client = createGithubClient({
+      token: TOKEN,
+      fetch: f,
+      writeScopes: { ...SCOPES_ALL, issues: [] },
+    });
+    const result = await client.updateIssueState(REPO, makeIssueNumber(1), "closed");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(GithubWriteScopeError);
   });
 });

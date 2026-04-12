@@ -659,7 +659,17 @@ class GithubClientImpl implements GithubClient {
       }
       return null;
     }
-    // kind === "label" — reserved, not enforced in 2D.
+    if (kind === "label") {
+      if (!scopes.labels.has(repoKey)) {
+        return fire(
+          new GithubWriteScopeError(`label denied for ${repoKey}`, {
+            attemptedRepo: repoKey,
+            scopeKind: kind,
+          }),
+        );
+      }
+      return null;
+    }
     return null;
   }
 
