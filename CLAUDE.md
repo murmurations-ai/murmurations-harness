@@ -1,82 +1,136 @@
 # CLAUDE.md
 
-Instructions for Claude Code when working in the Murmuration Harness repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What This Repo Is
 
-The Murmuration Harness is a **generic, open-source TypeScript agent coordination runtime**. It runs any number of AI agents in a "murmuration" (coordinated flock). It is:
+The Murmuration Harness is a generic, open-source TypeScript agent coordination runtime. It runs any number of AI agents in a "murmuration" with pluggable governance models (S3, Chain of Command, Meritocratic, Consensus, Parliamentary). GitHub is the system of record for all collaborative state. Local disk is runtime only.
 
-- **Generic** — works for any murmuration, not just Emergent Praxis. Zero EP-specific code in library packages.
-- **GitHub-native** — GitHub is the system of record for all collaborative state. Local disk is runtime only.
-- **Governance-pluggable** — supports Self-Organizing (S3), Chain of Command, Meritocratic, Consensus, Parliamentary. The plugin provides language/state machine/decision protocol.
-- **Real-work-oriented** — every action must produce artifacts that change the state of the world. Meetings that only produce prose are governance theater.
+**Non-negotiable:** Zero Emergent Praxis-specific references in `packages/`. EP-specific content belongs only in `examples/` and operator repos.
 
-## Before Every Commit
+## Build / Test / Lint Commands
 
-**Always run the full CI check locally before committing:**
+```sh
+pnpm run build          # build all packages (tsc --build, respects project references)
+pnpm run typecheck      # tsc --noEmit across all packages
+pnpm run lint           # eslint with strict-type-checked rules
+pnpm run lint:fix       # auto-fix lint issues
+pnpm run format         # prettier auto-fix
+pnpm run format:check   # prettier check (CI gate)
+pnpm run test           # vitest run (all packages)
+pnpm run check          # typecheck + lint + format:check + test (full CI locally)
+```
+
+**Run a single test file:**
+
+```sh
+npx vitest run packages/core/src/groups/groups.test.ts
+```
+
+**Run tests matching a name pattern:**
+
+```sh
+npx vitest run -t "parseMeetingActions"
+```
+
+**Before every commit, run:**
 
 ```sh
 pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test
 ```
 
-If format fails, run `pnpm run format` to auto-fix, then re-check.
+**After every push, watch CI:** `gh run watch <id> --repo murmurations-ai/murmurations-harness`
 
-**After every push, verify CI passes.** Use `gh run watch` to confirm. Never assume a push is clean without checking.
+## TypeScript Strictness
 
-## Lint and TypeScript Rules
+The tsconfig enables `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and full `strict`. This is stricter than most projects. **Read `docs/LINT-DESIGN-GUIDE.md` before writing any TypeScript.** The top recurring failures:
 
-**Read `docs/LINT-DESIGN-GUIDE.md` before writing any TypeScript.** It documents every recurring lint failure and the idiomatic fix. The top 5:
-
-1. **Array index in template literal** — extract to a `const` with `?? ""` fallback
-2. **Final `if` on exhausted discriminated union** — drop the `if`, let narrowing carry
-3. **Optional chain on non-nullable parent** — use plain `.` not `?.`
+1. **Array index in template literal** — extract to a `const` with `?? ""` fallback (not `!`)
+2. **Final `if` on exhausted discriminated union** — drop the guard, let narrowing carry
+3. **Optional chain `?.` on non-nullable parent** — use plain `.`
 4. **`async` mock with no `await`** — drop `async`, return `Promise.resolve()`
-5. **Missing `../pkg` project reference in tsconfig** — #1 cause of cascading errors
+5. **Missing `../pkg` project reference in tsconfig.json** — causes 50+ cascading errors
+6. **`exactOptionalPropertyTypes`** — can't pass `undefined` to optional fields; use conditional spread
+7. **`readonly` arrays** — `readonly T[]` is not assignable to `T[]`; match the declared type
 
-The harness uses `typescript-eslint` strict mode with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and `strictNullChecks`. Code that compiles locally may still fail CI lint.
+## Monorepo Architecture
 
-## Architecture
+pnpm workspace with 7 packages. Build order matters (project references).
 
-Read these in order for context:
+```
+@murmuration/core       — daemon, executor, scheduler, identity, governance, groups, agents, cost, secrets
+@murmuration/llm        — 4-provider LLM client (Gemini, Anthropic, OpenAI, Ollama) + pricing
+@murmuration/github     — GitHub REST/GraphQL client with write-scope enforcement (ADR-0017)
+@murmuration/signals    — signal aggregator (GitHub issues, private notes, inbox messages)
+@murmuration/secrets-dotenv — .env secrets provider
+@murmuration/cli        — CLI commands (start, init, directive, group-wake, backlog, dashboard)
+@murmuration/dashboard-tui — TUI dashboard (pi-tui)
+```
 
-1. `docs/ARCHITECTURE.md` — core beliefs, structured actions, "Did Work" contracts
-2. `docs/EXECUTION-PLAN.md` — what's done and what's next
-3. `docs/LINT-DESIGN-GUIDE.md` — how to write code that passes CI
+### Core Package Modules
 
-## Key Conventions
+The `@murmuration/core` package has these submodules (each re-exported from `packages/core/src/index.ts`):
 
-### Terminology
+- **execution/** — `AgentExecutor` interface, `InProcessExecutor`, `SubprocessExecutor`, `DispatchExecutor`, branded types (`AgentId`, `GroupId`, `WakeId`), `WakeAction`/`WakeActionReceipt`, `validateWake()`, `parseWakeActions()`
+- **daemon/** — `Daemon` class wiring scheduler + executor + governance + signals. Post-wake action execution hook, "Did Work" tracking, circuit breaker (3 failures), governance cron scheduling
+- **scheduler/** — `TimerScheduler` with cron, interval, delay-once triggers
+- **identity/** — `IdentityLoader` reads murmuration soul + agent soul + role.md + group contexts. Parses role.md YAML frontmatter via Zod
+- **governance/** — `GovernancePlugin` interface (model-agnostic), `GovernanceStateStore` (state machine + persistence), `GovernanceGitHubSync`, `GovernanceTerminology`
+- **groups/** — `runGroupWake()` (group meeting runner), `MeetingAction`/`ActionReceipt`, `parseMeetingActions()` with truncation recovery, `GovernanceMeetingPrompts` interface
+- **agents/** — `AgentStateStore` (lifecycle state machine, artifact tracking, idle-wake counting)
+- **signals/** — signal aggregator types, `SignalBundle.actionItems` partitioning
+- **cost/** — `WakeCostBuilder`, `WakeCostRecord`, pricing resolution
+- **secrets/** — `SecretValue` (branded, never serializes), `scrubLogRecord()` (recursive)
 
-- **"group"** in code (not "circle", "department", "committee")
-- The governance plugin provides display terms via `GovernanceTerminology`
-- "circle" only appears in the S3 governance plugin
+### Key Data Flow
 
-### Generic Harness
+```
+Identity files → IdentityLoader → IdentityChain → AgentSpawnContext
+GitHub issues  → SignalAggregator → SignalBundle (signals + actionItems)
+Cron/interval  → Scheduler → Daemon.#handleWake → Executor.spawn → AgentResult
+AgentResult    → validateWake → recordWakeOutcome (artifacts, idle tracking)
+AgentResult    → onWakeActions callback → GitHub mutations (labels, issues, comments)
+AgentResult    → GovernancePlugin.onEventsEmitted → governance state transitions
+```
 
-- Zero EP-specific references in `packages/`
-- EP-specific content belongs only in `examples/` and operator repos
-- Governance is pluggable — S3 is the default example, not a requirement
+### Meeting → Work Pipeline
 
-### GitHub as System of Record
+````
+Group meeting → facilitator returns ```actions JSON block
+  → parseMeetingActions() extracts structured actions
+  → executeActions() runs them against GitHub (labels, issues, comments, closures)
+  → action items created as GitHub issues with assigned:<agentId> labels
+  → agents see action items in SignalBundle.actionItems on next wake
+  → agents act on them → close issues when done
+````
 
-- Everything collaborative lives in GitHub (issues, labels, comments, committed files)
-- Local `.murmuration/` is for runtime state only
-- Meetings produce structured actions executed against GitHub, not just prose
+## Terminology
 
-### Agent Wake Lifecycle
+- **"group"** in all code — not "circle", "department", or "committee"
+- The governance plugin provides display terms via `GovernanceTerminology` (e.g. S3 plugin sets `group: "circle"`)
+- `WakeMode`: `"individual"` | `"group-member"` | `"group-facilitator"`
 
-- State machine: registered → idle → waking → running → completed/failed/timed-out → idle
-- Every wake tracks artifact count and action item coverage
-- Idle wakes (no artifacts) are tracked separately from productive wakes
-- Circuit breaker skips agents after 3 consecutive failures
+## Governance Model Independence
 
-### Testing
+The harness core must not contain S3-specific terms (consent, objection, tension, ratify). These belong in the governance plugin:
 
-- 289+ tests across 20 test files
-- Every new feature needs tests
-- When `AgentResult` or `SignalBundle` gains a field, update ALL test fixtures
+- `GovernanceMeetingPrompts` — plugin provides member/facilitator prompt templates and position parsing
+- `GovernanceTerminology` — plugin provides display terms
+- `GovernanceStateGraph` — plugin defines states and transitions (open strings, not enums)
+- Default prompts are generic ("state your position and reasoning")
 
-### Secrets
+## CLI Commands
 
-- **NEVER print .env values** in tool output
-- Use `cut -d= -f1` for key names only
+```sh
+murmuration start --root <path> [--agent <id>] [--now] [--once] [--dry-run] [--governance <path>]
+murmuration group-wake --root <path> --group <id> [--governance] [--directive "msg"]
+murmuration directive --root <path> --agent <id> "message"
+murmuration backlog --root <path> --group <id> [--repo owner/repo] [--refresh]
+murmuration init [dir]
+```
+
+`--now` triggers an immediate wake (overrides cron schedule, implies `--once`). No identity file edits needed.
+
+## Secrets
+
+**NEVER print .env values** in tool output. Use `cut -d= -f1` for key names only.
