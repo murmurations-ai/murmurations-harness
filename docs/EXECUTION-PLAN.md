@@ -156,6 +156,14 @@ type:content-idea, type:research-digest, stage:*
 | | Retrospective wake consumes metrics as concrete data (not vibes) | | |
 | | Evidence-based tensions filed → governance processes them → structural changes result | | |
 | | Closes the self-correction loop: underperformance → tension → governance → improvement | | |
+| 2.10 | **Scheduled + demand governance meetings** | `packages/core/src/daemon/index.ts`, `packages/core/src/circles/index.ts` | TODO |
+| | Circle config declares governance cadence (e.g. `governance_cron: "0 18 * * 5"` for weekly Friday) | | |
+| | Daemon checks governance queue per circle — if items pending + cadence fires, convenes governance meeting | | |
+| | Source can demand ad-hoc governance via `murmuration circle-wake --governance` or directive | | |
+| | Governance meeting auto-consumes all pending tensions/proposals since last meeting | | |
+| | Review-triggered: daemon checks `reviewAt` on ratified decisions per circle; expired reviews are added to the governance queue and trigger a meeting if none is scheduled | | |
+| | Three governance triggers: (1) scheduled cadence, (2) Source demand, (3) agreement review dates | | |
+| | Governance plugin defines the state machine; harness provides the scheduling + queue drain | | |
 
 **Label conventions for structured actions:**
 ```

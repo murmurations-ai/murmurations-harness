@@ -399,9 +399,38 @@ Each group has:
 - **Work queue** — GitHub issues labelled for this group
 - **Meeting cadence** — operational + governance schedules
 
-Groups can hold two kinds of meetings:
-- **Operational** — process backlog, prioritize, plan, assign, retrospect
-- **Governance** — process governance items through the active governance model
+Groups hold two kinds of meetings, each with distinct triggers and outputs:
+
+### Operational Meetings
+
+**Purpose:** Plan and assign work. Process the backlog, prioritize, create action items.
+
+**Trigger:** Scheduled cadence (e.g. daily, weekly) defined in circle config.
+
+**Output:** GitHub state changes — priority labels on issues, action items created and assigned to agents, blocked items flagged. These populate the work queue that agents read on their next individual wake.
+
+**The loop:** Operational meeting → labels + action items → agent wakes → agent executes → next meeting reviews progress.
+
+### Governance Meetings
+
+**Purpose:** Change how the circle operates. Process tensions, proposals, and structural decisions through the active governance model.
+
+**Triggers:** Both scheduled and demand-driven:
+- **Scheduled** — governance cadence defined in circle config (e.g. weekly). The meeting automatically picks up all tensions and proposals that accumulated since the last governance meeting.
+- **Demand (Source-initiated)** — Source convenes an ad-hoc governance meeting via `murmuration circle-wake --governance` or a directive. Used for urgent structural decisions.
+- **Review-triggered** — ratified decisions with expired review dates surface automatically for re-evaluation.
+
+**Output:** State transitions on governance items (label swaps on GitHub issues), decision records, role/policy changes, amended proposals. The governance plugin defines the specific states and transitions.
+
+**Governance queue:** The daemon tracks pending governance items per circle. Scheduled governance meetings consume the full queue. Demand meetings can target specific items.
+
+### Meeting ↔ Individual Wake Separation
+
+Agents participate in two distinct modes (tracked via `WakeMode`):
+- **Meeting mode** (`circle-member` / `circle-facilitator`) — contribute perspective, synthesize, don't execute action items
+- **Individual mode** (`individual`) — execute action items, produce artifacts, do role-specific work
+
+This separation is important: an agent in a governance meeting should deliberate, not execute. An agent in an individual wake should execute, not deliberate. The harness enforces this via `WakeMode` on the spawn context.
 
 ---
 
