@@ -97,6 +97,37 @@ Body:
 
 Research Agent commits to `notes/weekly/`, Content Production commits to `drafts/articles/`. This pattern extends to any agent that produces durable artifacts.
 
+## Repo Tree as Shared Workspace
+
+The GitHub repo tree is the murmuration's shared workspace. Issues coordinate work; the repo stores the artifacts. Every agent commits its work product to the appropriate directory, and issues reference files by path.
+
+```
+my-murmuration/
+  murmuration/soul.md                      ← identity
+  agents/*/role.md                          ← agent config
+  governance/
+    circles/*.md                            ← circle docs
+    decisions/<id>.md                       ← ratified governance decisions
+    meetings/<circle>/<date>.md             ← circle meeting minutes
+  notes/
+    daily/<date>.md                         ← daily chronicles (Chronicler)
+    weekly/<date>-research-digest.md        ← Research digests
+  drafts/
+    articles/<date>-<slug>.md              ← Content Production drafts
+    courses/                                ← course materials
+  content/                                  ← published content
+  designs/
+    briefs/<date>-<slug>.md                ← Design Agent briefs
+    assets/                                 ← visual assets
+  analytics/
+    reports/<date>.md                       ← Analytics reports
+    cost-summaries/<week>.md               ← CFO weekly cost reports
+```
+
+Git history is the activity record — who committed what, when, for which wake. The shared runner's `commitPathPrefix` option determines where each agent writes. Issues reference committed files by path so everything is linked.
+
+---
+
 ## What stays local
 
 | Mechanism | Location | Why local |
