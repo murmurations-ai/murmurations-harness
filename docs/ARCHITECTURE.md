@@ -356,6 +356,37 @@ governance/<groups>/<id>.md ← group context (optional, zero or more)
 
 The identity chain flows into the LLM as system prompt. The role.md frontmatter configures the agent's runtime behavior (LLM provider, wake schedule, signal scopes, write scopes, budget, secrets).
 
+### Agent Tooling
+
+Each agent declares the tools, skills, and context sources it needs to do its job. This is part of the identity chain — the agent knows what it can do, and the harness enforces it.
+
+```yaml
+# role.md frontmatter
+tools:
+  cli:              # command-line tools available to the agent
+    - gh            # GitHub CLI
+    - gcloud        # Google Cloud
+  mcp:              # MCP servers the agent can use
+    - notion        # Notion workspace access
+    - slack         # Slack messaging
+    - linear        # Linear project management
+  skills:           # harness-defined capabilities
+    - commit        # can commit files to the repo
+    - label-issue   # can add/remove labels
+    - create-issue  # can create new issues
+  context:          # additional context sources
+    - upstream: ["01-research"]   # reads output from these agents
+    - docs: ["docs/style-guide.md"]  # reference documents
+```
+
+**Tooling in the system prompt:** The harness injects the agent's declared tools into its system prompt so the LLM knows what actions are available. An agent without `commit` in its skills won't try to commit files.
+
+**Enforcement:** The executor validates actions against the agent's declared tools before executing them. An agent that tries to use an MCP server it doesn't have access to gets a scope violation, not a silent failure.
+
+**Tool request flow:** When an agent needs a tool it doesn't have, it files a governance event requesting it. The governance model processes the request (consent round for S3, approval for Chain of Command, etc.). If approved, Source updates the agent's role.md. This prevents uncontrolled capability creep while allowing agents to grow their toolset through governance.
+
+**MCP as a tool category:** MCP (Model Context Protocol) servers provide standardized access to external services. Each MCP server is a tool that an agent can be granted access to. The harness manages MCP server lifecycle and routes agent requests through the appropriate server. This means adding a new external service (Notion, Slack, Linear, etc.) is an operator configuration change — not a code change.
+
 ---
 
 ## Groups / Domains / Circles
