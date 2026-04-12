@@ -52,6 +52,7 @@ import {
 } from "@murmuration/core";
 import {
   createGithubClient,
+  makeIssueNumber,
   makeRepoCoordinate,
   type GithubClient,
   type GithubWriteScopes,
@@ -853,6 +854,92 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       })
     : undefined;
 
+  // Build the onWakeActions callback — executes structured actions
+  // from individual agent wakes against GitHub.
+  const onWakeActions: DaemonConfig["onWakeActions"] = async (agentId, actions) => {
+    const comp = compositions.find((c) => c.agentId === agentId);
+    if (!comp?.github) return [];
+    const agent = allRegistered.find((a) => a.agentId === agentId);
+    const firstScope = agent?.signalScopes?.githubScopes?.[0];
+    if (!firstScope) return [];
+    const repo = makeRepoCoordinate(firstScope.owner, firstScope.repo);
+    const gh = comp.github;
+    const receipts: import("@murmuration/core").WakeActionReceipt[] = [];
+    for (const action of actions) {
+      try {
+        switch (action.kind) {
+          case "label-issue": {
+            if (!action.issueNumber || !action.label) {
+              receipts.push({ action, success: false, error: "missing fields" });
+              break;
+            }
+            if (action.removeLabel) {
+              await gh.removeLabel(repo, makeIssueNumber(action.issueNumber), action.removeLabel);
+            }
+            const r = await gh.addLabels(repo, makeIssueNumber(action.issueNumber), [action.label]);
+            receipts.push({ action, success: r.ok, ...(!r.ok ? { error: r.error.code } : {}) });
+            break;
+          }
+          case "create-issue": {
+            if (!action.title) {
+              receipts.push({ action, success: false, error: "missing title" });
+              break;
+            }
+            const input: Record<string, unknown> = { title: action.title };
+            if (action.body) input.body = action.body;
+            if (action.labels && action.labels.length > 0) input.labels = [...action.labels];
+            const r = await gh.createIssue(
+              repo,
+              input as { title: string; body?: string; labels?: string[] },
+            );
+            receipts.push({
+              action,
+              success: r.ok,
+              ...(r.ok ? { issueNumber: r.value.number.value } : { error: r.error.code }),
+            });
+            break;
+          }
+          case "close-issue": {
+            if (!action.issueNumber) {
+              receipts.push({ action, success: false, error: "missing issueNumber" });
+              break;
+            }
+            const r = await gh.updateIssueState(
+              repo,
+              makeIssueNumber(action.issueNumber),
+              "closed",
+            );
+            receipts.push({ action, success: r.ok, ...(!r.ok ? { error: r.error.code } : {}) });
+            break;
+          }
+          case "comment-issue": {
+            if (!action.issueNumber || !action.body) {
+              receipts.push({ action, success: false, error: "missing fields" });
+              break;
+            }
+            const r = await gh.createIssueComment(repo, makeIssueNumber(action.issueNumber), {
+              body: action.body,
+            });
+            receipts.push({ action, success: r.ok, ...(!r.ok ? { error: r.error.code } : {}) });
+            break;
+          }
+          case "commit-file": {
+            // commit-file requires more context (branch OID); skip for now
+            receipts.push({ action, success: false, error: "commit-file not yet wired in daemon" });
+            break;
+          }
+        }
+      } catch (err: unknown) {
+        receipts.push({
+          action,
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return receipts;
+  };
+
   const needsRebuild = effectiveExecutor !== provisionalExecutor || githubClient !== undefined;
   const effectiveDaemon: Daemon = needsRebuild
     ? new Daemon({
@@ -873,6 +960,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         agentStateStore: new AgentStateStore({
           persistDir: resolve(exampleRoot, ".murmuration", "agents"),
         }),
+        onWakeActions,
       })
     : firstPassDaemon;
 
