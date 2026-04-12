@@ -119,7 +119,8 @@ Done.`;
   });
 
   it("detects truncation and sets truncated flag", () => {
-    const text = "```actions\n[\n  {\"kind\": \"close-issue\", \"issueNumber\": 1},\n  {\"kind\": \"comment-issue\", \"issueNumber\": 2, \"body\": \"trun";
+    const text =
+      '```actions\n[\n  {"kind": "close-issue", "issueNumber": 1},\n  {"kind": "comment-issue", "issueNumber": 2, "body": "trun';
     const result = parseMeetingActionsWithMeta(text);
     expect(result.truncated).toBe(true);
     expect(result.actions).toHaveLength(1); // only the complete close-issue
@@ -127,7 +128,7 @@ Done.`;
   });
 
   it("sets truncated=false for complete output", () => {
-    const text = "```actions\n[{\"kind\": \"close-issue\", \"issueNumber\": 1}]\n```";
+    const text = '```actions\n[{"kind": "close-issue", "issueNumber": 1}]\n```';
     const result = parseMeetingActionsWithMeta(text);
     expect(result.truncated).toBe(false);
     expect(result.actions).toHaveLength(1);

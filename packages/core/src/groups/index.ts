@@ -167,8 +167,11 @@ export const parseMeetingActionsWithMeta = (text: string): ParsedMeetingActions 
   if (jsonStr) {
     try {
       const parsed: unknown = JSON.parse(jsonStr);
-      if (Array.isArray(parsed)) return { actions: parsed.filter(isValidMeetingAction), truncated: false };
-    } catch { /* fall through to truncation recovery */ }
+      if (Array.isArray(parsed))
+        return { actions: parsed.filter(isValidMeetingAction), truncated: false };
+    } catch {
+      /* fall through to truncation recovery */
+    }
   }
 
   // Truncation recovery: if the actions block was cut off mid-JSON,
@@ -191,7 +194,9 @@ const recoverTruncatedActions = (body: string): MeetingAction[] => {
     try {
       const obj: unknown = JSON.parse(match[0]);
       if (isValidMeetingAction(obj)) actions.push(obj);
-    } catch { /* skip malformed */ }
+    } catch {
+      /* skip malformed */
+    }
   }
   return actions;
 };
