@@ -71,6 +71,7 @@ const makeContext = (agentId: string, wakeId: string): AgentSpawnContext => {
     wakeId: makeWakeId(wakeId),
     assembledAt: new Date(),
     signals: [],
+    actionItems: [],
     warnings: [],
   };
   const wakeReason: WakeReason = { kind: "manual", invokedBy: "test" };
@@ -80,6 +81,7 @@ const makeContext = (agentId: string, wakeId: string): AgentSpawnContext => {
     identity,
     signals,
     wakeReason,
+    wakeMode: "individual" as const,
     budget,
     environment: {},
   };

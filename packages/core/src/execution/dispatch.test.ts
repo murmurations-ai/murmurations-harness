@@ -32,9 +32,11 @@ const makeContext = (agentId: string): AgentSpawnContext => ({
     wakeId: makeWakeId("11111111-1111-1111-1111-111111111111"),
     assembledAt: new Date(),
     signals: [],
+    actionItems: [],
     warnings: [],
   },
   wakeReason: { kind: "manual", invokedBy: "test" },
+  wakeMode: "individual" as const,
   budget: {
     maxInputTokens: 0,
     maxOutputTokens: 0,

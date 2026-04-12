@@ -194,6 +194,18 @@ export type WakeReason =
   | { readonly kind: "manual"; readonly invokedBy: string; readonly note?: string };
 
 /**
+ * Wake mode — determines what the agent should focus on during this wake.
+ *
+ * - `individual`: standard wake — process signals, act on action items, produce artifacts
+ * - `circle-member`: participating in a circle meeting — contribute perspective, don't execute
+ * - `circle-facilitator`: facilitating a circle meeting — synthesize, produce action list
+ *
+ * Agents in `circle-member` or `circle-facilitator` mode should NOT execute
+ * action items — they are contributing to a group discussion, not doing individual work.
+ */
+export type WakeMode = "individual" | "circle-member" | "circle-facilitator";
+
+/**
  * Trust level tag for a signal, per carry-forward
  * {@link https://github.com/murmurations-ai/murmurations-harness/issues/4 | #4}
  * (Security Agent #25). The Security Agent owns the authoritative
@@ -287,6 +299,15 @@ export interface SignalBundle {
   readonly assembledAt: Date;
   readonly signals: readonly Signal[];
   /**
+   * Action items assigned to this agent (subset of signals, filtered by
+   * `assigned:<agentId>` + `action-item` labels). Surfaced prominently
+   * in the agent's prompt — these take priority over default role behavior
+   * unless the agent is blocked by upstream work, governance, or Source.
+   *
+   * This is harness-level behavior, not governance-model-specific.
+   */
+  readonly actionItems: readonly Signal[];
+  /**
    * Non-fatal warnings from the aggregator (e.g. rate-limited GitHub
    * queries that returned partial results). Surfaces in the activity feed
    * and gives the agent a chance to reason about signal incompleteness.
@@ -357,6 +378,7 @@ export interface AgentSpawnContext {
   readonly identity: IdentityChain;
   readonly signals: SignalBundle;
   readonly wakeReason: WakeReason;
+  readonly wakeMode: WakeMode;
   readonly budget: CostBudget;
   /**
    * Free-form, stable-per-wake environment key/value pairs (e.g. feature

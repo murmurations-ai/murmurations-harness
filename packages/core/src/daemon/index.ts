@@ -971,6 +971,7 @@ const buildSpawnContext = async (
         wakeId: event.wakeId,
         assembledAt: new Date(),
         signals: [],
+        actionItems: [],
         warnings: [`signal aggregator error: ${result.error.code}`],
       };
     }
@@ -979,6 +980,7 @@ const buildSpawnContext = async (
       wakeId: event.wakeId,
       assembledAt: new Date(),
       signals: [],
+      actionItems: [],
       warnings: [],
     };
   }
@@ -989,6 +991,7 @@ const buildSpawnContext = async (
     identity,
     signals,
     wakeReason: event.wakeReason,
+    wakeMode: "individual" as const,
     budget,
     environment: {},
   };

@@ -216,6 +216,7 @@ describe("Daemon", () => {
               summary: "fake summary two",
             },
           ],
+          actionItems: [],
           warnings: [],
         },
       }),

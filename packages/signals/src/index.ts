@@ -135,12 +135,21 @@ export class DefaultSignalAggregator implements SignalAggregator {
       );
     }
 
+    // Partition action items assigned to this agent
+    const agentIdValue = context.agentId.value;
+    const actionItems = signals.filter((s) => {
+      if (s.kind !== "github-issue") return false;
+      const labels = (s as unknown as { labels: readonly string[] }).labels;
+      return labels.includes("action-item") && labels.some((l) => l === `assigned:${agentIdValue}`);
+    });
+
     return {
       ok: true,
       bundle: {
         wakeId: context.wakeId,
         assembledAt: this.#now(),
         signals,
+        actionItems,
         warnings,
       },
     };
