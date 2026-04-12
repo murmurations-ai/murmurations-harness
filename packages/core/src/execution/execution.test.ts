@@ -6,7 +6,7 @@ import {
   isKilled,
   isTimedOut,
   makeAgentId,
-  makeCircleId,
+  makeGroupId,
   makeWakeId,
   type AgentResult,
   type CostBudget,
@@ -21,9 +21,9 @@ describe("branded primitives", () => {
     expect(id.value).toBe("08-editorial");
   });
 
-  it("makeCircleId produces a discriminated object", () => {
-    const id = makeCircleId("content");
-    expect(id.kind).toBe("circle-id");
+  it("makeGroupId produces a discriminated object", () => {
+    const id = makeGroupId("content");
+    expect(id.kind).toBe("group-id");
     expect(id.value).toBe("content");
   });
 

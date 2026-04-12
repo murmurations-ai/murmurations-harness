@@ -1,10 +1,10 @@
 /**
- * `murmuration circle-wake` — trigger a circle meeting on demand.
+ * `murmuration group-wake` — trigger a group meeting on demand.
  *
  * Usage:
- *   murmuration circle-wake --root ../my-murmuration --circle content
- *   murmuration circle-wake --root ../my-murmuration --circle content --governance
- *   murmuration circle-wake --root ../my-murmuration --circle content --directive "What's our top priority?"
+ *   murmuration group-wake --root ../my-murmuration --group content
+ *   murmuration group-wake --root ../my-murmuration --group content --governance
+ *   murmuration group-wake --root ../my-murmuration --group content --directive "What's our top priority?"
  */
 
 import { randomUUID } from "node:crypto";
@@ -15,10 +15,10 @@ import { resolve, join } from "node:path";
 import {
   makeSecretKey,
   IdentityLoader,
-  runCircleWake,
-  type CircleConfig,
-  type CircleWakeContext,
-  type CircleWakeKind,
+  runGroupWake,
+  type GroupConfig,
+  type GroupWakeContext,
+  type GroupWakeKind,
   type GovernanceItem,
   type MeetingAction,
   type ActionReceipt,
@@ -85,10 +85,10 @@ const getDefaultModel = (provider: string): string => {
   }
 };
 
-/** Fetch the circle's GitHub issues backlog (by label). */
-const fetchCircleBacklog = async (
+/** Fetch the group's GitHub issues backlog (by label). */
+const fetchGroupBacklog = async (
   rootDir: string,
-  _circleId: string,
+  _groupId: string,
   repoInfo: { owner: string; repo: string },
 ): Promise<string> => {
   try {
@@ -112,8 +112,8 @@ const fetchCircleBacklog = async (
   }
 };
 
-/** Parse a simple circle config from a circle doc's content. */
-const parseCircleConfig = (circleId: string, content: string): CircleConfig => {
+/** Parse a simple group config from a group doc's content. */
+const parseGroupConfig = (groupId: string, content: string): GroupConfig => {
   // Extract members from "- agent-id" lines under "## Members"
   const membersMatch = /## Members\n([\s\S]*?)(?=\n##|\n---|\n$)/i.exec(content);
   const members: string[] = [];
@@ -126,13 +126,13 @@ const parseCircleConfig = (circleId: string, content: string): CircleConfig => {
 
   // Extract facilitator from "facilitator:" in frontmatter or body
   const facMatch = /facilitator:\s*"?([^"\n]+)"?/i.exec(content);
-  const facilitator = facMatch?.[1]?.trim() ?? members[0] ?? circleId;
+  const facilitator = facMatch?.[1]?.trim() ?? members[0] ?? groupId;
 
   // Extract name from first heading
   const nameMatch = /^#\s+(.+)/m.exec(content);
-  const name = nameMatch?.[1]?.trim() ?? circleId;
+  const name = nameMatch?.[1]?.trim() ?? groupId;
 
-  return { circleId, name, members, facilitator };
+  return { groupId, name, members, facilitator };
 };
 
 // ---------------------------------------------------------------------------
@@ -222,31 +222,31 @@ const executeActions = async (
   return receipts;
 };
 
-export const runCircleWakeCommand = async (args: readonly string[], rootDir: string): Promise<void> => {
+export const runGroupWakeCommand = async (args: readonly string[], rootDir: string): Promise<void> => {
   const root = resolve(rootDir);
 
   // Parse args
-  const circleIdx = args.indexOf("--circle");
-  const circleId = circleIdx >= 0 ? args[circleIdx + 1] : undefined;
-  if (!circleId) {
-    console.error("murmuration circle-wake: --circle <id> is required");
+  const groupIdx = args.indexOf("--group");
+  const groupId = groupIdx >= 0 ? args[groupIdx + 1] : undefined;
+  if (!groupId) {
+    console.error("murmuration group-wake: --group <id> is required");
     process.exit(2);
   }
 
   const isGovernance = args.includes("--governance");
-  const kind: CircleWakeKind = isGovernance ? "governance" : "operational";
+  const kind: GroupWakeKind = isGovernance ? "governance" : "operational";
 
   const directiveIdx = args.indexOf("--directive");
   const directiveBody = directiveIdx >= 0 ? args[directiveIdx + 1] : undefined;
 
-  // Load circle config
-  const circleDocPath = join(root, "governance", "circles", `${circleId}.md`);
-  if (!existsSync(circleDocPath)) {
-    console.error(`murmuration circle-wake: circle doc not found at ${circleDocPath}`);
+  // Load group config
+  const groupDocPath = join(root, "governance", "groups", `${groupId}.md`);
+  if (!existsSync(groupDocPath)) {
+    console.error(`murmuration group-wake: group doc not found at ${groupDocPath}`);
     process.exit(1);
   }
-  const circleContent = await readFile(circleDocPath, "utf8");
-  const config = parseCircleConfig(circleId, circleContent);
+  const groupContent = await readFile(groupDocPath, "utf8");
+  const config = parseGroupConfig(groupId, groupContent);
 
   console.log(`Circle wake: ${config.name} (${kind})`);
   console.log(`  Members: ${config.members.join(", ")}`);
@@ -257,7 +257,7 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
   // Resolve LLM provider from facilitator's role.md
   const llmConfig = await resolveLLMConfig(root, config.facilitator);
   if (!llmConfig) {
-    console.error(`murmuration circle-wake: could not read LLM config from facilitator "${config.facilitator}" role.md`);
+    console.error(`murmuration group-wake: could not read LLM config from facilitator "${config.facilitator}" role.md`);
     process.exit(1);
   }
   console.log(`  LLM: ${llmConfig.provider}/${llmConfig.model}`);
@@ -290,7 +290,7 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
   }
 
   if (!llmClient) {
-    console.error(`murmuration circle-wake: ${secretKeyName ?? "LLM token"} not found in .env`);
+    console.error(`murmuration group-wake: ${secretKeyName ?? "LLM token"} not found in .env`);
     process.exit(1);
   }
 
@@ -314,12 +314,12 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
     }
   }
 
-  // Fetch the circle's GitHub issues backlog for context
+  // Fetch the group's GitHub issues backlog for context
   const repoInfo = await findRepoFromAgents(root, config.members);
   let backlogContext = "";
   if (repoInfo) {
     console.log(`  Fetching backlog from ${repoInfo.owner}/${repoInfo.repo}...`);
-    backlogContext = await fetchCircleBacklog(root, circleId!, repoInfo);
+    backlogContext = await fetchGroupBacklog(root, groupId!, repoInfo);
   }
 
   // Build the effective directive with backlog context
@@ -329,8 +329,8 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
   ].filter(Boolean).join("") || undefined;
 
   // Build context
-  const context: CircleWakeContext = {
-    circleId: circleId!,
+  const context: GroupWakeContext = {
+    groupId: groupId!,
     kind,
     members: config.members,
     facilitator: config.facilitator,
@@ -339,10 +339,10 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
     ...(effectiveDirective ? { directiveBody: effectiveDirective } : {}),
   };
 
-  // Run the circle wake
+  // Run the group wake
   const client = llmClient;
   const model = llmConfig.model;
-  const result = await runCircleWake(context, {
+  const result = await runGroupWake(context, {
     callLLM: async ({ systemPrompt, userPrompt, agentId }) => {
       console.log(`  [${agentId}] contributing...`);
       const r = await client.complete({
@@ -455,7 +455,7 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
     `_Tokens: ${String(result.totalInputTokens)} in / ${String(result.totalOutputTokens)} out_`,
   ].join("\n");
 
-  const meetingLabel = kind === "governance" ? "governance-meeting" : "circle-meeting";
+  const meetingLabel = kind === "governance" ? "governance-meeting" : "group-meeting";
   const repoOwner = repoInfo?.owner ?? "unknown";
   const repoName = repoInfo?.repo ?? "unknown";
 
@@ -475,7 +475,7 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
       makeRepoCoordinate(repoOwner, repoName),
       {
         title: `[${kind.toUpperCase()} MEETING] ${config.name} — ${dayUtc}`,
-        labels: [meetingLabel, `circle:${circleId}`],
+        labels: [meetingLabel, `group:${groupId}`],
         body: minutes,
       },
     );
@@ -485,7 +485,7 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
       console.log(`\nFailed to create meeting issue: ${issueResult.error.code}`);
       // Fallback: write locally
       const { writeFile: wf, mkdir } = await import("node:fs/promises");
-      const meetingDir = join(root, ".murmuration", "runs", `circle-${circleId}`, dayUtc);
+      const meetingDir = join(root, ".murmuration", "runs", `group-${groupId}`, dayUtc);
       await mkdir(meetingDir, { recursive: true });
       await wf(join(meetingDir, `meeting-${randomUUID().slice(0, 8)}.md`), `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`, "utf8");
       console.log(`  (saved locally as fallback)`);
@@ -493,7 +493,7 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
   } catch {
     // Fallback: write locally if GitHub fails
     const { writeFile: wf, mkdir } = await import("node:fs/promises");
-    const meetingDir = join(root, ".murmuration", "runs", `circle-${circleId}`, dayUtc);
+    const meetingDir = join(root, ".murmuration", "runs", `group-${groupId}`, dayUtc);
     await mkdir(meetingDir, { recursive: true });
     await wf(join(meetingDir, `meeting-${randomUUID().slice(0, 8)}.md`), `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`, "utf8");
     console.log(`\nMeeting minutes saved locally (GitHub unavailable).`);

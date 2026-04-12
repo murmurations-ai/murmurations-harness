@@ -11,8 +11,8 @@
  *         soul.md            — agent identity
  *         role.md            — frontmatter + accountabilities
  *     governance/
- *       circles/
- *         <circle>.md        — circle context (if any circles declared)
+ *       groups/
+ *         <group>.md         — group context (if any groups declared)
  *     .env                   — secret placeholders (0600)
  *     .gitignore             — ignores .env, .murmuration/
  *
@@ -62,8 +62,8 @@ export const runInit = async (targetArg?: string): Promise<void> => {
   const provider = providerInput.trim().toLowerCase() || "gemini";
 
   // 5. Circle (optional)
-  const circleInput = await ask("Circle this agent belongs to (or press Enter for none): ");
-  const circle = circleInput.trim().toLowerCase().replace(/\s+/g, "-") || "";
+  const groupInput = await ask("Group this agent belongs to (or press Enter for none): ");
+  const group = groupInput.trim().toLowerCase().replace(/\s+/g, "-") || "";
 
   // 6. Governance model
   const govInput = await ask(
@@ -82,8 +82,8 @@ export const runInit = async (targetArg?: string): Promise<void> => {
   // Directories
   await mkdir(join(targetDir, "murmuration"), { recursive: true });
   await mkdir(join(targetDir, "agents", agentDir), { recursive: true });
-  if (circle) {
-    await mkdir(join(targetDir, "governance", "circles"), { recursive: true });
+  if (group) {
+    await mkdir(join(targetDir, "governance", "groups"), { recursive: true });
   }
 
   // murmuration/soul.md
@@ -128,7 +128,7 @@ _Define the agent-specific bright lines beyond the murmuration soul._
 
   // agents/<name>/role.md
   const secretName = provider === "ollama" ? "" : `${provider.toUpperCase()}_API_KEY`;
-  const circleLine = circle ? `\n  - "${circle}"` : "";
+  const groupLine = group ? `\n  - "${group}"` : "";
   await writeFile(
     join(targetDir, "agents", agentDir, "role.md"),
     `---
@@ -136,7 +136,7 @@ agent_id: "${agentDir}"
 name: "${agentName.trim()}"
 model_tier: "balanced"
 max_wall_clock_ms: 120000
-circle_memberships:${circleLine || "\n  []"}
+group_memberships:${groupLine || "\n  []"}
 
 llm:
   provider: "${provider}"
@@ -176,20 +176,20 @@ secrets:
 
 - **Autonomous:** _(what this agent can do without asking)_
 - **Notify:** _(what requires notification to Source)_
-- **Consent:** _(what requires circle consent)_
+- **Consent:** _(what requires group consent)_
 `,
     "utf8",
   );
 
-  // governance/circles/<circle>.md
-  if (circle) {
+  // governance/groups/<group>.md
+  if (group) {
     await writeFile(
-      join(targetDir, "governance", "circles", `${circle}.md`),
-      `# ${circle.charAt(0).toUpperCase() + circle.slice(1)} Circle
+      join(targetDir, "governance", "groups", `${group}.md`),
+      `# ${group.charAt(0).toUpperCase() + group.slice(1)} Group
 
 ## Purpose
 
-_Define this circle's purpose._
+_Define this group's purpose._
 
 ## Members
 
@@ -232,7 +232,7 @@ _Define this circle's purpose._
   ${targetDir}/
     murmuration/soul.md
     agents/${agentDir}/soul.md
-    agents/${agentDir}/role.md${circle ? `\n    governance/circles/${circle}.md` : ""}
+    agents/${agentDir}/role.md${group ? `\n    governance/groups/${group}.md` : ""}
     .env (0600)
     .gitignore
 

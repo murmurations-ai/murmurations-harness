@@ -1,5 +1,5 @@
 /**
- * Circle Wake Runner — convenes all members of a circle for a
+ * Group Wake Runner — convenes all members of a group for a
  * shared session with a facilitator who synthesizes the output.
  *
  * Two wake kinds:
@@ -10,25 +10,25 @@
  * then the facilitator sees all contributions and synthesizes.
  *
  * This is NOT an individual agent wake — it's a group session
- * where the circle convenes as a unit. The daemon schedules it
- * from circle config, not from individual agent role.md.
+ * where the group convenes as a unit. The daemon schedules it
+ * from group config, not from individual agent role.md.
  */
 
 import type { Signal } from "../execution/index.js";
 import type { GovernanceItem } from "../governance/index.js";
 
 // ---------------------------------------------------------------------------
-// Circle configuration (parsed from circle docs)
+// Group configuration (parsed from group docs)
 // ---------------------------------------------------------------------------
 
-export interface CircleConfig {
-  readonly circleId: string;
+export interface GroupConfig {
+  readonly groupId: string;
   readonly name: string;
   readonly members: readonly string[]; // agent IDs
   readonly facilitator: string; // agent ID
   readonly operationalCron?: string;
   readonly governanceCron?: string;
-  readonly backlogLabel?: string; // GitHub label for this circle's issues
+  readonly backlogLabel?: string; // GitHub label for this group.s issues
   readonly backlogRepo?: string; // "owner/repo"
 }
 
@@ -36,11 +36,11 @@ export interface CircleConfig {
 // Circle wake context + result
 // ---------------------------------------------------------------------------
 
-export type CircleWakeKind = "operational" | "governance";
+export type GroupWakeKind = "operational" | "governance";
 
-export interface CircleWakeContext {
-  readonly circleId: string;
-  readonly kind: CircleWakeKind;
+export interface GroupWakeContext {
+  readonly groupId: string;
+  readonly kind: GroupWakeKind;
   readonly members: readonly string[];
   readonly facilitator: string;
   readonly signals: readonly Signal[];
@@ -117,9 +117,9 @@ export interface GovernanceTally {
 export type ConsentPosition = GovernancePosition;
 export type ConsentTally = GovernanceTally;
 
-export interface CircleWakeResult {
-  readonly circleId: string;
-  readonly kind: CircleWakeKind;
+export interface GroupWakeResult {
+  readonly groupId: string;
+  readonly kind: GroupWakeKind;
   readonly contributions: readonly MemberContribution[];
   readonly synthesis: string;
   /** Structured actions from the facilitator synthesis. */
@@ -214,7 +214,7 @@ const DEFAULT_GOV_FACILITATOR_INSTRUCTIONS = `For each governance item:
 - State whether the item should advance, be amended, or be tabled`;
 
 // ---------------------------------------------------------------------------
-// Circle Wake Runner
+// Group Wake Runner
 // ---------------------------------------------------------------------------
 
 /**
@@ -235,7 +235,7 @@ export interface GovernanceMeetingPrompts {
   readonly tallyPositions: (positions: readonly GovernancePosition[], governanceQueue: readonly GovernanceItem[]) => GovernanceTally[];
 }
 
-export interface CircleWakeRunnerDeps {
+export interface GroupWakeRunnerDeps {
   /** Call an LLM with system prompt + user prompt, return the response text + token counts. */
   readonly callLLM: (opts: {
     systemPrompt: string;
@@ -248,28 +248,28 @@ export interface CircleWakeRunnerDeps {
 }
 
 /**
- * Run a circle wake session. This is the core group-wake primitive.
+ * Run a group wake session. This is the core group-wake primitive.
  *
  * Phase 1 (member round): each member is called sequentially with
- * the circle context. Each member sees the contributions of members
+ * the group context. Each member sees the contributions of members
  * who spoke before them (accumulating context).
  *
  * Phase 2 (facilitator synthesis): the facilitator sees ALL member
  * contributions and produces the synthesized output — decisions,
  * priorities, meeting minutes.
  */
-export const runCircleWake = async (
-  context: CircleWakeContext,
-  deps: CircleWakeRunnerDeps,
+export const runGroupWake = async (
+  context: GroupWakeContext,
+  deps: GroupWakeRunnerDeps,
   signal?: AbortSignal,
-): Promise<CircleWakeResult> => {
+): Promise<GroupWakeResult> => {
   const contributions: MemberContribution[] = [];
   let totalInput = 0;
   let totalOutput = 0;
 
-  const circleContext = context.kind === "governance"
-    ? `This is a GOVERNANCE MEETING for the ${context.circleId} circle.\n\nGovernance queue (${String(context.governanceQueue.length)} items):\n${context.governanceQueue.map((item) => `  - [${item.id.slice(0, 8)}] ${item.kind} | state: ${item.currentState} | ${JSON.stringify(item.payload)}`).join("\n") || "  (empty)"}`
-    : `This is an OPERATIONAL MEETING for the ${context.circleId} circle.`;
+  const groupContext = context.kind === "governance"
+    ? `This is a GOVERNANCE MEETING for the ${context.groupId} group.\n\nGovernance queue (${String(context.governanceQueue.length)} items):\n${context.governanceQueue.map((item) => `  - [${item.id.slice(0, 8)}] ${item.kind} | state: ${item.currentState} | ${JSON.stringify(item.payload)}`).join("\n") || "  (empty)"}`
+    : `This is an OPERATIONAL MEETING for the ${context.groupId} group.`;
 
   const directiveSection = context.directiveBody
     ? `\n\nSOURCE DIRECTIVE:\n${context.directiveBody}\n\nRespond to the Source directive as part of your contribution.`
@@ -285,23 +285,23 @@ export const runCircleWake = async (
     if (memberId === context.facilitator) continue; // facilitator speaks last
 
     const priorContributions = contributions.length > 0
-      ? `\n\nPrior contributions from circle members:\n${contributions.map((c) => `### ${c.agentId}\n${c.content}`).join("\n\n")}`
+      ? `\n\nPrior contributions from group members:\n${contributions.map((c) => `### ${c.agentId}\n${c.content}`).join("\n\n")}`
       : "";
 
-    const userPrompt = `${circleContext}${directiveSection}${signalSummary}${priorContributions}
+    const userPrompt = `${groupContext}${directiveSection}${signalSummary}${priorContributions}
 
 ---
 
-You are ${memberId}, a member of the ${context.circleId} circle. Provide your contribution to this ${context.kind} meeting.
+You are ${memberId}, a member of the ${context.groupId} group. Provide your contribution to this ${context.kind} meeting.
 
 ${context.kind === "governance"
         ? (deps.governancePrompts?.memberInstructions ?? DEFAULT_GOV_MEMBER_INSTRUCTIONS)
-        : "Share your perspective on the circle's current priorities, what's working, and what needs attention."}
+        : "Share your perspective on the group.s current priorities, what's working, and what needs attention."}
 
 Keep your contribution focused and concise (3-5 paragraphs).`;
 
     const response = await deps.callLLM({
-      systemPrompt: `You are agent ${memberId} participating in a circle ${context.kind} meeting.`,
+      systemPrompt: `You are agent ${memberId} participating in a group ${context.kind} meeting.`,
       userPrompt,
       agentId: memberId,
       ...(signal ? { signal } : {}),
@@ -323,7 +323,7 @@ Keep your contribution focused and concise (3-5 paragraphs).`;
     .map((c) => `### ${c.agentId}\n${c.content}`)
     .join("\n\n");
 
-  const facilitatorPrompt = `${circleContext}${directiveSection}
+  const facilitatorPrompt = `${groupContext}${directiveSection}
 
 ## All member contributions
 
@@ -331,12 +331,12 @@ ${allContributions}
 
 ---
 
-You are ${context.facilitator}, the facilitator of the ${context.circleId} circle. Synthesize all member contributions into a meeting summary.
+You are ${context.facilitator}, the facilitator of the ${context.groupId} group. Synthesize all member contributions into a meeting summary.
 
 ${context.kind === "governance"
     ? (deps.governancePrompts?.facilitatorInstructions ?? DEFAULT_GOV_FACILITATOR_INSTRUCTIONS)
     : `Produce:
-1. KEY DECISIONS — what the circle agreed on
+1. KEY DECISIONS — what the group agreed on
 2. ACTION ITEMS — who does what by when (each becomes a GitHub issue)
 3. TENSIONS — any new governance items to file
 4. NEXT MEETING — what to revisit`}
@@ -349,7 +349,7 @@ IMPORTANT: After your prose summary, you MUST include a structured actions block
 [
   {"kind": "label-issue", "issueNumber": 42, "label": "priority:high"},
   {"kind": "label-issue", "issueNumber": 42, "label": "assigned:01-research"},
-  {"kind": "create-issue", "title": "Action item: ...", "body": "Context from meeting...", "labels": ["action-item", "assigned:02-content-production", "circle:${context.circleId}"]},
+  {"kind": "create-issue", "title": "Action item: ...", "body": "Context from meeting...", "labels": ["action-item", "assigned:02-content-production", "group:${context.groupId}"]},
   {"kind": "comment-issue", "issueNumber": 42, "body": "Meeting decision: ..."},
   {"kind": "close-issue", "issueNumber": 99}
 ]
@@ -362,7 +362,7 @@ Each action item MUST become a create-issue action with an "action-item" label a
 Only reference issue numbers from the Open Issues list above. Do not invent issue numbers.`;
 
   const synthesis = await deps.callLLM({
-    systemPrompt: `You are ${context.facilitator}, facilitator of the ${context.circleId} circle. You synthesize member contributions into clear meeting outcomes.`,
+    systemPrompt: `You are ${context.facilitator}, facilitator of the ${context.groupId} group. You synthesize member contributions into clear meeting outcomes.`,
     userPrompt: facilitatorPrompt,
     agentId: context.facilitator,
     signal,
@@ -391,7 +391,7 @@ Only reference issue numbers from the Open Issues list above. Do not invent issu
   const actions = parseMeetingActions(synthesis.content);
 
   return {
-    circleId: context.circleId,
+    groupId: context.groupId,
     kind: context.kind,
     contributions,
     synthesis: synthesis.content,

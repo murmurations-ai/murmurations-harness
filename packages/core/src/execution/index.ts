@@ -47,17 +47,17 @@ export const makeAgentId = (value: string): AgentId => ({
 });
 
 /**
- * Identifier for a circle (e.g. `"content"`), matching
- * `circle_id:` in `governance/circles/<name>.md` frontmatter.
+ * Identifier for a group (e.g. `"content"`), matching
+ * `group_id:` in `governance/groups/<name>.md` frontmatter.
  */
-export interface CircleId {
-  readonly kind: "circle-id";
+export interface GroupId {
+  readonly kind: "group-id";
   readonly value: string;
 }
 
-/** Construct a {@link CircleId} from its string form. */
-export const makeCircleId = (value: string): CircleId => ({
-  kind: "circle-id",
+/** Construct a {@link GroupId} from its string form. */
+export const makeGroupId = (value: string): GroupId => ({
+  kind: "group-id",
   value,
 });
 
@@ -89,10 +89,10 @@ export const makeWakeId = (value: string): WakeId => ({
  *
  * The four layer kinds match spec §5.1:
  *
- *   `murmuration_soul` → `agent_soul` → `agent_role` → `circle_context`
+ *   `murmuration_soul` → `agent_soul` → `agent_role` → `group_context`
  *
- * `circle_context` may appear zero or more times (spec §6: agents can
- * belong to multiple circles). All other kinds appear exactly once and
+ * `group_context` may appear zero or more times (spec §6: agents can
+ * belong to multiple groups). All other kinds appear exactly once and
  * in the order shown.
  */
 export type IdentityLayer =
@@ -122,9 +122,9 @@ export type IdentityLayer =
       readonly sourcePath: string;
     }
   | {
-      readonly kind: "circle-context";
-      readonly circleId: CircleId;
-      /** Rendered contents of `governance/circles/<circle>.md`. */
+      readonly kind: "group-context";
+      readonly groupId: GroupId;
+      /** Rendered contents of `governance/groups/<group>.md`. */
       readonly content: string;
       readonly sourcePath: string;
     };
@@ -138,14 +138,14 @@ export interface AgentRoleFrontmatter {
   readonly agentId: AgentId;
   readonly name: string;
   readonly modelTier: ModelTier;
-  readonly circleMemberships: readonly CircleId[];
+  readonly groupMemberships: readonly GroupId[];
 }
 
 /**
  * The full ordered identity chain handed to an executor on spawn. The
  * harness enforces that exactly one `murmuration-soul`, one `agent-soul`,
- * and one `agent-role` layer are present; `circle-context` entries match
- * `frontmatter.circleMemberships` 1:1.
+ * and one `agent-role` layer are present; `group-context` entries match
+ * `frontmatter.groupMemberships` 1:1.
  */
 export interface IdentityChain {
   readonly agentId: AgentId;
@@ -197,13 +197,13 @@ export type WakeReason =
  * Wake mode — determines what the agent should focus on during this wake.
  *
  * - `individual`: standard wake — process signals, act on action items, produce artifacts
- * - `circle-member`: participating in a circle meeting — contribute perspective, don't execute
- * - `circle-facilitator`: facilitating a circle meeting — synthesize, produce action list
+ * - `group-member`: participating in a group meeting — contribute perspective, don't execute
+ * - `group-facilitator`: facilitating a group meeting — synthesize, produce action list
  *
- * Agents in `circle-member` or `circle-facilitator` mode should NOT execute
+ * Agents in `group-member` or `group-facilitator` mode should NOT execute
  * action items — they are contributing to a group discussion, not doing individual work.
  */
-export type WakeMode = "individual" | "circle-member" | "circle-facilitator";
+export type WakeMode = "individual" | "group-member" | "group-facilitator";
 
 /**
  * Trust level tag for a signal, per carry-forward

@@ -70,7 +70,7 @@ describe("IdentityLoader", () => {
 agent_id: "08-editorial"
 name: "Editorial Agent"
 model_tier: balanced
-circle_memberships:
+group_memberships:
   - content
   - quality
 wake_schedule:
@@ -84,11 +84,11 @@ Accountabilities, etc.
 `,
     );
     await writeFixture(
-      "governance/circles/content.md",
+      "governance/groups/content.md",
       "---\ncircle_id: content\n---\n# Content Circle\n\nPurpose...\n",
     );
     await writeFixture(
-      "governance/circles/quality.md",
+      "governance/groups/quality.md",
       "---\ncircle_id: quality\n---\n# Quality Circle\n\nPurpose...\n",
     );
   };
@@ -102,7 +102,7 @@ Accountabilities, etc.
     expect(loaded.agentId.value).toBe("08-editorial");
     expect(loaded.frontmatter.name).toBe("Editorial Agent");
     expect(loaded.frontmatter.model_tier).toBe("balanced");
-    expect(loaded.frontmatter.circle_memberships).toEqual(["content", "quality"]);
+    expect(loaded.frontmatter.group_memberships).toEqual(["content", "quality"]);
     expect(loaded.frontmatter.max_wall_clock_ms).toBe(30_000);
 
     const chain = loaded.chain;
@@ -110,8 +110,8 @@ Accountabilities, etc.
     expect(chain.layers[0]?.kind).toBe("murmuration-soul");
     expect(chain.layers[1]?.kind).toBe("agent-soul");
     expect(chain.layers[2]?.kind).toBe("agent-role");
-    expect(chain.layers[3]?.kind).toBe("circle-context");
-    expect(chain.layers[4]?.kind).toBe("circle-context");
+    expect(chain.layers[3]?.kind).toBe("group-context");
+    expect(chain.layers[4]?.kind).toBe("group-context");
 
     const agentRoleLayer = chain.layers[2];
     expect(agentRoleLayer?.content).toContain("Editorial Agent — Role");
@@ -123,14 +123,14 @@ Accountabilities, etc.
     const loader = new IdentityLoader({ rootDir });
     const loaded = await loader.load("08-editorial");
 
-    expect(loaded.chain.frontmatter.circleMemberships).toHaveLength(2);
-    const circleIds: string[] = [];
+    expect(loaded.chain.frontmatter.groupMemberships).toHaveLength(2);
+    const groupIds: string[] = [];
     for (const layer of loaded.chain.layers) {
-      if (layer.kind === "circle-context") {
-        circleIds.push(layer.circleId.value);
+      if (layer.kind === "group-context") {
+        groupIds.push(layer.groupId.value);
       }
     }
-    expect(circleIds).toEqual(["content", "quality"]);
+    expect(groupIds).toEqual(["content", "quality"]);
   });
 
   it("throws IdentityFileMissingError when role.md is absent", async () => {
@@ -151,7 +151,7 @@ Accountabilities, etc.
 agent_id: "10-orphan"
 name: "Orphan"
 model_tier: fast
-circle_memberships:
+group_memberships:
   - nonexistent
 ---
 
@@ -238,7 +238,7 @@ model_tier: fast
     const loader = new IdentityLoader({ rootDir });
     const loaded = await loader.load("14-defaults");
 
-    expect(loaded.frontmatter.circle_memberships).toEqual([]);
+    expect(loaded.frontmatter.group_memberships).toEqual([]);
     expect(loaded.frontmatter.max_wall_clock_ms).toBe(15_000);
   });
 });
@@ -269,7 +269,7 @@ describe("roleFrontmatterSchema (ADR-0016 extensions)", () => {
     await writeFixture("murmuration/soul.md", "# Murmuration Soul\n\nShared.\n");
     await writeFixture(`agents/${agentDir}/soul.md`, "# Soul\n\nChar.\n");
     await writeFixture(`agents/${agentDir}/role.md`, `---\n${roleFrontmatter}\n---\n\n# Role\n`);
-    await writeFixture("governance/circles/engineering.md", "# Engineering\n");
+    await writeFixture("governance/groups/engineering.md", "# Engineering\n");
   };
 
   it("minimal hello-world frontmatter still loads (backwards compat)", async () => {
@@ -279,7 +279,7 @@ describe("roleFrontmatterSchema (ADR-0016 extensions)", () => {
         'agent_id: "hello-world"',
         'name: "Hello World Agent"',
         "model_tier: fast",
-        "circle_memberships:",
+        "group_memberships:",
         "  - engineering",
       ].join("\n"),
     );
@@ -307,7 +307,7 @@ describe("roleFrontmatterSchema (ADR-0016 extensions)", () => {
         'name: "Research Agent"',
         "model_tier: balanced",
         "max_wall_clock_ms: 600000",
-        "circle_memberships:",
+        "group_memberships:",
         "  - engineering",
         "llm:",
         '  provider: "gemini"',
@@ -433,7 +433,7 @@ describe("examples/research-agent identity chain", () => {
     expect(loaded.agentId.value).toBe("01-research");
     expect(loaded.frontmatter.name).toBe("Research Agent");
     expect(loaded.frontmatter.model_tier).toBe("balanced");
-    expect(loaded.frontmatter.circle_memberships).toEqual(["intelligence"]);
+    expect(loaded.frontmatter.group_memberships).toEqual(["intelligence"]);
   });
 
   it("parses the ADR-0016 llm pin (gemini / gemini-2.5-pro)", async () => {
@@ -513,6 +513,6 @@ describe("examples/research-agent identity chain", () => {
     expect(loaded.chain.layers[0]?.kind).toBe("murmuration-soul");
     expect(loaded.chain.layers[1]?.kind).toBe("agent-soul");
     expect(loaded.chain.layers[2]?.kind).toBe("agent-role");
-    expect(loaded.chain.layers[3]?.kind).toBe("circle-context");
+    expect(loaded.chain.layers[3]?.kind).toBe("group-context");
   });
 });

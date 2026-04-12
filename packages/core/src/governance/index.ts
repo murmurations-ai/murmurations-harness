@@ -466,11 +466,36 @@ export type GovernanceDecision =
  * the harness tracks items through those states with a full audit
  * trail and automatic review-date enforcement.
  */
+/**
+ * Display terms the governance model uses for human-facing output.
+ * The harness code uses "group" internally; the plugin overrides
+ * these for CLI output, dashboard labels, and meeting titles.
+ */
+export interface GovernanceTerminology {
+  /** What to call a group of agents (e.g. "circle", "department", "committee", "guild"). Default: "group". */
+  readonly group: string;
+  /** Plural form (e.g. "circles", "departments"). Default: "groups". */
+  readonly groupPlural: string;
+  /** What to call a governance item (e.g. "tension", "report", "motion", "flag"). Default: "item". */
+  readonly governanceItem: string;
+  /** What to call a governance event filed by an agent (e.g. "tension", "directive", "flag"). Default: "governance event". */
+  readonly governanceEvent: string;
+}
+
+export const DEFAULT_TERMINOLOGY: GovernanceTerminology = {
+  group: "group",
+  groupPlural: "groups",
+  governanceItem: "item",
+  governanceEvent: "governance event",
+};
+
 export interface GovernancePlugin {
   /** Human-readable name for logging (e.g. "self-organizing", "chain-of-command", "meritocratic", "consensus", "parliamentary"). */
   readonly name: string;
   /** Semver version of the plugin implementation. */
   readonly version: string;
+  /** Display terminology for this governance model. If omitted, generic defaults are used. */
+  readonly terminology?: GovernanceTerminology;
 
   /**
    * Declare the state graphs this governance model uses. Called once

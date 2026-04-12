@@ -95,7 +95,7 @@ export interface WakeCostRecord {
   readonly rollupHints: {
     readonly dayUtc: string;
     readonly isoWeekUtc: string;
-    readonly circleIds: readonly string[];
+    readonly groupIds: readonly string[];
   };
 }
 
@@ -150,7 +150,7 @@ export const wakeCostRecordSchema = z.object({
   rollupHints: z.object({
     dayUtc: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     isoWeekUtc: z.string().regex(/^\d{4}-W\d{2}$/),
-    circleIds: z.array(z.string()).readonly(),
+    groupIds: z.array(z.string()).readonly(),
   }),
 });
 

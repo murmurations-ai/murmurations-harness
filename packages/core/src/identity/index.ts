@@ -5,7 +5,7 @@
  * Spec §5 (identity model): inheritance is
  *
  *   murmuration/soul.md → agents/NN-name/soul.md → agents/NN-name/role.md
- *   + governance/circles/<id>.md (one per circle membership)
+ *   + governance/groups/<id>.md (one per group membership)
  *
  * The `role.md` file carries YAML frontmatter with operational config
  * (spec §5.3); this module parses and validates it via Zod, then reads
@@ -25,10 +25,10 @@ import { z } from "zod";
 
 import {
   makeAgentId,
-  makeCircleId,
+  makeGroupId,
   type AgentId,
   type AgentRoleFrontmatter,
-  type CircleId,
+  type GroupId,
   type IdentityChain,
   type IdentityLayer,
   type ModelTier,
@@ -214,7 +214,7 @@ export const roleFrontmatterSchema = z.object({
   // legacy compat (Phase 1B)
   model_tier: modelTierSchema,
   wake_schedule: wakeScheduleSchema.optional(),
-  circle_memberships: z.array(z.string().min(1)).default([]),
+  group_memberships: z.array(z.string().min(1)).default([]),
   max_wall_clock_ms: z.number().int().positive().default(15_000),
 
   // new in ADR-0016 (Phase 2C)
@@ -259,7 +259,7 @@ export const splitFrontmatter = (
  *   <rootDir>/murmuration/soul.md
  *   <rootDir>/agents/<agentDir>/soul.md
  *   <rootDir>/agents/<agentDir>/role.md
- *   <rootDir>/governance/circles/<circleId>.md
+ *   <rootDir>/governance/groups/<groupId>.md
  */
 export interface IdentityLoaderConfig {
   /** Repository root (absolute or relative to process.cwd()). */
@@ -268,8 +268,8 @@ export interface IdentityLoaderConfig {
   readonly murmurationSoulPath?: string;
   /** Path to the agents directory relative to `rootDir`. Defaults to `"agents"`. */
   readonly agentsDir?: string;
-  /** Path to the circles directory relative to `rootDir`. Defaults to `"governance/circles"`. */
-  readonly circlesDir?: string;
+  /** Path to the groups directory relative to `rootDir`. Defaults to `"governance/groups"`. */
+  readonly groupsDir?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,13 +296,13 @@ export class IdentityLoader {
   readonly #rootDir: string;
   readonly #murmurationSoulPath: string;
   readonly #agentsDir: string;
-  readonly #circlesDir: string;
+  readonly #groupsDir: string;
 
   public constructor(config: IdentityLoaderConfig) {
     this.#rootDir = resolve(config.rootDir);
     this.#murmurationSoulPath = config.murmurationSoulPath ?? "murmuration/soul.md";
     this.#agentsDir = config.agentsDir ?? "agents";
-    this.#circlesDir = config.circlesDir ?? "governance/circles";
+    this.#groupsDir = config.groupsDir ?? "governance/groups";
   }
 
   /**
@@ -379,22 +379,22 @@ export class IdentityLoader {
 
     const frontmatter = parsed.data;
     const agentId = makeAgentId(frontmatter.agent_id);
-    const circleMemberships: readonly CircleId[] = frontmatter.circle_memberships.map((c) =>
-      makeCircleId(c),
+    const groupMemberships: readonly GroupId[] = frontmatter.group_memberships.map((c) =>
+      makeGroupId(c),
     );
 
-    // Load circle contexts. Missing circle files are a hard error —
+    // Load group contexts. Missing group files are a hard error —
     // the role declared the membership and we cannot silently ignore it.
-    const circleLayers: IdentityLayer[] = [];
-    for (const circleId of circleMemberships) {
-      const circlePath = join(this.#rootDir, this.#circlesDir, `${circleId.value}.md`);
-      const circleContent = await readRequired(circlePath);
-      const { body: circleBody } = splitFrontmatter(circleContent);
-      circleLayers.push({
-        kind: "circle-context",
-        circleId,
-        content: circleBody,
-        sourcePath: circlePath,
+    const groupLayers: IdentityLayer[] = [];
+    for (const groupId of groupMemberships) {
+      const groupPath = join(this.#rootDir, this.#groupsDir, `${groupId.value}.md`);
+      const groupContent = await readRequired(groupPath);
+      const { body: groupBody } = splitFrontmatter(groupContent);
+      groupLayers.push({
+        kind: "group-context",
+        groupId,
+        content: groupBody,
+        sourcePath: groupPath,
       });
     }
 
@@ -416,14 +416,14 @@ export class IdentityLoader {
         content: roleBody,
         sourcePath: agentRolePath,
       },
-      ...circleLayers,
+      ...groupLayers,
     ];
 
     const runtimeFrontmatter: AgentRoleFrontmatter = {
       agentId,
       name: frontmatter.name,
       modelTier: frontmatter.model_tier as ModelTier,
-      circleMemberships,
+      groupMemberships,
     };
 
     const chain: IdentityChain = {

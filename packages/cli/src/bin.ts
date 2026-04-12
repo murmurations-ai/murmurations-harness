@@ -16,7 +16,7 @@
 
 import { runBacklog } from "./backlog.js";
 import { bootDaemon } from "./boot.js";
-import { runCircleWakeCommand } from "./circle-wake.js";
+import { runGroupWakeCommand } from "./group-wake.js";
 import { runDirective } from "./directive.js";
 import { runInit } from "./init.js";
 
@@ -76,10 +76,10 @@ murmuration — Murmuration Harness CLI
 Usage:
   murmuration start [options]           Boot the daemon
   murmuration init [dir]                Create a new murmuration (interactive)
-  murmuration directive [options] "msg" Send a directive to agents/circles
+  murmuration directive [options] "msg" Send a directive to agents/groups
   murmuration directive --list          Show all directives and responses
-  murmuration circle-wake [options]     Convene a circle meeting (on demand)
-  murmuration backlog [options]         View/refresh a circle's GitHub work queue
+  murmuration group-wake [options]     Convene a group meeting (on demand)
+  murmuration backlog [options]         View/refresh a group's GitHub work queue
   murmuration status                    (future) Print daemon status
   murmuration stop                      (future) Send SIGTERM to a running daemon
 
@@ -138,10 +138,10 @@ const main = async (): Promise<void> => {
       await runBacklog(argv.slice(1), rootDirB);
       break;
     }
-    case "circle-wake": {
+    case "group-wake": {
       const rootIdx2 = argv.indexOf("--root");
       const rootDir2 = (rootIdx2 >= 0 ? argv[rootIdx2 + 1] : undefined) ?? ".";
-      await runCircleWakeCommand(argv.slice(1), rootDir2);
+      await runGroupWakeCommand(argv.slice(1), rootDir2);
       break;
     }
     case "directive": {

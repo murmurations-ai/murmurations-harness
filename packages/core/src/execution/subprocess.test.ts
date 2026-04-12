@@ -6,7 +6,7 @@ import {
   isCompleted,
   isFailed,
   makeAgentId,
-  makeCircleId,
+  makeGroupId,
   makeWakeId,
   type AgentSpawnContext,
   type CostBudget,
@@ -39,7 +39,7 @@ const makeContext = (agentId: string, wakeId: string): AgentSpawnContext => {
       agentId: id,
       name: agentId,
       modelTier: "fast",
-      circleMemberships: [makeCircleId("engineering")],
+      groupMemberships: [makeGroupId("engineering")],
     },
     layers: [
       {
@@ -60,8 +60,8 @@ const makeContext = (agentId: string, wakeId: string): AgentSpawnContext => {
         sourcePath: "<test>",
       },
       {
-        kind: "circle-context",
-        circleId: makeCircleId("engineering"),
+        kind: "group-context",
+        groupId: makeGroupId("engineering"),
         content: "engineering circle context",
         sourcePath: "<test>",
       },
@@ -279,7 +279,7 @@ describe("SubprocessExecutor", () => {
     expect(result.wakeSummary).toContain("wakeId=wake-thread");
     expect(result.wakeSummary).toContain("agentId=thread-agent");
     expect(result.wakeSummary).toContain(
-      "layers=murmuration-soul,agent-soul,agent-role,circle-context",
+      "layers=murmuration-soul,agent-soul,agent-role,group-context",
     );
   });
 });

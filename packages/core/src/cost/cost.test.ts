@@ -111,7 +111,7 @@ describe("WakeCostBuilder", () => {
       wakeId: makeWakeId("wake-test"),
       agentId: makeAgentId("07-wren"),
       modelTier: "balanced",
-      circleIds: ["engineering"],
+      groupIds: ["engineering"],
       ...(opts.now !== undefined ? { now: opts.now } : {}),
       ...(opts.ceiling !== undefined ? { ceiling: opts.ceiling } : {}),
     };
@@ -136,7 +136,7 @@ describe("WakeCostBuilder", () => {
     expect(record.github.restCalls).toBe(0);
     expect(record.github.graphqlCalls).toBe(0);
     expect(record.budget).toBeNull();
-    expect(record.rollupHints.circleIds).toEqual(["engineering"]);
+    expect(record.rollupHints.groupIds).toEqual(["engineering"]);
     expect(record.rollupHints.dayUtc).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(record.rollupHints.isoWeekUtc).toMatch(/^\d{4}-W\d{2}$/);
   });
@@ -320,7 +320,7 @@ describe("wakeCostRecordSchema", () => {
     rollupHints: {
       dayUtc: "2026-04-09",
       isoWeekUtc: "2026-W15",
-      circleIds: ["engineering"],
+      groupIds: ["engineering"],
     },
   };
 

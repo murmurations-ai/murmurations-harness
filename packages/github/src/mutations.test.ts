@@ -535,7 +535,7 @@ describe("GithubClient mutations (ADR-0017)", () => {
         status: 200,
         body: [
           { id: 1, name: "priority:high" },
-          { id: 2, name: "circle:content" },
+          { id: 2, name: "group:content" },
         ],
       },
     ]);

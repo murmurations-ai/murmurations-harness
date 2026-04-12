@@ -39,16 +39,16 @@ const helloWorld: RegisteredAgent = {
   agentId: "hello-world",
   displayName: "Hello World Agent",
   trigger: { kind: "delay-once", delayMs: 50 },
-  circleMemberships: ["engineering"],
+  groupMemberships: ["engineering"],
   modelTier: "fast",
   maxWallClockMs: 5000,
   identityContent: {
     murmurationSoul: "test soul",
     agentSoul: "test agent soul",
     agentRole: "test role",
-    circleContexts: [
+    groupContexts: [
       {
-        circleId: "engineering",
+        groupId: "engineering",
         content: "engineering ctx",
       },
     ],

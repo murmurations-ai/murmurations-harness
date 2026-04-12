@@ -5,7 +5,7 @@ import { InProcessExecutor, type AgentRunner } from "./in-process.js";
 import {
   isCompleted,
   makeAgentId,
-  makeCircleId,
+  makeGroupId,
   makeWakeId,
   type AgentExecutor,
   type AgentSpawnContext,
@@ -24,7 +24,7 @@ const makeContext = (agentId: string): AgentSpawnContext => ({
       agentId: makeAgentId(agentId),
       name: agentId,
       modelTier: "balanced",
-      circleMemberships: [makeCircleId("test")],
+      groupMemberships: [makeGroupId("test")],
     },
     layers: [],
   },

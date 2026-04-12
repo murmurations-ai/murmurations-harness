@@ -29,7 +29,7 @@
 import type {
   AgentId,
   AgentRoleFrontmatter,
-  CircleId,
+  GroupId,
   SignalBundle,
   WakeId,
   WakeReason,
@@ -67,7 +67,7 @@ export interface SignalAggregationContext {
   readonly agentId: AgentId;
   readonly agentDir: string;
   readonly frontmatter: AgentRoleFrontmatter;
-  readonly circleMemberships: readonly CircleId[];
+  readonly groupMemberships: readonly GroupId[];
   readonly wakeReason: WakeReason;
   readonly now: Date;
 }

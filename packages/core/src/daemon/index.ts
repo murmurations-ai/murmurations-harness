@@ -25,13 +25,13 @@ import {
   isKilled,
   isTimedOut,
   makeAgentId,
-  makeCircleId,
+  makeGroupId,
   makeWakeId,
   type AgentExecutor,
   type AgentResult,
   type AgentSpawnContext,
   type EmittedGovernanceEvent,
-  type CircleId,
+  type GroupId,
   type CostBudget,
   type IdentityChain,
   type ResolvedModel,
@@ -82,7 +82,7 @@ export interface RegisteredAgent {
   readonly agentId: string;
   readonly displayName: string;
   readonly trigger: WakeTrigger;
-  readonly circleMemberships: readonly string[];
+  readonly groupMemberships: readonly string[];
   readonly modelTier: "fast" | "balanced" | "deep";
   /**
    * The identity content layers to thread through to the executor.
@@ -93,8 +93,8 @@ export interface RegisteredAgent {
     readonly murmurationSoul: string;
     readonly agentSoul: string;
     readonly agentRole: string;
-    readonly circleContexts: readonly {
-      readonly circleId: string;
+    readonly groupContexts: readonly {
+      readonly groupId: string;
       readonly content: string;
     }[];
   };
@@ -194,12 +194,12 @@ export const registeredAgentFromLoadedIdentity = (
   options: { readonly rolePath?: string } = {},
 ): RegisteredAgent => {
   const { chain, frontmatter } = loaded;
-  const circleContexts = chain.layers
+  const groupContexts = chain.layers
     .filter(
-      (l): l is Extract<(typeof chain.layers)[number], { kind: "circle-context" }> =>
-        l.kind === "circle-context",
+      (l): l is Extract<(typeof chain.layers)[number], { kind: "group-context" }> =>
+        l.kind === "group-context",
     )
-    .map((l) => ({ circleId: l.circleId.value, content: l.content }));
+    .map((l) => ({ groupId: l.groupId.value, content: l.content }));
 
   const murmurationSoul = chain.layers.find((l) => l.kind === "murmuration-soul")?.content ?? "";
   const agentSoul = chain.layers.find((l) => l.kind === "agent-soul")?.content ?? "";
@@ -259,13 +259,13 @@ export const registeredAgentFromLoadedIdentity = (
     agentId: chain.agentId.value,
     displayName: frontmatter.name,
     trigger,
-    circleMemberships: frontmatter.circle_memberships,
+    groupMemberships: frontmatter.group_memberships,
     modelTier: frontmatter.model_tier,
     identityContent: {
       murmurationSoul,
       agentSoul,
       agentRole,
-      circleContexts,
+      groupContexts,
     },
     maxWallClockMs: frontmatter.max_wall_clock_ms,
     ...(llm !== undefined ? { llm } : {}),
@@ -888,7 +888,7 @@ const buildSpawnContext = async (
   logger: DaemonLogger,
 ): Promise<AgentSpawnContext> => {
   const agentId = makeAgentId(agent.agentId);
-  const circleIds: CircleId[] = agent.circleMemberships.map((c) => makeCircleId(c));
+  const groupIds: GroupId[] = agent.groupMemberships.map((c) => makeGroupId(c));
 
   // Phase 1A: a minimal resolved model placeholder. Phase 1B reads
   // murmuration/models.yaml to resolve tier → concrete model.
@@ -913,7 +913,7 @@ const buildSpawnContext = async (
       agentId,
       name: agent.displayName,
       modelTier: agent.modelTier,
-      circleMemberships: circleIds,
+      groupMemberships: groupIds,
     },
     layers: [
       {
@@ -933,9 +933,9 @@ const buildSpawnContext = async (
         content: agent.identityContent.agentRole,
         sourcePath: "<phase-1a-placeholder>",
       },
-      ...agent.identityContent.circleContexts.map((ctx) => ({
-        kind: "circle-context" as const,
-        circleId: makeCircleId(ctx.circleId),
+      ...agent.identityContent.groupContexts.map((ctx) => ({
+        kind: "group-context" as const,
+        groupId: makeGroupId(ctx.groupId),
         content: ctx.content,
         sourcePath: "<phase-1a-placeholder>",
       })),
@@ -952,9 +952,9 @@ const buildSpawnContext = async (
         agentId,
         name: agent.displayName,
         modelTier: agent.modelTier,
-        circleMemberships: circleIds,
+        groupMemberships: groupIds,
       },
-      circleMemberships: circleIds,
+      groupMemberships: groupIds,
       wakeReason: event.wakeReason,
       now: new Date(),
     });

@@ -7,7 +7,7 @@
  *
  * ```ts
  * const builder = WakeCostBuilder.start({
- *   wakeId, agentId, modelTier, circleIds, ceiling,
+ *   wakeId, agentId, modelTier, groupIds, ceiling,
  * });
  * builder.recordSubprocessUsage({ userCpuMicros, systemCpuMicros, maxRssKb });
  * builder.addGithubCall({ transport: "rest" });
@@ -30,7 +30,7 @@ export interface WakeCostBuilderInit {
   readonly wakeId: WakeId;
   readonly agentId: AgentId;
   readonly modelTier: ModelTier;
-  readonly circleIds: readonly string[];
+  readonly groupIds: readonly string[];
   readonly ceiling?: BudgetCeiling | null;
   /** For tests — defaults to `() => new Date()`. */
   readonly now?: () => Date;
@@ -48,7 +48,7 @@ export class WakeCostBuilder {
   readonly #wakeId: WakeId;
   readonly #agentId: AgentId;
   readonly #modelTier: ModelTier;
-  readonly #circleIds: readonly string[];
+  readonly #groupIds: readonly string[];
   readonly #startedAt: Date;
   readonly #ceiling: BudgetCeiling | null;
   readonly #now: () => Date;
@@ -77,7 +77,7 @@ export class WakeCostBuilder {
     this.#wakeId = init.wakeId;
     this.#agentId = init.agentId;
     this.#modelTier = init.modelTier;
-    this.#circleIds = init.circleIds;
+    this.#groupIds = init.groupIds;
     this.#ceiling = init.ceiling ?? null;
     this.#now = init.now ?? ((): Date => new Date());
     this.#startedAt = this.#now();
@@ -223,7 +223,7 @@ export class WakeCostBuilder {
       rollupHints: {
         dayUtc: this.#startedAt.toISOString().slice(0, 10),
         isoWeekUtc: computeIsoWeekUtc(this.#startedAt),
-        circleIds: this.#circleIds,
+        groupIds: this.#groupIds,
       },
     };
     this.#finalized = record;

@@ -70,7 +70,7 @@ const makeCostRecord = (): WakeCostRecord => ({
   rollupHints: {
     dayUtc: "2026-04-12",
     isoWeekUtc: "2026-W15",
-    circleIds: ["intelligence"],
+    groupIds: ["intelligence"],
   },
 });
 

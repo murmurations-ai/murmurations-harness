@@ -7,7 +7,7 @@
  *
  * Usage:
  *   murmuration directive --root ../my-murmuration --agent 01-research "Validate this topic"
- *   murmuration directive --root ../my-murmuration --circle content "Should this circle hold meetings?"
+ *   murmuration directive --root ../my-murmuration --group content "Should this group hold meetings?"
  *   murmuration directive --root ../my-murmuration --all "Propose your ideal wake cadence"
  *   murmuration directive --root ../my-murmuration --list
  */
@@ -101,7 +101,7 @@ export const runDirective = async (
 
   // Determine scope
   const agentIdx = args.indexOf("--agent");
-  const circleIdx = args.indexOf("--circle");
+  const groupIdx = args.indexOf("--group");
   const allFlag = args.includes("--all");
 
   let scopeLabel: string;
@@ -109,14 +109,14 @@ export const runDirective = async (
   if (agentIdx >= 0 && args[agentIdx + 1]) {
     scopeLabel = `scope:agent:${args[agentIdx + 1]}`;
     scopeDesc = `agent ${args[agentIdx + 1]}`;
-  } else if (circleIdx >= 0 && args[circleIdx + 1]) {
-    scopeLabel = `scope:circle:${args[circleIdx + 1]}`;
-    scopeDesc = `circle ${args[circleIdx + 1]}`;
+  } else if (groupIdx >= 0 && args[groupIdx + 1]) {
+    scopeLabel = `scope:group:${args[groupIdx + 1]}`;
+    scopeDesc = `group ${args[groupIdx + 1]}`;
   } else if (allFlag) {
     scopeLabel = "scope:all";
     scopeDesc = "all agents";
   } else {
-    console.error("murmuration directive: specify --agent <id>, --circle <id>, or --all");
+    console.error("murmuration directive: specify --agent <id>, --group <id>, or --all");
     process.exit(2);
     return;
   }

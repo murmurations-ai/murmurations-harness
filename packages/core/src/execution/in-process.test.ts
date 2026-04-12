@@ -10,7 +10,7 @@ import {
   isKilled,
   isTimedOut,
   makeAgentId,
-  makeCircleId,
+  makeGroupId,
   makeWakeId,
   type AgentSpawnContext,
 } from "./index.js";
@@ -33,7 +33,7 @@ const makeContext = (): AgentSpawnContext => ({
       agentId: makeAgentId("01-research"),
       name: "Research Agent",
       modelTier: "balanced",
-      circleMemberships: [makeCircleId("intelligence")],
+      groupMemberships: [makeGroupId("intelligence")],
     },
     layers: [],
   },

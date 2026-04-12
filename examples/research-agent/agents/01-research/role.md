@@ -6,7 +6,7 @@ soul_file: "soul.md"
 # legacy compat (Phase 1B)
 model_tier: "balanced"
 max_wall_clock_ms: 600000 # 10 min per weekly wake
-circle_memberships:
+group_memberships:
   - "intelligence"
 
 # LLM provider + model (ADR-0016 §llm)

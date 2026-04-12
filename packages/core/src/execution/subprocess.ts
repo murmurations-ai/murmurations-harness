@@ -187,7 +187,7 @@ export class SubprocessExecutor implements AgentExecutor {
       wakeId: context.wakeId,
       agentId: context.agentId,
       modelTier: context.budget.model.tier,
-      circleIds: context.identity.frontmatter.circleMemberships.map((c) => c.value),
+      groupIds: context.identity.frontmatter.groupMemberships.map((c) => c.value),
       ceiling: null,
     });
     const rusageAtSpawn = process.resourceUsage();
@@ -641,7 +641,7 @@ const serializeContext = (context: AgentSpawnContext): string => {
         agentId: context.identity.frontmatter.agentId.value,
         name: context.identity.frontmatter.name,
         modelTier: context.identity.frontmatter.modelTier,
-        circleMemberships: context.identity.frontmatter.circleMemberships.map((c) => c.value),
+        groupMemberships: context.identity.frontmatter.groupMemberships.map((c) => c.value),
       },
       layerKinds: context.identity.layers.map((l) => l.kind),
     },

@@ -244,7 +244,7 @@ export class AgentStateStore {
   /**
    * Get agents that are stuck — in "running" or "waking" state for
    * longer than their maxWallClockMs. This is the stall detection
-   * primitive the dashboard and circle meetings use.
+   * primitive the dashboard and group meetings use.
    */
   public getStalledAgents(): readonly AgentRecord[] {
     const now = this.#now().getTime();

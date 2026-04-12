@@ -420,7 +420,7 @@ const triggerFromFrontmatter = (
  *  retains its Phase 1A behavior. */
 export interface BootDaemonOptions {
   /** Absolute or relative path to the identity root (the directory that
-   *  contains `murmuration/`, `agents/`, and `governance/circles/`). */
+   *  contains `murmuration/`, `agents/`, and `governance/groups/`). */
   readonly rootDir?: string;
   /** Subdirectory under `<rootDir>/agents/` containing the agent to boot. */
   readonly agentDir?: string;

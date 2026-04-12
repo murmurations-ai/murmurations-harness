@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import {
   makeAgentId,
-  makeCircleId,
+  makeGroupId,
   makeWakeId,
   type SignalAggregationContext,
 } from "@murmuration/core";
@@ -130,9 +130,9 @@ const mkContext = (
     agentId: makeAgentId("07-wren"),
     name: "Wren",
     modelTier: "balanced",
-    circleMemberships: [makeCircleId("engineering")],
+    groupMemberships: [makeGroupId("engineering")],
   },
-  circleMemberships: [makeCircleId("engineering")],
+  groupMemberships: [makeGroupId("engineering")],
   wakeReason: { kind: "manual", invokedBy: "test" },
   now: new Date("2026-04-09T14:00:00Z"),
   ...overrides,

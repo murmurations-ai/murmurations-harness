@@ -25,5 +25,5 @@ export * from "./daemon/index.js";
 // directives/index.ts removed — directives are GitHub issues now.
 // The DirectiveStore was a file-based mechanism that has been replaced
 // by creating GitHub issues with the "source-directive" label.
-export * from "./circles/index.js";
+export * from "./groups/index.js";
 export * from "./agents/index.js";

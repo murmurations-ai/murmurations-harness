@@ -186,7 +186,7 @@ export class InProcessExecutor<Clients = unknown> implements AgentExecutor {
       wakeId: context.wakeId,
       agentId: context.agentId,
       modelTier: context.budget.model.tier,
-      circleIds: context.identity.frontmatter.circleMemberships.map((c) => c.value),
+      groupIds: context.identity.frontmatter.groupMemberships.map((c) => c.value),
       ceiling: null,
     });
 

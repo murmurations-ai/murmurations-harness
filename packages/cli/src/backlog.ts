@@ -1,9 +1,9 @@
 /**
- * `murmuration backlog` — view and manage a circle's GitHub work queue.
+ * `murmuration backlog` — view and manage a group's GitHub work queue.
  *
  * Usage:
- *   murmuration backlog --root ../my-murmuration --circle content
- *   murmuration backlog --root ../my-murmuration --circle content --refresh
+ *   murmuration backlog --root ../my-murmuration --group content
+ *   murmuration backlog --root ../my-murmuration --group content --refresh
  */
 
 import { existsSync } from "node:fs";
@@ -29,10 +29,10 @@ export interface BacklogItem {
 export const runBacklog = async (args: readonly string[], rootDir: string): Promise<void> => {
   const root = resolve(rootDir);
 
-  const circleIdx = args.indexOf("--circle");
-  const circleId = circleIdx >= 0 ? args[circleIdx + 1] : undefined;
-  if (!circleId) {
-    console.error("murmuration backlog: --circle <id> is required");
+  const groupIdx = args.indexOf("--group");
+  const groupId = groupIdx >= 0 ? args[groupIdx + 1] : undefined;
+  if (!groupId) {
+    console.error("murmuration backlog: --group <id> is required");
     process.exit(2);
   }
 
@@ -41,15 +41,15 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
 
   const doRefresh = args.includes("--refresh");
   const backlogDir = join(root, ".murmuration", "backlogs");
-  const backlogFile = join(backlogDir, `${circleId}.json`);
+  const backlogFile = join(backlogDir, `${groupId}.json`);
 
-  // Load circle config to get backlog label + repo
-  const circleDocPath = join(root, "governance", "circles", `${circleId}.md`);
-  let backlogLabel = `circle: ${circleId}`;
+  // Load group config to get backlog label + repo
+  const groupDocPath = join(root, "governance", "groups", `${groupId}.md`);
+  let backlogLabel = `group:${groupId}`;
   let backlogRepo = repoArg ?? "";
 
-  if (existsSync(circleDocPath)) {
-    const content = await readFile(circleDocPath, "utf8");
+  if (existsSync(groupDocPath)) {
+    const content = await readFile(groupDocPath, "utf8");
     const labelMatch = /backlog_label:\s*"?([^"\n]+)"?/i.exec(content);
     if (labelMatch) backlogLabel = labelMatch[1]!.trim();
     const repoMatch = /backlog_repo:\s*"?([^"\n]+)"?/i.exec(content);
@@ -57,7 +57,7 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
   }
 
   if (doRefresh && !backlogRepo) {
-    console.error("murmuration backlog: no repo configured. Use --repo owner/repo or set backlog_repo: in the circle doc.");
+    console.error("murmuration backlog: no repo configured. Use --repo owner/repo or set backlog_repo: in the group doc.");
     process.exit(2);
   }
 
@@ -80,7 +80,7 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
     const gh = createGithubClient({ token: provider.get(GITHUB_TOKEN) });
     const repoCoord = makeRepoCoordinate(owner, repo);
 
-    console.log(`Refreshing ${circleId} backlog from ${backlogRepo} (label: "${backlogLabel}")...`);
+    console.log(`Refreshing ${groupId} backlog from ${backlogRepo} (label: "${backlogLabel}")...`);
 
     const result = await gh.listIssues(repoCoord, {
       state: "open",
@@ -114,16 +114,16 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
     const content = await readFile(backlogFile, "utf8");
     items = JSON.parse(content) as BacklogItem[];
   } catch {
-    console.log(`No backlog cached for ${circleId}. Run with --refresh to fetch from GitHub.`);
+    console.log(`No backlog cached for ${groupId}. Run with --refresh to fetch from GitHub.`);
     return;
   }
 
   if (items.length === 0) {
-    console.log(`${circleId} backlog is empty.`);
+    console.log(`${groupId} backlog is empty.`);
     return;
   }
 
-  console.log(`${circleId} backlog (${String(items.length)} items):\n`);
+  console.log(`${groupId} backlog (${String(items.length)} items):\n`);
   for (const [idx, item] of items.entries()) {
     const labels = item.labels.filter((l) => l !== backlogLabel).join(", ");
     const labelStr = labels ? ` [${labels}]` : "";

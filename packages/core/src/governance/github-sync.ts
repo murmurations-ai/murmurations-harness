@@ -62,7 +62,7 @@ export class GovernanceGitHubSync {
         `state:${item.currentState}`,
         `agent:${item.createdBy.value}`,
       ];
-      if (this.#defaultCircle) labels.push(`circle:${this.#defaultCircle}`);
+      if (this.#defaultCircle) labels.push(`group:${this.#defaultCircle}`);
 
       const body = [
         `**Filed by:** ${item.createdBy.value}`,
