@@ -369,6 +369,19 @@ export interface DaemonConfig {
    * The dashboard reads state directly from this store.
    */
   readonly agentStateStore?: AgentStateStore;
+  /**
+   * Post-wake action executor. If present, the daemon calls this after
+   * every completed wake that has `result.actions.length > 0`. The
+   * callback validates actions against write scopes and executes them
+   * against GitHub (or whatever external system). Returns receipts.
+   *
+   * Wired by the CLI's boot path to the per-agent GitHub client.
+   * The daemon doesn't know about GitHub — it just calls the hook.
+   */
+  readonly onWakeActions?: (
+    agentId: string,
+    actions: readonly import("../execution/index.js").WakeAction[],
+  ) => Promise<readonly import("../execution/index.js").WakeActionReceipt[]>;
 }
 
 export interface DaemonLogger {
@@ -406,6 +419,7 @@ export class Daemon {
    */
   readonly #governanceInbox = new Map<string, EmittedGovernanceEvent[]>();
   readonly #agentStateStore: AgentStateStore | undefined;
+  readonly #onWakeActions: DaemonConfig["onWakeActions"];
   readonly #governanceTimers = new Map<string, NodeJS.Timeout>();
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
@@ -421,6 +435,7 @@ export class Daemon {
     this.#runArtifactWriter = config.runArtifactWriter;
     this.#governance = config.governance ?? new NoOpGovernancePlugin();
     this.#agentStateStore = config.agentStateStore;
+    this.#onWakeActions = config.onWakeActions;
     this.#governanceStore = new GovernanceStateStore({
       ...(config.governancePersistDir ? { persistDir: config.governancePersistDir } : {}),
       ...(config.governanceSync ? { onSync: config.governanceSync } : {}),
@@ -641,13 +656,49 @@ export class Daemon {
       this.#agentStateStore?.transition(agent.agentId, "running", event.wakeId.value);
       const result = await this.#executor.waitForCompletion(handle);
 
-      // Record outcome in state store
+      // Execute structured wake actions (Phase 2.4/2.5)
+      let actionReceipts: readonly import("../execution/index.js").WakeActionReceipt[] = [];
+      if (isCompleted(result) && result.actions.length > 0 && this.#onWakeActions) {
+        try {
+          actionReceipts = await this.#onWakeActions(agent.agentId, result.actions);
+          const succeeded = actionReceipts.filter((r) => r.success).length;
+          const failed = actionReceipts.filter((r) => !r.success).length;
+          this.#logger.info("daemon.wake.actions", {
+            agentId: agent.agentId,
+            wakeId: event.wakeId.value,
+            total: result.actions.length,
+            succeeded,
+            failed,
+          });
+        } catch (err) {
+          this.#logger.error("daemon.wake.actions.error", {
+            agentId: agent.agentId,
+            wakeId: event.wakeId.value,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      // "Did Work" tracking — count artifacts produced this wake
+      const artifactCount = actionReceipts.filter((r) => r.success).length
+        + result.outputs.length
+        + (result.governanceEvents.length > 0 ? 1 : 0);
+      if (artifactCount === 0 && isCompleted(result)) {
+        this.#logger.info("daemon.wake.idle", {
+          agentId: agent.agentId,
+          wakeId: event.wakeId.value,
+          reason: "wake completed but produced no artifacts",
+        });
+      }
+
+      // Record outcome in state store (after actions so artifactCount is known)
       const outcome = isCompleted(result) ? "success" as const
         : isFailed(result) ? "failure" as const
           : isTimedOut(result) ? "timeout" as const
             : "killed" as const;
       this.#agentStateStore?.recordWakeOutcome(event.wakeId.value, outcome, {
         costMicros: result.costRecord?.totals.costMicros.value,
+        artifactCount,
         ...(isFailed(result) ? { errorMessage: result.outcome.error.message } : {}),
       });
 
@@ -655,9 +706,6 @@ export class Daemon {
       if (this.#runArtifactWriter) {
         await this.#runArtifactWriter.record(result, result.costRecord, this.#logger);
       }
-      // Directive responses are now GitHub issue comments — agents
-      // that want to respond to a source-directive issue do so via
-      // createIssueComment in their runner. No daemon-side tracking.
 
       // Governance event routing — hand emitted events to the plugin,
       // then dispatch each routing decision.

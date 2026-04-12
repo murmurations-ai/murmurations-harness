@@ -52,6 +52,8 @@ export interface AgentRecord {
   readonly maxWallClockMs: number;
   readonly consecutiveFailures: number;
   readonly totalWakes: number;
+  readonly totalArtifacts: number;
+  readonly idleWakes: number;
   readonly currentWakeId: string | null;
   readonly currentWakeStartedAt: string | null; // ISO
 }
@@ -120,6 +122,8 @@ export class AgentStateStore {
       maxWallClockMs,
       consecutiveFailures: 0,
       totalWakes: 0,
+      totalArtifacts: 0,
+      idleWakes: 0,
       currentWakeId: null,
       currentWakeStartedAt: null,
     });
@@ -191,7 +195,7 @@ export class AgentStateStore {
   public recordWakeOutcome(
     wakeId: string,
     outcome: WakeOutcome,
-    options: { errorMessage?: string | undefined; costMicros?: number | undefined } = {},
+    options: { errorMessage?: string | undefined; costMicros?: number | undefined; artifactCount?: number | undefined } = {},
   ): void {
     const wake = this.#wakes.get(wakeId);
     if (!wake) return;
@@ -219,11 +223,15 @@ export class AgentStateStore {
     if (agent) {
       const consecutiveFailures =
         outcome === "success" ? 0 : agent.consecutiveFailures + 1;
+      const artifacts = options.artifactCount ?? 0;
+      const isIdle = outcome === "success" && artifacts === 0;
       this.#agents.set(wake.agentId, {
         ...agent,
         currentState: "idle",
         lastOutcome: outcome,
         consecutiveFailures,
+        totalArtifacts: agent.totalArtifacts + artifacts,
+        idleWakes: agent.idleWakes + (isIdle ? 1 : 0),
         currentWakeId: null,
         currentWakeStartedAt: null,
       });
