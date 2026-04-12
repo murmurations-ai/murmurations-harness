@@ -260,7 +260,7 @@ Or simpler: circle wakes are scheduled on the circle config, not on individual a
 
 ## Agent Self-Reflection + Tension Filing
 
-Every agent should periodically reflect on its own effectiveness and, when something isn't working, file a tension or proposal to its circle's governance queue — without Source needing to prompt it.
+Every agent should periodically reflect on its own effectiveness and, when something isn't working, emit a governance event to its circle's governance queue — without Source needing to prompt it. The active governance plugin provides the language and event kinds: S3 calls them "tensions," Chain of Command calls them "reports," Parliamentary calls them "motions." The agent doesn't need to know which model is active.
 
 ### How it works
 
@@ -274,25 +274,23 @@ OBSERVATION: [one sentence — what went well or what's not working]
 TENSION: [none / filed]
 ```
 
-If the agent reports `TENSION: filed`, it also emits a governance event:
+If the agent reports a governance event, it emits it through the standard governance event mechanism:
 
 ```
-::governance::tension:: {"topic": "...", "driver": "...", "proposedAction": "..."}
+::governance::<kind>:: {"topic": "...", "description": "...", "proposedAction": "..."}
 ```
+
+The `<kind>` is provided by the active governance plugin's state graphs. Examples:
+- S3: `tension`, `proposal-opened`
+- Chain of Command: `report`, `escalation`
+- Parliamentary: `motion`, `amendment`
 
 This flows through the existing governance dispatch:
-1. The S3 plugin receives the tension in `onEventsEmitted`
-2. Creates a `GovernanceItem` in the state store (kind: "tension", state: "open")
-3. Routes it to Source + the agent's circle
-4. The tension sits in the governance queue until the next **governance circle wake** processes it
-
-If the agent has enough context to draft a proposal (not just name the tension), it can emit a proposal directly:
-
-```
-::governance::proposal-opened:: {"title": "...", "driver": "...", "proposal": "...", "reviewPeriod": "90d"}
-```
-
-This creates a proposal item in the state store, ready for the next governance meeting's consent round.
+1. The governance plugin receives the event in `onEventsEmitted`
+2. Creates a `GovernanceItem` in the state store (using the plugin's state graph for that kind)
+3. GovernanceGitHubSync creates a GitHub issue with the appropriate labels
+4. Routes it to Source + the agent's circle
+5. The item sits in the governance queue until the next **governance circle wake** processes it
 
 ### What agents can self-reflect on
 
@@ -305,9 +303,9 @@ This creates a proposal item in the state store, ready for the next governance m
 
 ### Why this matters
 
-In S3, tensions are the **sole driver of governance change**. If agents can't sense and file tensions themselves, Source has to notice everything manually. An agent sensing "my cadence is wrong" and filing a tension to its circle's governance queue is exactly how a self-organizing murmuration is supposed to work — the system evolves from within, not from Source micromanaging.
+In any governance model, agents sensing problems and escalating them is the driver of organizational change. If agents can't self-reflect and file governance events, Source has to notice everything manually. An agent sensing "my cadence is wrong" and filing a governance event to its circle's queue is how a self-organizing murmuration works — the system evolves from within.
 
-This also closes the loop on the cadence governance round we tried to run manually: instead of Source asking "how often should you run?", the agent notices "my runs are idle because upstream only produces weekly" and files a tension: "propose reducing my cadence to weekly to match upstream." The circle processes it in their next governance meeting.
+The governance plugin decides what happens next: S3 runs a consent round, Chain of Command escalates to the authority, Parliamentary opens a motion for debate. The harness provides the sensing + filing; the plugin provides the resolution.
 
 ---
 
