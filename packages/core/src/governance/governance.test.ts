@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { makeAgentId } from "../execution/index.js";
-import { GovernanceStateStore, NoOpGovernancePlugin, type GovernanceStateGraph } from "./index.js";
+import { GovernanceStateStore, NoOpGovernancePlugin, type GovernanceStateGraph, type GovernanceItem } from "./index.js";
 
 // Example state graphs covering different governance models.
 
@@ -197,6 +197,100 @@ describe("NoOpGovernancePlugin", () => {
       store,
     );
     expect(decisions).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sync callbacks (#49)
+// ---------------------------------------------------------------------------
+
+describe("GovernanceSyncCallbacks", () => {
+  const AGENT = makeAgentId("01-research");
+
+  it("fires onCreate callback when an item is created", () => {
+    const created: GovernanceItem[] = [];
+    const store = new GovernanceStateStore({
+      onSync: { onCreate: (item) => created.push(item) },
+    });
+    store.registerGraph(S3_TENSION);
+    store.create("tension", AGENT, { topic: "test" });
+    expect(created).toHaveLength(1);
+    expect(created[0]?.kind).toBe("tension");
+  });
+
+  it("fires onTransition callback on state change", () => {
+    const transitions: Array<{ item: GovernanceItem; transition: { from: string; to: string } }> = [];
+    const store = new GovernanceStateStore({
+      onSync: {
+        onTransition: (item, t) => transitions.push({ item, transition: { from: t.from, to: t.to } }),
+      },
+    });
+    store.registerGraph(S3_TENSION);
+    const item = store.create("tension", AGENT, {});
+    store.transition(item.id, "deliberating", AGENT.value);
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0]?.transition.from).toBe("open");
+    expect(transitions[0]?.transition.to).toBe("deliberating");
+  });
+
+  it("swallows errors from sync callbacks without blocking governance ops", () => {
+    const store = new GovernanceStateStore({
+      onSync: {
+        onCreate: () => { throw new Error("sync boom"); },
+        onTransition: () => { throw new Error("sync boom"); },
+      },
+    });
+    store.registerGraph(S3_TENSION);
+    // Should not throw despite the callbacks throwing
+    const item = store.create("tension", AGENT, {});
+    const updated = store.transition(item.id, "deliberating", AGENT.value);
+    expect(updated.currentState).toBe("deliberating");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GovernancePlugin contract tests (#48)
+// ---------------------------------------------------------------------------
+
+describe("GovernancePlugin + Daemon dispatch contract", () => {
+  it("NoOpGovernancePlugin stateGraphs returns empty array", () => {
+    const plugin = new NoOpGovernancePlugin();
+    expect(plugin.stateGraphs()).toEqual([]);
+  });
+
+  it("NoOpGovernancePlugin evaluateAction always allows", async () => {
+    const plugin = new NoOpGovernancePlugin();
+    const store = new GovernanceStateStore();
+    const result = await plugin.evaluateAction(makeAgentId("test"), "commit", { file: "a.md" }, store);
+    expect(result.allow).toBe(true);
+  });
+
+  it("GovernancePlugin onEventsEmitted receives batch and can create items", async () => {
+    // Simulates what a real plugin would do: receive events, create governance items
+    const store = new GovernanceStateStore();
+    store.registerGraph(S3_TENSION);
+
+    const plugin = new NoOpGovernancePlugin();
+    // Override to actually create an item from an event
+    plugin.onEventsEmitted = async (batch, s) => {
+      for (const event of batch.events) {
+        if (event.kind === "tension") {
+          s.create("tension", batch.agentId, event.payload as Record<string, unknown>);
+        }
+      }
+      return [];
+    };
+
+    await plugin.onEventsEmitted(
+      {
+        wakeId: { kind: "wake-id", value: "w1" },
+        agentId: makeAgentId("01-research"),
+        events: [{ kind: "tension", payload: { topic: "pricing" } }],
+      },
+      store,
+    );
+
+    expect(store.query({ kind: "tension" })).toHaveLength(1);
   });
 });
 
