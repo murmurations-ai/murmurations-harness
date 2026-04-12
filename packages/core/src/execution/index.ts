@@ -475,12 +475,18 @@ export interface WakeValidationResult {
  */
 export const validateWake = (
   context: { actionItems: readonly Signal[] },
-  result: { actions: readonly WakeAction[]; outputs: readonly AgentOutputArtifact[]; governanceEvents: readonly EmittedGovernanceEvent[]; wakeSummary: string },
+  result: {
+    actions: readonly WakeAction[];
+    outputs: readonly AgentOutputArtifact[];
+    governanceEvents: readonly EmittedGovernanceEvent[];
+    wakeSummary: string;
+  },
   actionReceipts: readonly WakeActionReceipt[],
 ): WakeValidationResult => {
-  const artifactCount = actionReceipts.filter((r) => r.success).length
-    + result.outputs.length
-    + (result.governanceEvents.length > 0 ? 1 : 0);
+  const artifactCount =
+    actionReceipts.filter((r) => r.success).length +
+    result.outputs.length +
+    (result.governanceEvents.length > 0 ? 1 : 0);
 
   const actionItemsAssigned = context.actionItems.length;
   let actionItemsAddressed = 0;
@@ -513,7 +519,11 @@ export const validateWake = (
 };
 
 const VALID_WAKE_ACTION_KINDS = new Set([
-  "label-issue", "create-issue", "close-issue", "comment-issue", "commit-file",
+  "label-issue",
+  "create-issue",
+  "close-issue",
+  "comment-issue",
+  "commit-file",
 ]);
 
 /**

@@ -89,6 +89,8 @@ describe("outcome type guards", () => {
       budgetOverrunEvents: 0,
     },
     wakeSummary: "",
+    actions: [],
+    actionReceipts: [],
     startedAt: new Date(0),
     finishedAt: new Date(100),
   };
@@ -223,24 +225,28 @@ describe("validateWake", () => {
   });
 
   it("marks wake as productive when actions succeed", () => {
-    const receipts = [{ action: { kind: "label-issue" as const, issueNumber: 1, label: "x" }, success: true }];
+    const receipts = [
+      { action: { kind: "label-issue" as const, issueNumber: 1, label: "x" }, success: true },
+    ];
     const v = validateWake({ actionItems: [] }, emptyResult, receipts);
     expect(v.productive).toBe(true);
     expect(v.artifactCount).toBe(1);
   });
 
   it("counts action items addressed by issue number in wake summary", () => {
-    const actionItems = [{
-      kind: "github-issue" as const,
-      id: "github-issue:x/y#259",
-      trust: "trusted" as const,
-      fetchedAt: new Date(),
-      number: 259,
-      title: "Action item",
-      url: "https://x",
-      labels: ["action-item", "assigned:02-content-production"],
-      excerpt: "",
-    }];
+    const actionItems = [
+      {
+        kind: "github-issue" as const,
+        id: "github-issue:x/y#259",
+        trust: "trusted" as const,
+        fetchedAt: new Date(),
+        number: 259,
+        title: "Action item",
+        url: "https://x",
+        labels: ["action-item", "assigned:02-content-production"],
+        excerpt: "",
+      },
+    ];
     const result = { ...emptyResult, wakeSummary: "Addressed #259 — coordinated with team." };
     const v = validateWake({ actionItems }, result, []);
     expect(v.actionItemsAssigned).toBe(1);
@@ -249,17 +255,19 @@ describe("validateWake", () => {
   });
 
   it("flags unaddressed action items", () => {
-    const actionItems = [{
-      kind: "github-issue" as const,
-      id: "github-issue:x/y#100",
-      trust: "trusted" as const,
-      fetchedAt: new Date(),
-      number: 100,
-      title: "Do something",
-      url: "https://x",
-      labels: ["action-item", "assigned:test"],
-      excerpt: "",
-    }];
+    const actionItems = [
+      {
+        kind: "github-issue" as const,
+        id: "github-issue:x/y#100",
+        trust: "trusted" as const,
+        fetchedAt: new Date(),
+        number: 100,
+        title: "Do something",
+        url: "https://x",
+        labels: ["action-item", "assigned:test"],
+        excerpt: "",
+      },
+    ];
     const v = validateWake({ actionItems }, emptyResult, []);
     expect(v.productive).toBe(false);
     expect(v.actionItemsAssigned).toBe(1);
@@ -276,8 +284,28 @@ describe("validateWake", () => {
 
   it("handles mixed addressed and unaddressed action items", () => {
     const actionItems = [
-      { kind: "github-issue" as const, id: "a", trust: "trusted" as const, fetchedAt: new Date(), number: 10, title: "A", url: "x", labels: ["action-item", "assigned:x"], excerpt: "" },
-      { kind: "github-issue" as const, id: "b", trust: "trusted" as const, fetchedAt: new Date(), number: 20, title: "B", url: "x", labels: ["action-item", "assigned:x"], excerpt: "" },
+      {
+        kind: "github-issue" as const,
+        id: "a",
+        trust: "trusted" as const,
+        fetchedAt: new Date(),
+        number: 10,
+        title: "A",
+        url: "x",
+        labels: ["action-item", "assigned:x"],
+        excerpt: "",
+      },
+      {
+        kind: "github-issue" as const,
+        id: "b",
+        trust: "trusted" as const,
+        fetchedAt: new Date(),
+        number: 20,
+        title: "B",
+        url: "x",
+        labels: ["action-item", "assigned:x"],
+        excerpt: "",
+      },
     ];
     const result = { ...emptyResult, wakeSummary: "Addressed #10 but not the other." };
     const v = validateWake({ actionItems }, result, []);

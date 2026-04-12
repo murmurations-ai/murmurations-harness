@@ -575,9 +575,7 @@ describe("GithubClient mutations (ADR-0017)", () => {
 
   // -- updateIssueState ------------------------------------------------------
   it("updateIssueState closes an issue", async () => {
-    const { fetch: f, calls } = makeFakeFetch([
-      { status: 200, body: { id: 42, state: "closed" } },
-    ]);
+    const { fetch: f, calls } = makeFakeFetch([{ status: 200, body: { id: 42, state: "closed" } }]);
     const client = createGithubClient({ token: TOKEN, fetch: f, writeScopes: SCOPES_ALL });
     const result = await client.updateIssueState(REPO, makeIssueNumber(42), "closed");
     expect(result.ok).toBe(true);

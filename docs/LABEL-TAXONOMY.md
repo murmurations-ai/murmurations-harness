@@ -9,20 +9,20 @@ for its own circles, agents, governance states, and pipeline stages.
 
 ## Source Directives
 
-| Label | Use |
-|---|---|
-| `source-directive` | Issue is a Source directive (question/instruction/decision) |
-| `scope:all` | Directive targets all agents |
-| `scope:circle:<id>` | Directive targets a specific circle |
-| `scope:agent:<id>` | Directive targets a specific agent |
+| Label               | Use                                                         |
+| ------------------- | ----------------------------------------------------------- |
+| `source-directive`  | Issue is a Source directive (question/instruction/decision) |
+| `scope:all`         | Directive targets all agents                                |
+| `scope:circle:<id>` | Directive targets a specific circle                         |
+| `scope:agent:<id>`  | Directive targets a specific agent                          |
 
 ## Governance
 
-| Label | Use |
-|---|---|
-| `governance:tension` | A tension filed by an agent or Source |
-| `governance:proposal` | A formal proposal awaiting consent |
-| `governance:decision` | A ratified governance decision |
+| Label                 | Use                                   |
+| --------------------- | ------------------------------------- |
+| `governance:tension`  | A tension filed by an agent or Source |
+| `governance:proposal` | A formal proposal awaiting consent    |
+| `governance:decision` | A ratified governance decision        |
 
 ## Governance State (state machine via label swaps)
 
@@ -42,23 +42,23 @@ The governance plugin's `stateGraphs()` method declares the valid states. The ha
 
 ## Circles / Domains
 
-| Pattern | Use |
-|---|---|
+| Pattern       | Use                                      |
+| ------------- | ---------------------------------------- |
 | `circle:<id>` | Associates an issue with a circle/domain |
 
 _Operator-defined. Each murmuration creates labels for its own circles. Examples: `circle:content`, `circle:engineering`, `circle:operations`._
 
 ## Meetings
 
-| Label | Use |
-|---|---|
-| `circle-meeting` | Operational circle meeting minutes |
-| `governance-meeting` | Governance circle meeting minutes |
+| Label                | Use                                |
+| -------------------- | ---------------------------------- |
+| `circle-meeting`     | Operational circle meeting minutes |
+| `governance-meeting` | Governance circle meeting minutes  |
 
 ## Agents (for targeted items)
 
-| Label | Agent |
-|---|---|
+| Label        | Agent                                                               |
+| ------------ | ------------------------------------------------------------------- |
 | `agent:<id>` | Targets or was filed by a specific agent (e.g. `agent:01-research`) |
 
 ## Pipeline / Workflow (operator-defined)

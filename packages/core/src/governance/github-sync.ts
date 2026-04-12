@@ -10,7 +10,11 @@
  * governance (Phase 1.2 of the execution plan).
  */
 
-import type { GovernanceItem, GovernanceStateTransition, GovernanceDecisionRecord } from "./index.js";
+import type {
+  GovernanceItem,
+  GovernanceStateTransition,
+  GovernanceDecisionRecord,
+} from "./index.js";
 
 /**
  * Minimal GitHub client interface — just what governance sync needs.
@@ -24,10 +28,7 @@ export interface GovernanceSyncGitHub {
     readonly labels: readonly string[];
   }): Promise<{ ok: boolean; issueNumber?: number; htmlUrl?: string; error?: string }>;
 
-  createIssueComment(
-    issueNumber: number,
-    body: string,
-  ): Promise<{ ok: boolean; error?: string }>;
+  createIssueComment(issueNumber: number, body: string): Promise<{ ok: boolean; error?: string }>;
 }
 
 export interface GovernanceGitHubSyncConfig {
@@ -60,7 +61,8 @@ export class GovernanceGitHubSync {
   public async onCreate(item: GovernanceItem): Promise<void> {
     try {
       const payload = typeof item.payload === "object" && item.payload !== null ? item.payload : {};
-      const topic = (payload as { topic?: string }).topic ?? (payload as { action?: string }).action ?? "";
+      const topic =
+        (payload as { topic?: string }).topic ?? (payload as { action?: string }).action ?? "";
 
       const labels = [
         `governance:${item.kind}`,
@@ -79,7 +81,9 @@ export class GovernanceGitHubSync {
         "",
         `---`,
         `_Tracked by the Murmuration Harness governance state machine. Item ID: ${item.id}_`,
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       const result = await this.#github.createIssue({
         title: `[${item.kind.toUpperCase()}] ${topic.slice(0, 80) || item.kind}`,
@@ -96,7 +100,10 @@ export class GovernanceGitHubSync {
   }
 
   /** Post a comment + swap labels on state transition. */
-  public async onTransition(item: GovernanceItem, transition: GovernanceStateTransition): Promise<void> {
+  public async onTransition(
+    item: GovernanceItem,
+    transition: GovernanceStateTransition,
+  ): Promise<void> {
     try {
       const issueNumber = this.#issueMap.get(item.id);
       if (!issueNumber) return;
@@ -106,7 +113,9 @@ export class GovernanceGitHubSync {
         `**Triggered by:** ${transition.triggeredBy}`,
         transition.reason ? `**Reason:** ${transition.reason}` : "",
         `**At:** ${transition.at.toISOString()}`,
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       await this.#github.createIssueComment(issueNumber, comment);
     } catch {
@@ -129,10 +138,13 @@ export class GovernanceGitHubSync {
         `**Summary:** ${record.summary}`,
         "",
         `### History`,
-        ...record.history.map((h) =>
-          `- ${h.from} → ${h.to} (${h.triggeredBy}, ${h.at.toISOString().slice(0, 16)})${h.reason ? `: ${h.reason}` : ""}`,
+        ...record.history.map(
+          (h) =>
+            `- ${h.from} → ${h.to} (${h.triggeredBy}, ${h.at.toISOString().slice(0, 16)})${h.reason ? `: ${h.reason}` : ""}`,
         ),
-      ].filter(Boolean).join("\n");
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       await this.#github.createIssueComment(issueNumber, comment);
     } catch {

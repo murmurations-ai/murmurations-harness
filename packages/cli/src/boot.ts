@@ -602,7 +602,9 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     ...(secretsBlock ? { secrets: secretsBlock } : {}),
     ...(governancePlugin ? { governance: governancePlugin } : {}),
     governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
-    agentStateStore: new AgentStateStore({ persistDir: resolve(exampleRoot, ".murmuration", "agents") }),
+    agentStateStore: new AgentStateStore({
+      persistDir: resolve(exampleRoot, ".murmuration", "agents"),
+    }),
   });
 
   let githubClient: GithubClient | undefined;
@@ -828,7 +830,11 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               { title: input.title, body: input.body, labels: [...input.labels] },
             );
             if (!result.ok) return { ok: false, error: result.error.message };
-            return { ok: true, issueNumber: result.value.number.value, htmlUrl: result.value.htmlUrl };
+            return {
+              ok: true,
+              issueNumber: result.value.number.value,
+              htmlUrl: result.value.htmlUrl,
+            };
           },
           createIssueComment: async (issueNumber, body) => {
             const { makeIssueNumber } = await import("@murmuration/github");
@@ -864,7 +870,9 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         ...(governancePlugin ? { governance: governancePlugin } : {}),
         governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
         ...(governanceSync ? { governanceSync } : {}),
-        agentStateStore: new AgentStateStore({ persistDir: resolve(exampleRoot, ".murmuration", "agents") }),
+        agentStateStore: new AgentStateStore({
+          persistDir: resolve(exampleRoot, ".murmuration", "agents"),
+        }),
       })
     : firstPassDaemon;
 

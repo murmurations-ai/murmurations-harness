@@ -11,6 +11,7 @@
 A murmuration collaborates through GitHub. Every piece of information that any agent, any harness instance, or any human needs to see lives in GitHub — as issues, comments, labels, or committed files. Local `.murmuration/` directories are ephemeral runtime caches that can be rebuilt from GitHub state.
 
 This enables:
+
 - **Multi-instance murmurations** — multiple harness processes on different machines running different subsets of agents, all coordinating through the same GitHub repo
 - **Human-agent parity** — Source sees the same issues, labels, and comments that agents see
 - **Resilience** — a harness crash loses only local runtime state; all collaborative state survives in GitHub
@@ -37,6 +38,7 @@ Body:
 ```
 
 **Scoped directives** use additional labels:
+
 - `scope:all` — every agent responds
 - `scope:circle:content` — only Content Circle members
 - `scope:agent:01-research` — only Research Agent
@@ -60,12 +62,14 @@ Body:
 ```
 
 **State machine via labels:**
+
 - `state:open` → `state:deliberating` → `state:consent-round` → `state:resolved`
 - The GovernanceStateStore reads issue labels to determine current state
 - Transitions happen by swapping labels (remove old, add new) + posting a comment explaining the transition
 - This is visible to everyone — humans, agents, other harness instances
 
 **Consent rounds** are issue comments:
+
 ```
 ### 02-content-production — consent
 ✅ Consent — aligns with our priorities.
@@ -78,6 +82,7 @@ Body:
 ```
 
 **Decision records** are posted as a final comment + the issue is closed:
+
 ```
 ## Decision Record
 **State:** resolved
@@ -90,6 +95,7 @@ Body:
 
 **Before:** `.murmuration/runs/circle-<id>/<date>/meeting-*.md` — local files
 **After:** Either:
+
 - **GitHub issue** with label `circle-meeting` + circle label — good for operational meetings with action items
 - **Committed file** at `governance/meetings/<circle>/<date>.md` — good for decisions that need to persist in the repo
 
@@ -112,6 +118,7 @@ The GitHub repo tree is the murmuration's shared workspace. Issues coordinate wo
 A good first governance directive for any new murmuration: "What folder structure will best serve all agents, their roles, and Source?"
 
 **Example layout (not prescriptive):**
+
 ```
 my-murmuration/
   murmuration/soul.md                      ← identity
@@ -141,12 +148,12 @@ Git history is the activity record — who committed what, when, for which wake.
 
 ## What stays local
 
-| Mechanism | Location | Why local |
-|---|---|---|
-| **Agent state** | `.murmuration/agents/state.json` | Runtime state — which agent is running *right now* on *this machine*. Two harness instances have different state files. |
-| **Cost records** | `.murmuration/runs/<agent>/index.jsonl` | Telemetry — too high-frequency for GitHub. Aggregated cost summaries could be committed periodically. |
-| **Daemon log** | `.murmuration/daemon.log` | Operational debug — per-instance |
-| **Backlog cache** | `.murmuration/backlogs/<circle>.json` | Local cache of GitHub issues — rebuilt from GitHub on `--refresh` |
+| Mechanism         | Location                                | Why local                                                                                                               |
+| ----------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **Agent state**   | `.murmuration/agents/state.json`        | Runtime state — which agent is running _right now_ on _this machine_. Two harness instances have different state files. |
+| **Cost records**  | `.murmuration/runs/<agent>/index.jsonl` | Telemetry — too high-frequency for GitHub. Aggregated cost summaries could be committed periodically.                   |
+| **Daemon log**    | `.murmuration/daemon.log`               | Operational debug — per-instance                                                                                        |
+| **Backlog cache** | `.murmuration/backlogs/<circle>.json`   | Local cache of GitHub issues — rebuilt from GitHub on `--refresh`                                                       |
 
 ## Multi-Instance Architecture
 
@@ -167,6 +174,7 @@ instances:
 ```
 
 Each instance:
+
 1. Reads its agent assignments from the shared config
 2. Runs only its assigned agents on its own cron
 3. Reads signals from GitHub (all instances see the same issues)
@@ -229,12 +237,14 @@ stage:editorial-planning
 ## Implementation Phases
 
 ### Phase 1 — Directives to GitHub (smallest change)
+
 - `murmuration directive` creates a GitHub issue instead of a local file
 - Remove DirectiveStore + filesystem directives
 - Agents see directives through existing signal aggregator (listIssues with label filter)
 - Remove daemon directive injection code
 
 ### Phase 2 — Governance to GitHub
+
 - GovernanceStateStore reads/writes via GitHub issues instead of local JSONL
 - State transitions = label swaps + comments
 - Consent rounds = structured issue comments
@@ -242,10 +252,12 @@ stage:editorial-planning
 - `murmuration circle-wake --governance` posts results as issue comments
 
 ### Phase 3 — Meeting minutes to GitHub
+
 - `murmuration circle-wake` creates a GitHub issue for the meeting or commits minutes to the repo
 - Action items from meetings become separate issues
 
 ### Phase 4 — Multi-instance config
+
 - `murmuration/harness.yaml` defines instance-to-agent assignments
 - Daemon reads only its assigned agents
 - Signal aggregator sees all agents' GitHub activity regardless of instance

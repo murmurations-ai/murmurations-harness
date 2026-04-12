@@ -45,25 +45,35 @@ const PROVIDER_SECRET_KEY: Record<string, string | null> = {
 };
 
 /** Find the GitHub repo from the first available agent's signal scopes via IdentityLoader. */
-const findRepoFromAgents = async (rootDir: string, memberIds: readonly string[]): Promise<{ owner: string; repo: string } | null> => {
+const findRepoFromAgents = async (
+  rootDir: string,
+  memberIds: readonly string[],
+): Promise<{ owner: string; repo: string } | null> => {
   try {
     const loader = new IdentityLoader({ rootDir });
     for (const memberId of memberIds) {
       try {
         const identity = await loader.load(memberId);
-        const scopes = identity.frontmatter.signals?.github_scopes;
+        const scopes = identity.frontmatter.signals.github_scopes;
         if (scopes && scopes.length > 0) {
           const scope = scopes[0]!;
           return { owner: scope.owner, repo: scope.repo };
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
-  } catch { /* skip */ }
+  } catch {
+    /* skip */
+  }
   return null;
 };
 
 /** Resolve LLM provider + model from the facilitator's role.md. */
-const resolveLLMConfig = async (rootDir: string, facilitatorId: string): Promise<{ provider: string; model: string } | null> => {
+const resolveLLMConfig = async (
+  rootDir: string,
+  facilitatorId: string,
+): Promise<{ provider: string; model: string } | null> => {
   try {
     const loader = new IdentityLoader({ rootDir });
     const identity = await loader.load(facilitatorId);
@@ -71,17 +81,24 @@ const resolveLLMConfig = async (rootDir: string, facilitatorId: string): Promise
     if (llm) {
       return { provider: llm.provider, model: llm.model ?? getDefaultModel(llm.provider) };
     }
-  } catch { /* skip */ }
+  } catch {
+    /* skip */
+  }
   return null;
 };
 
 const getDefaultModel = (provider: string): string => {
   switch (provider) {
-    case "gemini": return "gemini-2.5-flash";
-    case "anthropic": return "claude-sonnet-4-20250514";
-    case "openai": return "gpt-4o";
-    case "ollama": return "llama3";
-    default: return "unknown";
+    case "gemini":
+      return "gemini-2.5-flash";
+    case "anthropic":
+      return "claude-sonnet-4-20250514";
+    case "openai":
+      return "gpt-4o";
+    case "ollama":
+      return "llama3";
+    default:
+      return "unknown";
   }
 };
 
@@ -158,13 +175,19 @@ const executeActions = async (
           if (action.removeLabel) {
             await gh.removeLabel(repo, makeIssueNumber(action.issueNumber), action.removeLabel);
           }
-          const result = await gh.addLabels(repo, makeIssueNumber(action.issueNumber), [action.label]);
+          const result = await gh.addLabels(repo, makeIssueNumber(action.issueNumber), [
+            action.label,
+          ]);
           if (result.ok) {
             const swap = action.removeLabel ? ` (-${action.removeLabel})` : "";
-            console.log(`    \x1b[32m✓\x1b[0m label-issue #${String(action.issueNumber)} +${action.label}${swap}`);
+            console.log(
+              `    \x1b[32m✓\x1b[0m label-issue #${String(action.issueNumber)} +${action.label}${swap}`,
+            );
             receipts.push({ action, success: true });
           } else {
-            console.log(`    \x1b[31m✗\x1b[0m label-issue #${String(action.issueNumber)}: ${result.error.code}`);
+            console.log(
+              `    \x1b[31m✗\x1b[0m label-issue #${String(action.issueNumber)}: ${result.error.code}`,
+            );
             receipts.push({ action, success: false, error: result.error.code });
           }
           break;
@@ -177,7 +200,10 @@ const executeActions = async (
           const issueInput: Record<string, unknown> = { title: action.title };
           if (action.body) issueInput.body = action.body;
           if (action.labels && action.labels.length > 0) issueInput.labels = [...action.labels];
-          const result = await gh.createIssue(repo, issueInput as { title: string; body?: string; labels?: string[] });
+          const result = await gh.createIssue(
+            repo,
+            issueInput as { title: string; body?: string; labels?: string[] },
+          );
           if (result.ok) {
             const num = result.value.number.value;
             console.log(`    \x1b[32m✓\x1b[0m create-issue #${String(num)}: ${action.title}`);
@@ -193,12 +219,18 @@ const executeActions = async (
             receipts.push({ action, success: false, error: "missing issueNumber" });
             break;
           }
-          const result = await gh.updateIssueState(repo, makeIssueNumber(action.issueNumber), "closed");
+          const result = await gh.updateIssueState(
+            repo,
+            makeIssueNumber(action.issueNumber),
+            "closed",
+          );
           if (result.ok) {
             console.log(`    \x1b[32m✓\x1b[0m close-issue #${String(action.issueNumber)}`);
             receipts.push({ action, success: true });
           } else {
-            console.log(`    \x1b[31m✗\x1b[0m close-issue #${String(action.issueNumber)}: ${result.error.code}`);
+            console.log(
+              `    \x1b[31m✗\x1b[0m close-issue #${String(action.issueNumber)}: ${result.error.code}`,
+            );
             receipts.push({ action, success: false, error: result.error.code });
           }
           break;
@@ -208,26 +240,37 @@ const executeActions = async (
             receipts.push({ action, success: false, error: "missing issueNumber or body" });
             break;
           }
-          const result = await gh.createIssueComment(repo, makeIssueNumber(action.issueNumber), { body: action.body });
+          const result = await gh.createIssueComment(repo, makeIssueNumber(action.issueNumber), {
+            body: action.body,
+          });
           if (result.ok) {
             console.log(`    \x1b[32m✓\x1b[0m comment-issue #${String(action.issueNumber)}`);
             receipts.push({ action, success: true });
           } else {
-            console.log(`    \x1b[31m✗\x1b[0m comment-issue #${String(action.issueNumber)}: ${result.error.code}`);
+            console.log(
+              `    \x1b[31m✗\x1b[0m comment-issue #${String(action.issueNumber)}: ${result.error.code}`,
+            );
             receipts.push({ action, success: false, error: result.error.code });
           }
           break;
         }
       }
     } catch (err) {
-      receipts.push({ action, success: false, error: err instanceof Error ? err.message : String(err) });
+      receipts.push({
+        action,
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
   return receipts;
 };
 
-export const runGroupWakeCommand = async (args: readonly string[], rootDir: string): Promise<void> => {
+export const runGroupWakeCommand = async (
+  args: readonly string[],
+  rootDir: string,
+): Promise<void> => {
   const root = resolve(rootDir);
 
   // Parse args
@@ -262,7 +305,9 @@ export const runGroupWakeCommand = async (args: readonly string[], rootDir: stri
   // Resolve LLM provider from facilitator's role.md
   const llmConfig = await resolveLLMConfig(root, config.facilitator);
   if (!llmConfig) {
-    console.error(`murmuration group-wake: could not read LLM config from facilitator "${config.facilitator}" role.md`);
+    console.error(
+      `murmuration group-wake: could not read LLM config from facilitator "${config.facilitator}" role.md`,
+    );
     process.exit(1);
   }
   console.log(`  LLM: ${llmConfig.provider}/${llmConfig.model}`);
@@ -324,18 +369,20 @@ export const runGroupWakeCommand = async (args: readonly string[], rootDir: stri
   let backlogContext = "";
   if (repoInfo) {
     console.log(`  Fetching backlog from ${repoInfo.owner}/${repoInfo.repo}...`);
-    backlogContext = await fetchGroupBacklog(root, groupId!, repoInfo);
+    backlogContext = await fetchGroupBacklog(root, groupId, repoInfo);
   }
 
   // Build the effective directive with backlog context
-  const effectiveDirective = [
-    directiveBody ?? "",
-    backlogContext ? `\n\n## Open Issues (${repoInfo?.owner}/${repoInfo?.repo})\n\n${backlogContext}` : "",
-  ].filter(Boolean).join("") || undefined;
+  const backlogSection =
+    repoInfo && backlogContext
+      ? `\n\n## Open Issues (${repoInfo.owner}/${repoInfo.repo})\n\n${backlogContext}`
+      : "";
+  const effectiveDirective =
+    [directiveBody ?? "", backlogSection].filter(Boolean).join("") || undefined;
 
   // Build context
   const context: GroupWakeContext = {
-    groupId: groupId!,
+    groupId,
     kind,
     members: config.members,
     facilitator: config.facilitator,
@@ -400,15 +447,21 @@ export const runGroupWakeCommand = async (args: readonly string[], rootDir: stri
     const failed = receipts.filter((r) => !r.success).length;
     console.log(`\n  ${String(succeeded)} succeeded, ${String(failed)} failed`);
   } else if (result.actions.length > 0) {
-    console.log(`\n--- ${String(result.actions.length)} action(s) proposed but no GitHub access — skipped ---`);
+    console.log(
+      `\n--- ${String(result.actions.length)} action(s) proposed but no GitHub access — skipped ---`,
+    );
   }
 
   // Print governance position tallies
   if (result.tallies.length > 0) {
     console.log(`\n--- Governance Tallies ---\n`);
     for (const tally of result.tallies) {
-      const countsStr = Object.entries(tally.counts).map(([k, v]) => `${String(v)} ${k}`).join(", ");
-      console.log(`  Item ${tally.itemId}: ${countsStr} → \x1b[1m${tally.recommendation.toUpperCase()}\x1b[0m`);
+      const countsStr = Object.entries(tally.counts)
+        .map(([k, v]) => `${String(v)} ${k}`)
+        .join(", ");
+      console.log(
+        `  Item ${tally.itemId}: ${countsStr} → \x1b[1m${tally.recommendation.toUpperCase()}\x1b[0m`,
+      );
       for (const p of tally.positions) {
         console.log(`    ${p.agentId}: \x1b[33m${p.position}\x1b[0m — ${p.reasoning.slice(0, 60)}`);
       }
@@ -416,8 +469,12 @@ export const runGroupWakeCommand = async (args: readonly string[], rootDir: stri
   }
 
   console.log(`\n${"─".repeat(60)}`);
-  console.log(`Tokens: ${String(result.totalInputTokens)} in / ${String(result.totalOutputTokens)} out`);
-  console.log(`Cost: ~$${(((result.totalInputTokens * 0.15 + result.totalOutputTokens * 0.6) / 1_000_000)).toFixed(4)}`);
+  console.log(
+    `Tokens: ${String(result.totalInputTokens)} in / ${String(result.totalOutputTokens)} out`,
+  );
+  console.log(
+    `Cost: ~$${((result.totalInputTokens * 0.15 + result.totalOutputTokens * 0.6) / 1_000_000).toFixed(4)}`,
+  );
 
   // Post meeting minutes as a GitHub issue
   const dayUtc = new Date().toISOString().slice(0, 10);
@@ -433,15 +490,16 @@ export const runGroupWakeCommand = async (args: readonly string[], rootDir: stri
           "\n## Actions Executed\n",
           ...receipts.map((r) => {
             const icon = r.success ? "✅" : "❌";
-            const detail = r.action.kind === "create-issue" && r.issueNumber
-              ? ` → #${String(r.issueNumber)}`
-              : r.action.kind === "label-issue"
-                ? ` #${String(r.action.issueNumber)} +${r.action.label ?? ""}`
-                : r.action.kind === "close-issue"
-                  ? ` #${String(r.action.issueNumber)}`
-                  : r.action.kind === "comment-issue"
+            const detail =
+              r.action.kind === "create-issue" && r.issueNumber
+                ? ` → #${String(r.issueNumber)}`
+                : r.action.kind === "label-issue"
+                  ? ` #${String(r.action.issueNumber)} +${r.action.label ?? ""}`
+                  : r.action.kind === "close-issue"
                     ? ` #${String(r.action.issueNumber)}`
-                    : "";
+                    : r.action.kind === "comment-issue"
+                      ? ` #${String(r.action.issueNumber)}`
+                      : "";
             return `- ${icon} **${r.action.kind}**${detail}${r.error ? ` — ${r.error}` : ""}`;
           }),
         ]
@@ -450,7 +508,9 @@ export const runGroupWakeCommand = async (args: readonly string[], rootDir: stri
       ? [
           "\n## Consent Round Tallies\n",
           ...result.tallies.map((t) => {
-            const countsStr = Object.entries(t.counts).map(([k, v]) => `${k}: ${String(v)}`).join(", ");
+            const countsStr = Object.entries(t.counts)
+              .map(([k, v]) => `${k}: ${String(v)}`)
+              .join(", ");
             return `### Item ${t.itemId}\n- ${countsStr}\n- Recommendation: **${t.recommendation.toUpperCase()}**\n${t.positions.map((p) => `  - ${p.agentId}: ${p.position}${p.reasoning ? ` — ${p.reasoning}` : ""}`).join("\n")}`;
           }),
         ]
@@ -466,7 +526,8 @@ export const runGroupWakeCommand = async (args: readonly string[], rootDir: stri
 
   try {
     if (!secretsProvider?.has(GITHUB_TOKEN)) throw new Error("no GITHUB_TOKEN");
-    const { makeRepoCoordinate, createGithubClient: createGH } = await import("@murmuration/github");
+    const { makeRepoCoordinate, createGithubClient: createGH } =
+      await import("@murmuration/github");
     const meetingGh = createGH({
       token: secretsProvider.get(GITHUB_TOKEN),
       writeScopes: {
@@ -476,14 +537,11 @@ export const runGroupWakeCommand = async (args: readonly string[], rootDir: stri
         issues: [`${repoOwner}/${repoName}`],
       },
     });
-    const issueResult = await meetingGh.createIssue(
-      makeRepoCoordinate(repoOwner, repoName),
-      {
-        title: `[${kind.toUpperCase()} MEETING] ${config.name} — ${dayUtc}`,
-        labels: [meetingLabel, `group:${groupId}`],
-        body: minutes,
-      },
-    );
+    const issueResult = await meetingGh.createIssue(makeRepoCoordinate(repoOwner, repoName), {
+      title: `[${kind.toUpperCase()} MEETING] ${config.name} — ${dayUtc}`,
+      labels: [meetingLabel, `group:${groupId}`],
+      body: minutes,
+    });
     if (issueResult.ok) {
       console.log(`\nMeeting minutes: ${issueResult.value.htmlUrl}`);
     } else {
@@ -492,7 +550,11 @@ export const runGroupWakeCommand = async (args: readonly string[], rootDir: stri
       const { writeFile: wf, mkdir } = await import("node:fs/promises");
       const meetingDir = join(root, ".murmuration", "runs", `group-${groupId}`, dayUtc);
       await mkdir(meetingDir, { recursive: true });
-      await wf(join(meetingDir, `meeting-${randomUUID().slice(0, 8)}.md`), `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`, "utf8");
+      await wf(
+        join(meetingDir, `meeting-${randomUUID().slice(0, 8)}.md`),
+        `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`,
+        "utf8",
+      );
       console.log(`  (saved locally as fallback)`);
     }
   } catch {
@@ -500,7 +562,11 @@ export const runGroupWakeCommand = async (args: readonly string[], rootDir: stri
     const { writeFile: wf, mkdir } = await import("node:fs/promises");
     const meetingDir = join(root, ".murmuration", "runs", `group-${groupId}`, dayUtc);
     await mkdir(meetingDir, { recursive: true });
-    await wf(join(meetingDir, `meeting-${randomUUID().slice(0, 8)}.md`), `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`, "utf8");
+    await wf(
+      join(meetingDir, `meeting-${randomUUID().slice(0, 8)}.md`),
+      `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`,
+      "utf8",
+    );
     console.log(`\nMeeting minutes saved locally (GitHub unavailable).`);
   }
 };

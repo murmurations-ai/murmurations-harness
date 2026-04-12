@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { makeAgentId } from "../execution/index.js";
-import { GovernanceStateStore, NoOpGovernancePlugin, type GovernanceStateGraph, type GovernanceItem } from "./index.js";
+import {
+  GovernanceStateStore,
+  NoOpGovernancePlugin,
+  type GovernancePlugin,
+  type GovernanceStateGraph,
+  type GovernanceItem,
+} from "./index.js";
 
 // Example state graphs covering different governance models.
 
@@ -206,7 +212,7 @@ describe("NoOpGovernancePlugin", () => {
 
 describe("GovernanceTerminology", () => {
   it("NoOpGovernancePlugin has no terminology (uses defaults)", () => {
-    const plugin = new NoOpGovernancePlugin();
+    const plugin: GovernancePlugin = new NoOpGovernancePlugin();
     expect(plugin.terminology).toBeUndefined();
   });
 
@@ -238,10 +244,11 @@ describe("GovernanceSyncCallbacks", () => {
   });
 
   it("fires onTransition callback on state change", () => {
-    const transitions: Array<{ item: GovernanceItem; transition: { from: string; to: string } }> = [];
+    const transitions: { item: GovernanceItem; transition: { from: string; to: string } }[] = [];
     const store = new GovernanceStateStore({
       onSync: {
-        onTransition: (item, t) => transitions.push({ item, transition: { from: t.from, to: t.to } }),
+        onTransition: (item, t) =>
+          transitions.push({ item, transition: { from: t.from, to: t.to } }),
       },
     });
     store.registerGraph(S3_TENSION);
@@ -255,8 +262,12 @@ describe("GovernanceSyncCallbacks", () => {
   it("swallows errors from sync callbacks without blocking governance ops", () => {
     const store = new GovernanceStateStore({
       onSync: {
-        onCreate: () => { throw new Error("sync boom"); },
-        onTransition: () => { throw new Error("sync boom"); },
+        onCreate: () => {
+          throw new Error("sync boom");
+        },
+        onTransition: () => {
+          throw new Error("sync boom");
+        },
       },
     });
     store.registerGraph(S3_TENSION);
@@ -280,7 +291,12 @@ describe("GovernancePlugin + Daemon dispatch contract", () => {
   it("NoOpGovernancePlugin evaluateAction always allows", async () => {
     const plugin = new NoOpGovernancePlugin();
     const store = new GovernanceStateStore();
-    const result = await plugin.evaluateAction(makeAgentId("test"), "commit", { file: "a.md" }, store);
+    const result = await plugin.evaluateAction(
+      makeAgentId("test"),
+      "commit",
+      { file: "a.md" },
+      store,
+    );
     expect(result.allow).toBe(true);
   });
 
@@ -291,13 +307,13 @@ describe("GovernancePlugin + Daemon dispatch contract", () => {
 
     const plugin = new NoOpGovernancePlugin();
     // Override to actually create an item from an event
-    plugin.onEventsEmitted = async (batch, s) => {
+    plugin.onEventsEmitted = (batch, s) => {
       for (const event of batch.events) {
         if (event.kind === "tension") {
           s.create("tension", batch.agentId, event.payload as Record<string, unknown>);
         }
       }
-      return [];
+      return Promise.resolve([]);
     };
 
     await plugin.onEventsEmitted(

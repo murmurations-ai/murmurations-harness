@@ -537,7 +537,9 @@ export class Daemon {
 
     // Register agents in the state store + scheduler
     if (this.#agentStateStore) {
-      void this.#agentStateStore.load().catch(() => {});
+      void this.#agentStateStore.load().catch(() => {
+        /* best-effort load; missing/invalid state file is tolerated */
+      });
     }
     for (const agent of this.#agents) {
       this.#agentStateStore?.register(agent.agentId, agent.maxWallClockMs);
@@ -711,12 +713,14 @@ export class Daemon {
 
       // Post-wake validation — "Did Work" tracking
       const validation = isCompleted(result)
-        ? validateWake(
-            { actionItems: context.signals.actionItems },
-            result,
-            actionReceipts,
-          )
-        : { productive: false, artifactCount: 0, actionItemsAddressed: 0, actionItemsAssigned: 0, reason: "wake did not complete" };
+        ? validateWake({ actionItems: context.signals.actionItems }, result, actionReceipts)
+        : {
+            productive: false,
+            artifactCount: 0,
+            actionItemsAddressed: 0,
+            actionItemsAssigned: 0,
+            reason: "wake did not complete",
+          };
 
       if (!validation.productive && isCompleted(result)) {
         this.#logger.info("daemon.wake.idle", {
@@ -737,10 +741,13 @@ export class Daemon {
       }
 
       // Record outcome in state store
-      const outcome = isCompleted(result) ? "success" as const
-        : isFailed(result) ? "failure" as const
-          : isTimedOut(result) ? "timeout" as const
-            : "killed" as const;
+      const outcome = isCompleted(result)
+        ? ("success" as const)
+        : isFailed(result)
+          ? ("failure" as const)
+          : isTimedOut(result)
+            ? ("timeout" as const)
+            : ("killed" as const);
       this.#agentStateStore?.recordWakeOutcome(event.wakeId.value, outcome, {
         costMicros: result.costRecord?.totals.costMicros.value,
         artifactCount: validation.artifactCount,
@@ -885,7 +892,10 @@ export class Daemon {
           // Also check for expired review dates
           const reviewDue = this.#governanceStore.query({ reviewDue: true });
 
-          const meetingItems = [...pending, ...reviewDue.filter((r) => !pending.some((p) => p.id === r.id))];
+          const meetingItems = [
+            ...pending,
+            ...reviewDue.filter((r) => !pending.some((p) => p.id === r.id)),
+          ];
 
           if (meetingItems.length === 0) continue;
 
@@ -897,7 +907,7 @@ export class Daemon {
           });
 
           // Fire the callback (non-blocking)
-          void this.#onGovernanceMeetingDue!(group.groupId, meetingItems).catch((err) => {
+          void this.#onGovernanceMeetingDue!(group.groupId, meetingItems).catch((err: unknown) => {
             this.#logger.error("daemon.governance.meeting.error", {
               groupId: group.groupId,
               error: err instanceof Error ? err.message : String(err),

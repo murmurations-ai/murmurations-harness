@@ -475,9 +475,12 @@ class GithubClientImpl implements GithubClient {
     const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/issues/${String(issueNumber.value)}/labels`;
     const raw = await this.#requestMutation(url, "POST", { labels: [...labels] }, options);
     if (!raw.ok) return raw;
-    const body = raw.value.body as unknown;
+    const body = raw.value.body;
     if (!Array.isArray(body)) return { ok: true, value: [] };
-    return { ok: true, value: (body as Array<{ name?: string }>).map((l) => l.name ?? "").filter(Boolean) };
+    return {
+      ok: true,
+      value: (body as { name?: string }[]).map((l) => l.name ?? "").filter(Boolean),
+    };
   }
 
   public async removeLabel(
@@ -659,16 +662,13 @@ class GithubClientImpl implements GithubClient {
       }
       return null;
     }
-    if (kind === "label") {
-      if (!scopes.labels.has(repoKey)) {
-        return fire(
-          new GithubWriteScopeError(`label denied for ${repoKey}`, {
-            attemptedRepo: repoKey,
-            scopeKind: kind,
-          }),
-        );
-      }
-      return null;
+    if (!scopes.labels.has(repoKey)) {
+      return fire(
+        new GithubWriteScopeError(`label denied for ${repoKey}`, {
+          attemptedRepo: repoKey,
+          scopeKind: kind,
+        }),
+      );
     }
     return null;
   }

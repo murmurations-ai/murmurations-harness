@@ -16,37 +16,37 @@ import { existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 
 import { makeSecretKey, IdentityLoader } from "@murmuration/core";
-import {
-  createGithubClient,
-  makeRepoCoordinate,
-} from "@murmuration/github";
+import { createGithubClient, makeRepoCoordinate } from "@murmuration/github";
 import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
 /** Read the default repo from the first agent's signal scopes via IdentityLoader. */
-const findDefaultRepo = async (rootDir: string): Promise<{ owner: string; repo: string } | null> => {
+const findDefaultRepo = async (
+  rootDir: string,
+): Promise<{ owner: string; repo: string } | null> => {
   try {
     const loader = new IdentityLoader({ rootDir });
     const agentIds = await loader.discover();
     for (const agentId of agentIds) {
       try {
         const identity = await loader.load(agentId);
-        const scopes = identity.frontmatter.signals?.github_scopes;
+        const scopes = identity.frontmatter.signals.github_scopes;
         if (scopes && scopes.length > 0) {
           const scope = scopes[0]!;
           return { owner: scope.owner, repo: scope.repo };
         }
-      } catch { /* skip agents that can't be loaded */ }
+      } catch {
+        /* skip agents that can't be loaded */
+      }
     }
-  } catch { /* skip */ }
+  } catch {
+    /* skip */
+  }
   return null;
 };
 
-export const runDirective = async (
-  args: readonly string[],
-  rootDir: string,
-): Promise<void> => {
+export const runDirective = async (args: readonly string[], rootDir: string): Promise<void> => {
   const root = resolve(rootDir);
 
   // Load GitHub client
@@ -61,7 +61,9 @@ export const runDirective = async (
   // Find the target repo
   const repoInfo = await findDefaultRepo(root);
   if (!repoInfo) {
-    console.error("murmuration directive: could not determine target repo from agent role.md files");
+    console.error(
+      "murmuration directive: could not determine target repo from agent role.md files",
+    );
     process.exit(1);
   }
   const repoKey = `${repoInfo.owner}/${repoInfo.repo}`;
@@ -94,7 +96,9 @@ export const runDirective = async (
     for (const issue of result.value) {
       const state = issue.state === "open" ? "pending" : "responded";
       const scope = issue.labels.find((l) => l.startsWith("scope:")) ?? "scope:?";
-      console.log(`  #${String(issue.number.value).padEnd(5)} ${state.padEnd(10)} ${scope.padEnd(20)} ${issue.title.slice(0, 60)}`);
+      console.log(
+        `  #${String(issue.number.value).padEnd(5)} ${state.padEnd(10)} ${scope.padEnd(20)} ${issue.title.slice(0, 60)}`,
+      );
     }
     return;
   }
@@ -106,12 +110,14 @@ export const runDirective = async (
 
   let scopeLabel: string;
   let scopeDesc: string;
-  if (agentIdx >= 0 && args[agentIdx + 1]) {
-    scopeLabel = `scope:agent:${args[agentIdx + 1]}`;
-    scopeDesc = `agent ${args[agentIdx + 1]}`;
-  } else if (groupIdx >= 0 && args[groupIdx + 1]) {
-    scopeLabel = `scope:group:${args[groupIdx + 1]}`;
-    scopeDesc = `group ${args[groupIdx + 1]}`;
+  const agentArg = args[agentIdx + 1];
+  const groupArg = args[groupIdx + 1];
+  if (agentIdx >= 0 && agentArg) {
+    scopeLabel = `scope:agent:${agentArg}`;
+    scopeDesc = `agent ${agentArg}`;
+  } else if (groupIdx >= 0 && groupArg) {
+    scopeLabel = `scope:group:${groupArg}`;
+    scopeDesc = `group ${groupArg}`;
   } else if (allFlag) {
     scopeLabel = "scope:all";
     scopeDesc = "all agents";
