@@ -506,7 +506,10 @@ export const validateWake = (
       ? `${String(actionItemsAssigned)} action items assigned but none addressed`
       : "wake completed but produced no artifacts";
 
-  return { productive, artifactCount, actionItemsAddressed, actionItemsAssigned, reason };
+  if (reason !== undefined) {
+    return { productive, artifactCount, actionItemsAddressed, actionItemsAssigned, reason };
+  }
+  return { productive, artifactCount, actionItemsAddressed, actionItemsAssigned };
 };
 
 const VALID_WAKE_ACTION_KINDS = new Set([

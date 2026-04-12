@@ -13,6 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import { resolve, dirname } from "node:path";
+import cronParser from "cron-parser";
 import { formatUSDMicros } from "../cost/usd.js";
 import { RunArtifactWriter, DispatchRunArtifactWriter } from "./runs.js";
 import { AgentStateStore } from "../agents/index.js";
@@ -383,6 +384,22 @@ export interface DaemonConfig {
     agentId: string,
     actions: readonly import("../execution/index.js").WakeAction[],
   ) => Promise<readonly import("../execution/index.js").WakeActionReceipt[]>;
+  /**
+   * Group configurations for scheduled meetings. If present, the daemon
+   * schedules governance checks on each group's governanceCron. When the
+   * cron fires and the governance queue has pending items (or expired
+   * reviews), the onGovernanceMeetingDue callback is invoked.
+   */
+  readonly groups?: readonly import("../groups/index.js").GroupConfig[];
+  /**
+   * Called when a scheduled governance meeting is due for a group.
+   * The CLI wires this to the group-wake runner. The daemon provides
+   * the group ID and the pending governance items.
+   */
+  readonly onGovernanceMeetingDue?: (
+    groupId: string,
+    pendingItems: readonly import("../governance/index.js").GovernanceItem[],
+  ) => Promise<void>;
 }
 
 export interface DaemonLogger {
@@ -421,6 +438,9 @@ export class Daemon {
   readonly #governanceInbox = new Map<string, EmittedGovernanceEvent[]>();
   readonly #agentStateStore: AgentStateStore | undefined;
   readonly #onWakeActions: DaemonConfig["onWakeActions"];
+  readonly #groups: readonly import("../groups/index.js").GroupConfig[];
+  readonly #onGovernanceMeetingDue: DaemonConfig["onGovernanceMeetingDue"];
+  readonly #governanceCronTimers: NodeJS.Timeout[] = [];
   readonly #governanceTimers = new Map<string, NodeJS.Timeout>();
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
@@ -437,6 +457,8 @@ export class Daemon {
     this.#governance = config.governance ?? new NoOpGovernancePlugin();
     this.#agentStateStore = config.agentStateStore;
     this.#onWakeActions = config.onWakeActions;
+    this.#groups = config.groups ?? [];
+    this.#onGovernanceMeetingDue = config.onGovernanceMeetingDue;
     this.#governanceStore = new GovernanceStateStore({
       ...(config.governancePersistDir ? { persistDir: config.governancePersistDir } : {}),
       ...(config.governanceSync ? { onSync: config.governanceSync } : {}),
@@ -527,6 +549,9 @@ export class Daemon {
       });
     }
 
+    // Schedule governance meeting checks per group
+    this.#scheduleGovernanceCrons();
+
     this.#scheduler.start();
 
     // Heartbeat keeps the event loop alive between scheduled wakes so
@@ -560,6 +585,10 @@ export class Daemon {
       clearTimeout(timer);
     }
     this.#governanceTimers.clear();
+    for (const timer of this.#governanceCronTimers) {
+      clearInterval(timer);
+    }
+    this.#governanceCronTimers.length = 0;
     await this.#scheduler.stop();
     await Promise.allSettled([...this.#inFlight]);
     try {
@@ -814,6 +843,77 @@ export class Daemon {
         }
       }
     }
+  }
+
+  /**
+   * Schedule governance meeting checks for groups with governanceCron.
+   * Uses setInterval to check periodically (every 60s). When the check
+   * fires, it queries the governance store for pending items per group
+   * and also checks for expired review dates. If items are pending and
+   * the callback is wired, it fires the meeting.
+   */
+  #scheduleGovernanceCrons(): void {
+    if (this.#groups.length === 0 || !this.#onGovernanceMeetingDue) return;
+
+    const groupsWithCron = this.#groups.filter((g) => g.governanceCron);
+    if (groupsWithCron.length === 0) return;
+
+    // Track last-fired time per group to avoid double-firing
+    const lastFired = new Map<string, number>();
+
+    const checkInterval = setInterval(() => {
+      if (!this.#running) return;
+
+      const now = Date.now();
+      for (const group of groupsWithCron) {
+        try {
+          // Use cron-parser to check if the cron has fired since last check
+          const interval = cronParser.parseExpression(group.governanceCron!);
+          const prev = interval.prev().getTime();
+          const last = lastFired.get(group.groupId) ?? 0;
+
+          if (prev <= last) continue; // Already handled this cron tick
+          lastFired.set(group.groupId, now);
+
+          // Check governance queue for this group
+          const allItems = this.#governanceStore.query();
+          const terminalStates = new Set(
+            this.#governanceStore.graphs().flatMap((g) => g.terminalStates),
+          );
+          const pending = allItems.filter((i) => !terminalStates.has(i.currentState));
+
+          // Also check for expired review dates
+          const reviewDue = this.#governanceStore.query({ reviewDue: true });
+
+          const meetingItems = [...pending, ...reviewDue.filter((r) => !pending.some((p) => p.id === r.id))];
+
+          if (meetingItems.length === 0) continue;
+
+          this.#logger.info("daemon.governance.meeting.due", {
+            groupId: group.groupId,
+            pendingCount: pending.length,
+            reviewDueCount: reviewDue.length,
+            totalItems: meetingItems.length,
+          });
+
+          // Fire the callback (non-blocking)
+          void this.#onGovernanceMeetingDue!(group.groupId, meetingItems).catch((err) => {
+            this.#logger.error("daemon.governance.meeting.error", {
+              groupId: group.groupId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        } catch {
+          // cron parse error or other issue — skip this tick
+        }
+      }
+    }, 60_000); // Check every 60 seconds
+
+    this.#governanceCronTimers.push(checkInterval);
+
+    this.#logger.info("daemon.governance.crons.scheduled", {
+      groups: groupsWithCron.map((g) => ({ groupId: g.groupId, cron: g.governanceCron })),
+    });
   }
 
   /**
