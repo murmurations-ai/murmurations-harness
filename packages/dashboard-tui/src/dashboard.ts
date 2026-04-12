@@ -50,23 +50,28 @@ const renderOverview = (
   governance: readonly GovernanceEntry[],
   cost: CostSummary,
 ): string => {
-  const failCount = agents.filter((a) => a.outcome === "failed").length;
-  const staleCount = agents.filter((a) => a.stale).length;
+  const runningCount = agents.filter((a) => a.state === "running" || a.state === "waking").length;
+  const failCount = agents.filter((a) => a.consecutiveFailures > 0).length;
+  const stalledCount = agents.filter((a) => a.stale && (a.state === "running" || a.state === "waking")).length;
+  const idleStale = agents.filter((a) => a.stale && a.state !== "running" && a.state !== "waking").length;
   const reviewDue = governance.filter((g) => g.reviewDue).length;
 
   let status: string;
-  if (failCount > 0) {
-    status = red(`CRITICAL (${String(failCount)} failed)`);
-  } else if (staleCount > 0 || reviewDue > 0) {
+  if (stalledCount > 0) {
+    status = red(`CRITICAL (${String(stalledCount)} stalled)`);
+  } else if (failCount > 0 || idleStale > 0 || reviewDue > 0) {
     const parts: string[] = [];
-    if (staleCount > 0) parts.push(red(`${String(staleCount)} stale`));
+    if (failCount > 0) parts.push(red(`${String(failCount)} failing`));
+    if (idleStale > 0) parts.push(yellow(`${String(idleStale)} awaiting first wake`));
     if (reviewDue > 0) parts.push(yellow(`${String(reviewDue)} review-due`));
     status = yellow("ATTENTION") + ` (${parts.join(", ")})`;
+  } else if (runningCount > 0) {
+    status = cyan(`ACTIVE (${String(runningCount)} running)`);
   } else {
     status = green("ALL SYSTEMS OK");
   }
 
-  const activeCount = agents.filter((a) => a.outcome === "completed").length;
+  const activeCount = agents.filter((a) => a.totalWakes > 0).length;
   return `  ${bold("Status:")} ${status}  ${dim("|")}  ${bold("Agents:")} ${String(activeCount)}/${String(agents.length)} active  ${dim("|")}  ${bold("Today:")} ${formatUsd(cost.todayMicros)} (${String(cost.todayWakes)} wakes)\n`;
 };
 
@@ -91,11 +96,16 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
 
   for (const a of active) {
     let marker: string;
-    if (a.outcome === "completed") marker = green("[ok]");
-    else if (a.outcome === "failed") marker = red("[FAIL]");
-    else if (a.outcome === "timed-out") marker = yellow("[TOUT]");
+    if (a.state === "running") marker = cyan("[RUN]");
+    else if (a.state === "waking") marker = cyan("[WAKE]");
+    else if (a.outcome === "success") marker = green("[ok]");
+    else if (a.outcome === "failure") marker = red("[FAIL]");
+    else if (a.outcome === "timeout") marker = yellow("[TOUT]");
     else if (a.outcome === "killed") marker = red("[KILL]");
+    else if (a.state === "idle") marker = dim("[idle]");
     else marker = dim("[--]");
+
+    const failStr = a.consecutiveFailures > 0 ? red(` ${String(a.consecutiveFailures)}F`) : "";
 
     const time = a.lastWake!.toISOString().slice(11, 16);
     const next = a.nextWakeCountdown !== "--" ? a.nextWakeCountdown.padEnd(8) : dim("--".padEnd(8));
@@ -112,7 +122,7 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
         : dim("░".repeat(BAR_WIDTH));
 
     lines.push(
-      `  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w`,
+      `  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w${failStr}`,
     );
   }
 

@@ -15,11 +15,14 @@ import cronParser from "cron-parser";
 
 export interface AgentStatus {
   readonly agentId: string;
+  readonly state: string; // lifecycle state from AgentStateStore
   readonly lastWake: Date | null;
   readonly outcome: string | null;
   readonly costMicros: number;
   readonly costFormatted: string;
-  readonly stale: boolean; // no wake in > 48h
+  readonly stale: boolean; // stalled or no wake in > 48h
+  readonly consecutiveFailures: number;
+  readonly totalWakes: number;
   readonly nextWake: Date | null;
   readonly nextWakeCountdown: string; // human-readable "2h 14m" or "--"
 }
@@ -70,13 +73,36 @@ const formatCountdown = (target: Date | null): string => {
 };
 
 export const readPipelineState = async (rootDir: string): Promise<readonly AgentStatus[]> => {
-  // Discover agents from the agents/ directory (not just runs/)
-  // so we show agents that haven't woken yet too.
+  // Primary: read from AgentStateStore (formal state machine)
+  // Fallback: discover agents from agents/*/role.md + index.jsonl
+  interface StateAgentRecord {
+    agentId: string;
+    currentState: string;
+    lastWokenAt: string | null;
+    lastOutcome: string | null;
+    maxWallClockMs: number;
+    consecutiveFailures: number;
+    totalWakes: number;
+    currentWakeId: string | null;
+    currentWakeStartedAt: string | null;
+  }
+
+  const stateFile = join(rootDir, ".murmuration", "agents", "state.json");
+  let stateAgents: Record<string, StateAgentRecord> | undefined;
+
+  try {
+    const content = await readFile(stateFile, "utf8");
+    const parsed = JSON.parse(content) as { agents?: Record<string, StateAgentRecord> };
+    stateAgents = parsed.agents;
+  } catch {
+    // No state store yet — fall back to discovery
+  }
+
+  // Discover agent dirs for cron info (state store doesn't have cron)
   const agentsDir = join(rootDir, "agents");
   let agentDirs: string[];
   try {
     const entries = await readdir(agentsDir);
-    // Filter to dirs that have role.md
     const valid: string[] = [];
     for (const e of entries.sort()) {
       try {
@@ -86,24 +112,65 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
     }
     agentDirs = valid;
   } catch {
-    return [];
+    agentDirs = [];
   }
 
-  const runsDir = join(rootDir, ".murmuration", "runs");
   const results: AgentStatus[] = [];
+  const runsDir = join(rootDir, ".murmuration", "runs");
+
   for (const agentId of agentDirs.sort()) {
-    // Read next wake from role.md cron
     const schedule = await parseCronFromRole(rootDir, agentId);
     const nextWake = schedule.cron ? computeNextFire(schedule.cron, schedule.tz) : null;
     const nextWakeCountdown = formatCountdown(nextWake);
 
+    // Try state store first
+    const agentState = stateAgents?.[agentId];
+    if (agentState) {
+      const lastWake = agentState.lastWokenAt ? new Date(agentState.lastWokenAt) : null;
+      const isRunning = agentState.currentState === "running" || agentState.currentState === "waking";
+      const isStalled = isRunning && agentState.currentWakeStartedAt
+        ? Date.now() - new Date(agentState.currentWakeStartedAt).getTime() > agentState.maxWallClockMs
+        : false;
+      const stale = isStalled || (!lastWake || Date.now() - lastWake.getTime() > 48 * 3600 * 1000);
+
+      // Get cost from index.jsonl (state store tracks outcomes, not costs per wake)
+      let costMicros = 0;
+      let costFormatted = "$0.0000";
+      try {
+        const indexContent = await readFile(join(runsDir, agentId, "index.jsonl"), "utf8");
+        const lines = indexContent.trim().split("\n").filter((l) => l.length > 0);
+        const last = lines[lines.length - 1];
+        if (last) {
+          const entry = JSON.parse(last) as { llm?: { costMicros?: number; costUsdFormatted?: string } };
+          costMicros = entry.llm?.costMicros ?? 0;
+          costFormatted = `$${entry.llm?.costUsdFormatted ?? "0.0000"}`;
+        }
+      } catch { /* no cost data */ }
+
+      results.push({
+        agentId,
+        state: agentState.currentState,
+        lastWake,
+        outcome: agentState.lastOutcome,
+        costMicros,
+        costFormatted,
+        stale,
+        consecutiveFailures: agentState.consecutiveFailures,
+        totalWakes: agentState.totalWakes,
+        nextWake,
+        nextWakeCountdown,
+      });
+      continue;
+    }
+
+    // Fallback: index.jsonl
     const indexPath = join(runsDir, agentId, "index.jsonl");
     try {
       const contents = await readFile(indexPath, "utf8");
       const lines = contents.trim().split("\n").filter((l) => l.length > 0);
       const lastLine = lines[lines.length - 1];
       if (!lastLine) {
-        results.push({ agentId, lastWake: null, outcome: null, costMicros: 0, costFormatted: "$0.0000", stale: true, nextWake, nextWakeCountdown });
+        results.push({ agentId, state: "registered", lastWake: null, outcome: null, costMicros: 0, costFormatted: "$0.0000", stale: true, consecutiveFailures: 0, totalWakes: 0, nextWake, nextWakeCountdown });
         continue;
       }
       const entry = JSON.parse(lastLine) as {
@@ -115,16 +182,19 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
       const stale = lastWake ? Date.now() - lastWake.getTime() > 48 * 3600 * 1000 : true;
       results.push({
         agentId,
+        state: "idle",
         lastWake,
         outcome: entry.outcome ?? null,
         costMicros: entry.llm?.costMicros ?? 0,
         costFormatted: `$${entry.llm?.costUsdFormatted ?? "0.0000"}`,
         stale,
+        consecutiveFailures: 0,
+        totalWakes: 0,
         nextWake,
         nextWakeCountdown,
       });
     } catch {
-      results.push({ agentId, lastWake: null, outcome: null, costMicros: 0, costFormatted: "$0.0000", stale: true, nextWake, nextWakeCountdown });
+      results.push({ agentId, state: "registered", lastWake: null, outcome: null, costMicros: 0, costFormatted: "$0.0000", stale: true, consecutiveFailures: 0, totalWakes: 0, nextWake, nextWakeCountdown });
     }
   }
   return results;
@@ -142,12 +212,59 @@ export interface ActivityEntry {
 }
 
 export const readRecentActivity = async (rootDir: string, maxEntries = 20): Promise<readonly ActivityEntry[]> => {
+  // Primary: read from AgentStateStore's wake instances
+  const stateFile = join(rootDir, ".murmuration", "agents", "state.json");
+  try {
+    const content = await readFile(stateFile, "utf8");
+    const data = JSON.parse(content) as {
+      wakes?: Record<string, {
+        wakeId: string;
+        agentId: string;
+        state: string;
+        startedAt: string | null;
+        finishedAt: string | null;
+        outcome: string | null;
+      }>;
+    };
+    if (data.wakes) {
+      const allWakes = Object.values(data.wakes)
+        .filter((w) => w.startedAt)
+        .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""))
+        .slice(-maxEntries);
+
+      return allWakes.map((w) => {
+        const ts = w.finishedAt?.slice(11, 19) ?? w.startedAt?.slice(11, 19) ?? "";
+        let event: string;
+        let detail: string;
+        if (w.state === "running" || w.state === "waking") {
+          event = "running";
+          detail = `since ${w.startedAt?.slice(11, 19) ?? "?"}`;
+        } else if (w.outcome === "success") {
+          event = "completed";
+          detail = "";
+        } else if (w.outcome === "failure") {
+          event = "failed";
+          detail = "";
+        } else if (w.outcome === "timeout") {
+          event = "timed-out";
+          detail = "";
+        } else {
+          event = w.state;
+          detail = "";
+        }
+        return { ts, agentId: w.agentId, event, detail };
+      });
+    }
+  } catch {
+    // Fall through to log-based
+  }
+
+  // Fallback: parse daemon.log
   const logPath = join(rootDir, ".murmuration", "daemon.log");
   let contents: string;
   try {
     contents = await readFile(logPath, "utf8");
   } catch {
-    // Also try cron.log
     try {
       contents = await readFile(join(rootDir, ".murmuration", "cron.log"), "utf8");
     } catch {
@@ -173,7 +290,7 @@ export const readRecentActivity = async (rootDir: string, maxEntries = 20): Prom
         });
       }
     } catch {
-      // skip malformed lines
+      // skip
     }
   }
   return entries.slice(-maxEntries);
