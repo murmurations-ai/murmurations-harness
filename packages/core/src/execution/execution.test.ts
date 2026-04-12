@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isCompleted,
   isFailed,
+  validateWake,
   isKilled,
   isTimedOut,
   makeAgentId,
@@ -204,5 +205,65 @@ describe("parseWakeActions", () => {
     const actions = parseWakeActions(text);
     expect(actions).toHaveLength(1);
     expect(actions[0]?.kind).toBe("label-issue");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateWake
+// ---------------------------------------------------------------------------
+
+describe("validateWake", () => {
+  const emptyResult = { actions: [], outputs: [], governanceEvents: [], wakeSummary: "" };
+
+  it("marks wake as idle when no artifacts produced and no action items", () => {
+    const v = validateWake({ actionItems: [] }, emptyResult, []);
+    expect(v.productive).toBe(false);
+    expect(v.artifactCount).toBe(0);
+    expect(v.reason).toContain("no artifacts");
+  });
+
+  it("marks wake as productive when actions succeed", () => {
+    const receipts = [{ action: { kind: "label-issue" as const, issueNumber: 1, label: "x" }, success: true }];
+    const v = validateWake({ actionItems: [] }, emptyResult, receipts);
+    expect(v.productive).toBe(true);
+    expect(v.artifactCount).toBe(1);
+  });
+
+  it("counts action items addressed by issue number in wake summary", () => {
+    const actionItems = [{
+      kind: "github-issue" as const,
+      id: "github-issue:x/y#259",
+      trust: "trusted" as const,
+      fetchedAt: new Date(),
+      number: 259,
+      title: "Action item",
+      url: "https://x",
+      labels: ["action-item", "assigned:02-content-production"],
+      excerpt: "",
+    }];
+    const result = { ...emptyResult, wakeSummary: "Addressed #259 — coordinated with team." };
+    const v = validateWake({ actionItems }, result, []);
+    expect(v.actionItemsAssigned).toBe(1);
+    expect(v.actionItemsAddressed).toBe(1);
+    expect(v.productive).toBe(true);
+  });
+
+  it("flags unaddressed action items", () => {
+    const actionItems = [{
+      kind: "github-issue" as const,
+      id: "github-issue:x/y#100",
+      trust: "trusted" as const,
+      fetchedAt: new Date(),
+      number: 100,
+      title: "Do something",
+      url: "https://x",
+      labels: ["action-item", "assigned:test"],
+      excerpt: "",
+    }];
+    const v = validateWake({ actionItems }, emptyResult, []);
+    expect(v.productive).toBe(false);
+    expect(v.actionItemsAssigned).toBe(1);
+    expect(v.actionItemsAddressed).toBe(0);
+    expect(v.reason).toContain("none addressed");
   });
 });

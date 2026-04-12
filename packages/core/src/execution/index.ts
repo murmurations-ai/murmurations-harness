@@ -447,6 +447,68 @@ export interface WakeActionReceipt {
   readonly issueNumber?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Wake validation — post-wake check on whether the agent did real work
+// ---------------------------------------------------------------------------
+
+/**
+ * Result of validating a completed wake. Produced by the daemon's
+ * post-wake validation hook. Feeds into AgentStateStore metrics
+ * and retrospective data.
+ */
+export interface WakeValidationResult {
+  /** Did the agent produce meaningful output? */
+  readonly productive: boolean;
+  /** Number of artifacts produced (actions executed + outputs + governance events). */
+  readonly artifactCount: number;
+  /** Number of assigned action items the agent addressed (mentioned or acted on). */
+  readonly actionItemsAddressed: number;
+  /** Total action items that were assigned to the agent this wake. */
+  readonly actionItemsAssigned: number;
+  /** If not productive, why. */
+  readonly reason?: string;
+}
+
+/**
+ * Default validation: checks artifact count and action item coverage.
+ * Used when no custom validator is configured.
+ */
+export const validateWake = (
+  context: { actionItems: readonly Signal[] },
+  result: { actions: readonly WakeAction[]; outputs: readonly AgentOutputArtifact[]; governanceEvents: readonly EmittedGovernanceEvent[]; wakeSummary: string },
+  actionReceipts: readonly WakeActionReceipt[],
+): WakeValidationResult => {
+  const artifactCount = actionReceipts.filter((r) => r.success).length
+    + result.outputs.length
+    + (result.governanceEvents.length > 0 ? 1 : 0);
+
+  const actionItemsAssigned = context.actionItems.length;
+  let actionItemsAddressed = 0;
+
+  if (actionItemsAssigned > 0) {
+    // Check which action items were addressed — either by structured action
+    // referencing the issue number, or by mention in the wake summary
+    for (const item of context.actionItems) {
+      if (item.kind !== "github-issue") continue;
+      const issueNum = (item as unknown as { number: number }).number;
+      const referenced =
+        result.actions.some((a) => a.issueNumber === issueNum) ||
+        actionReceipts.some((r) => r.action.issueNumber === issueNum) ||
+        result.wakeSummary.includes(`#${String(issueNum)}`);
+      if (referenced) actionItemsAddressed++;
+    }
+  }
+
+  const productive = artifactCount > 0 || actionItemsAddressed > 0;
+  const reason = productive
+    ? undefined
+    : actionItemsAssigned > 0
+      ? `${String(actionItemsAssigned)} action items assigned but none addressed`
+      : "wake completed but produced no artifacts";
+
+  return { productive, artifactCount, actionItemsAddressed, actionItemsAssigned, reason };
+};
+
 const VALID_WAKE_ACTION_KINDS = new Set([
   "label-issue", "create-issue", "close-issue", "comment-issue", "commit-file",
 ]);

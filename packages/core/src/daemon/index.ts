@@ -36,6 +36,7 @@ import {
   type IdentityChain,
   type ResolvedModel,
   type SignalBundle,
+  validateWake,
 } from "../execution/index.js";
 import type { LoadedAgentIdentity } from "../identity/index.js";
 import {
@@ -679,26 +680,41 @@ export class Daemon {
         }
       }
 
-      // "Did Work" tracking — count artifacts produced this wake
-      const artifactCount = actionReceipts.filter((r) => r.success).length
-        + result.outputs.length
-        + (result.governanceEvents.length > 0 ? 1 : 0);
-      if (artifactCount === 0 && isCompleted(result)) {
+      // Post-wake validation — "Did Work" tracking
+      const validation = isCompleted(result)
+        ? validateWake(
+            { actionItems: context.signals.actionItems },
+            result,
+            actionReceipts,
+          )
+        : { productive: false, artifactCount: 0, actionItemsAddressed: 0, actionItemsAssigned: 0, reason: "wake did not complete" };
+
+      if (!validation.productive && isCompleted(result)) {
         this.#logger.info("daemon.wake.idle", {
           agentId: agent.agentId,
           wakeId: event.wakeId.value,
-          reason: "wake completed but produced no artifacts",
+          reason: validation.reason,
+          actionItemsAssigned: validation.actionItemsAssigned,
+          actionItemsAddressed: validation.actionItemsAddressed,
+        });
+      } else if (isCompleted(result)) {
+        this.#logger.info("daemon.wake.validated", {
+          agentId: agent.agentId,
+          wakeId: event.wakeId.value,
+          artifactCount: validation.artifactCount,
+          actionItemsAddressed: validation.actionItemsAddressed,
+          actionItemsAssigned: validation.actionItemsAssigned,
         });
       }
 
-      // Record outcome in state store (after actions so artifactCount is known)
+      // Record outcome in state store
       const outcome = isCompleted(result) ? "success" as const
         : isFailed(result) ? "failure" as const
           : isTimedOut(result) ? "timeout" as const
             : "killed" as const;
       this.#agentStateStore?.recordWakeOutcome(event.wakeId.value, outcome, {
         costMicros: result.costRecord?.totals.costMicros.value,
-        artifactCount,
+        artifactCount: validation.artifactCount,
         ...(isFailed(result) ? { errorMessage: result.outcome.error.message } : {}),
       });
 
