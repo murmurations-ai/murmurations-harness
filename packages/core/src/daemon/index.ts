@@ -14,6 +14,7 @@
 import { randomUUID } from "node:crypto";
 import { formatUSDMicros } from "../cost/usd.js";
 import { RunArtifactWriter, DispatchRunArtifactWriter } from "./runs.js";
+import { AgentStateStore } from "../agents/index.js";
 import { DirectiveStore } from "../directives/index.js";
 import {
   isCompleted,
@@ -356,6 +357,13 @@ export interface DaemonConfig {
    * before each wake. See `directives/index.ts`.
    */
   readonly directiveStore?: DirectiveStore;
+  /**
+   * Agent state store for formal wake lifecycle tracking. If present,
+   * the daemon transitions agent state at each lifecycle point:
+   * registered → idle → waking → running → completed/failed → idle.
+   * The dashboard reads state directly from this store.
+   */
+  readonly agentStateStore?: AgentStateStore;
 }
 
 export interface DaemonLogger {
@@ -393,6 +401,7 @@ export class Daemon {
    */
   readonly #governanceInbox = new Map<string, EmittedGovernanceEvent[]>();
   readonly #directiveStore: DirectiveStore | undefined;
+  readonly #agentStateStore: AgentStateStore | undefined;
   readonly #governanceTimers = new Map<string, NodeJS.Timeout>();
   #heartbeatHandle: NodeJS.Timeout | undefined;
   #running = false;
@@ -408,6 +417,7 @@ export class Daemon {
     this.#runArtifactWriter = config.runArtifactWriter;
     this.#governance = config.governance ?? new NoOpGovernancePlugin();
     this.#directiveStore = config.directiveStore;
+    this.#agentStateStore = config.agentStateStore;
     this.#governanceStore = new GovernanceStateStore({
       ...(config.governancePersistDir ? { persistDir: config.governancePersistDir } : {}),
     });
@@ -483,7 +493,13 @@ export class Daemon {
 
     this.#scheduler.onWake((event) => this.#handleWake(event));
 
+    // Register agents in the state store + scheduler
+    if (this.#agentStateStore) {
+      void this.#agentStateStore.load().catch(() => {});
+    }
     for (const agent of this.#agents) {
+      this.#agentStateStore?.register(agent.agentId, agent.maxWallClockMs);
+      this.#agentStateStore?.transition(agent.agentId, "idle");
       this.#scheduler.schedule(makeAgentId(agent.agentId), agent.trigger);
       this.#logger.info("daemon.agent.registered", {
         agentId: agent.agentId,
@@ -629,8 +645,21 @@ export class Daemon {
     });
 
     try {
+      this.#agentStateStore?.transition(agent.agentId, "waking", event.wakeId.value);
       const handle = await this.#executor.spawn(context);
+      this.#agentStateStore?.transition(agent.agentId, "running", event.wakeId.value);
       const result = await this.#executor.waitForCompletion(handle);
+
+      // Record outcome in state store
+      const outcome = isCompleted(result) ? "success" as const
+        : isFailed(result) ? "failure" as const
+          : isTimedOut(result) ? "timeout" as const
+            : "killed" as const;
+      this.#agentStateStore?.recordWakeOutcome(event.wakeId.value, outcome, {
+        costMicros: result.costRecord?.totals.costMicros.value,
+        ...(isFailed(result) ? { errorMessage: result.outcome.error.message } : {}),
+      });
+
       this.#logResult(result);
       if (this.#runArtifactWriter) {
         await this.#runArtifactWriter.record(result, result.costRecord, this.#logger);
@@ -681,6 +710,9 @@ export class Daemon {
         }
       }
     } catch (error) {
+      this.#agentStateStore?.recordWakeOutcome(event.wakeId.value, "failure", {
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
       this.#logger.error("daemon.wake.error", {
         agentId: agent.agentId,
         wakeId: event.wakeId.value,

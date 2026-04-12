@@ -26,6 +26,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  AgentStateStore,
   Daemon,
   DirectiveStore,
   DispatchExecutor,
@@ -594,6 +595,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     ...(governancePlugin ? { governance: governancePlugin } : {}),
     governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
     directiveStore: new DirectiveStore(exampleRoot),
+    agentStateStore: new AgentStateStore({ persistDir: resolve(exampleRoot, ".murmuration", "agents") }),
   });
 
   let githubClient: GithubClient | undefined;
@@ -823,6 +825,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         ...(governancePlugin ? { governance: governancePlugin } : {}),
         governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
     directiveStore: new DirectiveStore(exampleRoot),
+    agentStateStore: new AgentStateStore({ persistDir: resolve(exampleRoot, ".murmuration", "agents") }),
       })
     : firstPassDaemon;
 
