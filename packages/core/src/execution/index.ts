@@ -415,6 +415,80 @@ export interface EmittedGovernanceEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Wake actions — structured actions agents return for the harness to execute
+// ---------------------------------------------------------------------------
+
+/**
+ * A structured action an agent wants the harness to execute against GitHub.
+ * Returned alongside the wake summary. The executor validates each action
+ * against the agent's write scopes (ADR-0017) before executing.
+ *
+ * This is the individual-wake equivalent of MeetingAction. Agents that
+ * need to label issues, create action items, close completed work, or
+ * post comments return these instead of making raw GitHub API calls.
+ */
+export interface WakeAction {
+  readonly kind: "label-issue" | "create-issue" | "close-issue" | "comment-issue" | "commit-file";
+  readonly issueNumber?: number;
+  readonly label?: string;
+  readonly removeLabel?: string;
+  readonly title?: string;
+  readonly body?: string;
+  readonly labels?: readonly string[];
+  readonly filePath?: string;
+  readonly fileContent?: string;
+}
+
+/** Result of executing a single WakeAction. */
+export interface WakeActionReceipt {
+  readonly action: WakeAction;
+  readonly success: boolean;
+  readonly error?: string;
+  readonly issueNumber?: number;
+}
+
+const VALID_WAKE_ACTION_KINDS = new Set([
+  "label-issue", "create-issue", "close-issue", "comment-issue", "commit-file",
+]);
+
+/**
+ * Parse structured wake actions from LLM output. Same format as meeting
+ * actions (```actions fenced JSON block), with the addition of "commit-file".
+ * Returns empty array if no valid actions found (never throws).
+ */
+export const parseWakeActions = (text: string): WakeAction[] => {
+  const fencedMatch = /```(?:actions|json)\s*\n(\[[\s\S]*?\])\s*\n```/.exec(text);
+  if (!fencedMatch?.[1]) return [];
+  try {
+    const parsed: unknown = JSON.parse(fencedMatch[1]);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isValidWakeAction);
+  } catch {
+    return [];
+  }
+};
+
+const isValidWakeAction = (item: unknown): item is WakeAction => {
+  if (typeof item !== "object" || item === null) return false;
+  const obj = item as Record<string, unknown>;
+  if (typeof obj.kind !== "string" || !VALID_WAKE_ACTION_KINDS.has(obj.kind)) return false;
+  switch (obj.kind) {
+    case "label-issue":
+      return typeof obj.issueNumber === "number" && typeof obj.label === "string";
+    case "create-issue":
+      return typeof obj.title === "string";
+    case "close-issue":
+      return typeof obj.issueNumber === "number";
+    case "comment-issue":
+      return typeof obj.issueNumber === "number" && typeof obj.body === "string";
+    case "commit-file":
+      return typeof obj.filePath === "string" && typeof obj.fileContent === "string";
+    default:
+      return false;
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Agent result (what the executor returns)
 // ---------------------------------------------------------------------------
 
@@ -481,6 +555,14 @@ export interface AgentResult {
    * wake failed before the summary was written.
    */
   readonly wakeSummary: string;
+  /**
+   * Structured actions the agent wants executed. Populated by the runner,
+   * validated + executed by the daemon after the wake completes. Empty if
+   * the agent didn't return any actions (legacy runners, failed wakes).
+   */
+  readonly actions: readonly WakeAction[];
+  /** Execution receipts — one per action attempted. Empty until the daemon executes. */
+  readonly actionReceipts: readonly WakeActionReceipt[];
   readonly startedAt: Date;
   readonly finishedAt: Date;
 }

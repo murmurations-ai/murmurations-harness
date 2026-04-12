@@ -37,6 +37,7 @@ import {
   type CostActuals,
   type EmittedGovernanceEvent,
   type ExecutorCapabilities,
+  type WakeAction,
 } from "./index.js";
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,8 @@ export interface AgentRunnerResult {
   readonly outputs?: readonly AgentOutputArtifact[];
   /** Governance events the agent emitted during the wake. Optional. */
   readonly governanceEvents?: readonly EmittedGovernanceEvent[];
+  /** Structured actions for the harness to execute after the wake. Optional. */
+  readonly actions?: readonly WakeAction[];
 }
 
 /**
@@ -287,6 +290,8 @@ export class InProcessExecutor<Clients = unknown> implements AgentExecutor {
           outcome: { kind: "completed" },
           outputs: terminal.result.outputs ?? [],
           governanceEvents: terminal.result.governanceEvents ?? [],
+          actions: terminal.result.actions ?? [],
+          actionReceipts: [],
           cost,
           costRecord,
           wakeSummary: terminal.result.wakeSummary,
@@ -309,6 +314,8 @@ export class InProcessExecutor<Clients = unknown> implements AgentExecutor {
           },
           outputs: [],
           governanceEvents: [],
+          actions: [],
+          actionReceipts: [],
           cost,
           costRecord,
           wakeSummary: "",
@@ -323,6 +330,8 @@ export class InProcessExecutor<Clients = unknown> implements AgentExecutor {
           outcome: { kind: "timed-out", budget: record.context.budget },
           outputs: [],
           governanceEvents: [],
+          actions: [],
+          actionReceipts: [],
           cost,
           costRecord,
           wakeSummary: "",
@@ -337,6 +346,8 @@ export class InProcessExecutor<Clients = unknown> implements AgentExecutor {
           outcome: { kind: "killed", reason: terminal.reason },
           outputs: [],
           governanceEvents: [],
+          actions: [],
+          actionReceipts: [],
           cost,
           costRecord,
           wakeSummary: "",

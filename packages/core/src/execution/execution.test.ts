@@ -8,6 +8,7 @@ import {
   makeAgentId,
   makeGroupId,
   makeWakeId,
+  parseWakeActions,
   type AgentResult,
   type CostBudget,
   type ResolvedModel,
@@ -152,5 +153,56 @@ describe("outcome type guards", () => {
       ).length;
       expect(trueCount).toBe(1);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseWakeActions
+// ---------------------------------------------------------------------------
+
+describe("parseWakeActions", () => {
+  it("parses actions from a fenced ```actions block", () => {
+    const text = `Here is my output.
+
+\`\`\`actions
+[
+  {"kind": "label-issue", "issueNumber": 42, "label": "priority:high"},
+  {"kind": "close-issue", "issueNumber": 259}
+]
+\`\`\``;
+
+    const actions = parseWakeActions(text);
+    expect(actions).toHaveLength(2);
+    expect(actions[0]?.kind).toBe("label-issue");
+    expect(actions[1]?.kind).toBe("close-issue");
+  });
+
+  it("parses commit-file actions", () => {
+    const text = `\`\`\`actions
+[{"kind": "commit-file", "filePath": "drafts/article.md", "fileContent": "# Title\\n\\nBody"}]
+\`\`\``;
+
+    const actions = parseWakeActions(text);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]?.kind).toBe("commit-file");
+    expect(actions[0]?.filePath).toBe("drafts/article.md");
+  });
+
+  it("returns empty array when no fenced block", () => {
+    expect(parseWakeActions("no actions here")).toEqual([]);
+  });
+
+  it("filters invalid actions", () => {
+    const text = `\`\`\`actions
+[
+  {"kind": "label-issue", "issueNumber": 1, "label": "ok"},
+  {"kind": "nuke-repo"},
+  {"kind": "commit-file"}
+]
+\`\`\``;
+
+    const actions = parseWakeActions(text);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]?.kind).toBe("label-issue");
   });
 });

@@ -24,6 +24,8 @@ const makeResult = (overrides: Partial<AgentResult> = {}): AgentResult => ({
   outcome: { kind: "completed" },
   outputs: [],
   governanceEvents: [],
+  actions: [],
+  actionReceipts: [],
   cost: {
     inputTokens: 1200,
     outputTokens: 350,
