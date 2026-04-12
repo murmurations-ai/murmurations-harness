@@ -28,6 +28,7 @@ These are all forms of **group wakes** — multiple agents participating in a sh
 **Purpose:** The circle does work together — processing its GitHub issues backlog, prioritizing, planning, assigning tasks, running retrospectives.
 
 **Shape:**
+
 - All circle members wake with the same context (backlog, recent activity, upstream signals)
 - Each member contributes their perspective in sequence (round format)
 - The facilitator (or a designated agent) synthesizes the contributions
@@ -42,6 +43,7 @@ These are all forms of **group wakes** — multiple agents participating in a sh
 **Purpose:** The circle processes governance items — proposals needing consent, tensions needing deliberation, agreements due for review.
 
 **Shape:**
+
 - All circle members wake with the governance queue (pending items from the GovernanceStateStore)
 - For each item: the proposal is presented, each member responds (consent / concern / objection), the facilitator tallies and advances the state machine
 - Output: governance decisions (ratified / rejected / amended), updated state store, decision records
@@ -86,13 +88,13 @@ interface CircleWakeContext {
   readonly facilitator: RegisteredAgent;
   readonly wakeKind: "operational" | "governance";
   readonly signals: SignalBundle;
-  readonly backlog: readonly GitHubIssue[];     // the circle's work queue
-  readonly governanceQueue: readonly GovernanceItem[];  // pending governance items
-  readonly clients: InProcessRunnerClients;     // shared LLM + GitHub
+  readonly backlog: readonly GitHubIssue[]; // the circle's work queue
+  readonly governanceQueue: readonly GovernanceItem[]; // pending governance items
+  readonly clients: InProcessRunnerClients; // shared LLM + GitHub
 }
 
 interface CircleWakeResult {
-  readonly meetingMinutes: string;              // the synthesized output
+  readonly meetingMinutes: string; // the synthesized output
   readonly decisions: readonly GovernanceDecision[];
   readonly backlogUpdates: readonly BacklogUpdate[];
   readonly outputs: readonly AgentOutputArtifact[];
@@ -102,6 +104,7 @@ interface CircleWakeResult {
 ### How a circle wake runs
 
 **Phase 1: Context assembly**
+
 1. Daemon reads the circle doc → identifies members + facilitator
 2. Loads the circle's GitHub issues backlog (filtered by circle label)
 3. Loads the governance queue (pending items from the state store for this circle)
@@ -109,17 +112,20 @@ interface CircleWakeResult {
 
 **Phase 2: Member round**
 For each member (in order):
+
 1. Construct the member's prompt: circle context + backlog + their role + "what's your input?"
 2. Call LLM with their identity chain as system prompt
 3. Collect their response as a structured contribution
 
 **Phase 3: Facilitator synthesis**
+
 1. The facilitator sees ALL member contributions
 2. Constructs a synthesized output: decisions, priorities, action items
 3. For governance items: tallies consent/concern/objection and advances the state machine
 4. Produces meeting minutes
 
 **Phase 4: Persistence**
+
 1. Meeting minutes → `.murmuration/runs/<circleId>/<date>/meeting-<id>.md`
 2. Governance decisions → state store transitions
 3. Backlog updates → GitHub issue comments or label changes
@@ -150,6 +156,7 @@ murmuration governance --circle content --round consent --issue 42
 ### How it works
 
 1. The CLI writes a **directive file** to `.murmuration/directives/<id>.json`:
+
    ```json
    {
      "id": "dir-2026-04-10-001",
@@ -189,26 +196,26 @@ members:
   - "10-quality"
   - "16-editorial-calendar"
   - "21-chronicler"
-facilitator: "16-editorial-calendar"  # or "07-coordinator"
+facilitator: "16-editorial-calendar" # or "07-coordinator"
 
 # Operational meeting
 operational_wake:
-  cron: "0 19 * * *"          # daily at 19:00 UTC
+  cron: "0 19 * * *" # daily at 19:00 UTC
   backlog_label: "circle: content"
   max_items: 10
 
 # Governance meeting
 governance_wake:
-  cron: "0 19 * * 5"          # weekly Friday at 19:00 UTC
+  cron: "0 19 * * 5" # weekly Friday at 19:00 UTC
   # OR trigger-based:
-  trigger_threshold: 3         # wake when ≥3 pending governance items
-  review_check: true           # also wake if any agreements are due for review
+  trigger_threshold: 3 # wake when ≥3 pending governance items
+  review_check: true # also wake if any agreements are due for review
 
 # GitHub work queue
 backlog:
   repo: "xeeban/emergent-praxis"
   labels: ["circle: content"]
-  prioritization: "by-agent-vote"  # or "by-facilitator" or "fifo"
+  prioritization: "by-agent-vote" # or "by-facilitator" or "fifo"
 ```
 
 ---
@@ -227,6 +234,7 @@ Each circle has a **prioritized work queue** backed by GitHub issues:
 4. The circle's next meeting reviews progress on assigned items
 
 This gives circles a natural workflow:
+
 ```
 Issues arrive → Circle operational wake → Prioritize + assign → Agents work → Circle reviews → Repeat
 ```
@@ -244,8 +252,18 @@ export type WakeTrigger =
   | { readonly kind: "cron"; readonly expression: string; readonly tz?: string }
   | { readonly kind: "event"; readonly eventType: string }
   // NEW:
-  | { readonly kind: "circle-operational"; readonly circleId: string; readonly expression: string; readonly tz?: string }
-  | { readonly kind: "circle-governance"; readonly circleId: string; readonly expression: string; readonly tz?: string };
+  | {
+      readonly kind: "circle-operational";
+      readonly circleId: string;
+      readonly expression: string;
+      readonly tz?: string;
+    }
+  | {
+      readonly kind: "circle-governance";
+      readonly circleId: string;
+      readonly expression: string;
+      readonly tz?: string;
+    };
 ```
 
 Or simpler: circle wakes are scheduled on the circle config, not on individual agents. The daemon reads circle configs and schedules circle wakes alongside individual agent wakes.
@@ -281,11 +299,13 @@ If the agent reports a governance event, it emits it through the standard govern
 ```
 
 The `<kind>` is provided by the active governance plugin's state graphs. Examples:
+
 - S3: `tension`, `proposal-opened`
 - Chain of Command: `report`, `escalation`
 - Parliamentary: `motion`, `amendment`
 
 This flows through the existing governance dispatch:
+
 1. The governance plugin receives the event in `onEventsEmitted`
 2. Creates a `GovernanceItem` in the state store (using the plugin's state graph for that kind)
 3. GovernanceGitHubSync creates a GitHub issue with the appropriate labels
@@ -325,8 +345,9 @@ What tension should we file?
 ```
 
 Each member contributes from their role's perspective. The facilitator synthesizes into:
+
 - **Keep doing** — practices that worked
-- **Stop doing** — things that wasted effort or caused problems  
+- **Stop doing** — things that wasted effort or caused problems
 - **Start doing** — new practices to try next cycle
 - **Tensions filed** — any structural issues elevated to governance
 
@@ -338,7 +359,7 @@ Different murmurations measure success differently. The harness shouldn't bake i
 
 ```ts
 interface StrategyPlugin {
-  readonly name: string;       // "okr", "kpi", "north-star", "none"
+  readonly name: string; // "okr", "kpi", "north-star", "none"
   readonly version: string;
 
   /** Declare the measurement structure (objectives, metrics, etc.) */
@@ -361,12 +382,12 @@ interface StrategyPlugin {
 
 **Example strategy plugins:**
 
-| Plugin | How it guides | Measurement shape |
-|---|---|---|
-| **OKR** | Objectives + Key Results per circle per quarter. Retrospectives score KR progress (0.0-1.0). Planning prioritizes backlog items that advance the lowest-scoring KRs. | `{ objective, keyResult, target, current, score }` |
-| **North Star** | One murmuration-wide metric + circle-level input metrics. Retrospectives check whether inputs are driving the north star. | `{ northStar, inputMetric, value, trend }` |
-| **KPI** | Key Performance Indicators per agent/circle. Retrospectives flag KPIs below threshold. | `{ kpi, threshold, actual, status }` |
-| **None** | No measurement framework — circles self-organize without quantitative goals. | (empty) |
+| Plugin         | How it guides                                                                                                                                                        | Measurement shape                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| **OKR**        | Objectives + Key Results per circle per quarter. Retrospectives score KR progress (0.0-1.0). Planning prioritizes backlog items that advance the lowest-scoring KRs. | `{ objective, keyResult, target, current, score }` |
+| **North Star** | One murmuration-wide metric + circle-level input metrics. Retrospectives check whether inputs are driving the north star.                                            | `{ northStar, inputMetric, value, trend }`         |
+| **KPI**        | Key Performance Indicators per agent/circle. Retrospectives flag KPIs below threshold.                                                                               | `{ kpi, threshold, actual, status }`               |
+| **None**       | No measurement framework — circles self-organize without quantitative goals.                                                                                         | (empty)                                            |
 
 ### How strategy flows through the system
 
@@ -374,7 +395,7 @@ interface StrategyPlugin {
 Source sets strategy (OKRs, North Star, etc.)
   ↓
 Strategy plugin provides measurement schema
-  ↓ 
+  ↓
 Each circle's operational wake evaluates: "Are we on track?"
   ↓
 Circle retrospective reflects: "Why or why not? What do we change?"
@@ -415,12 +436,14 @@ Strategy: OKR Q2 2026
 ## Implementation phases
 
 ### Phase A — Source Directives (smallest, unblocks everything)
+
 - `murmuration directive` CLI command
 - Directive files in `.murmuration/directives/`
 - Daemon injects pending directives into signal bundle
 - No code changes to runners — directives appear as signals
 
 ### Phase B — Agent Self-Reflection + Tension Filing
+
 - Add self-reflection prompt to the shared runner's output contract
 - Agents emit governance events when they sense a tension
 - S3 plugin creates governance items from agent-filed tensions
@@ -428,6 +451,7 @@ Strategy: OKR Q2 2026
 - Agents can also file proposals directly (not just tensions)
 
 ### Phase C — Circle Wake Runner
+
 - `CircleWakeRunner` in `@murmuration/core`
 - Circle config schema (members, facilitator, backlog label)
 - Daemon schedules circle wakes from circle configs
@@ -435,24 +459,28 @@ Strategy: OKR Q2 2026
 - Meeting minutes artifact
 
 ### Phase D — Governance Meeting Protocol
+
 - Governance wake variant of CircleWakeRunner
 - Consent round tallying (consent/concern/objection per member)
 - State machine advancement based on tally
 - Decision record generation
 
 ### Phase E — Circle Work Queue
+
 - `murmuration backlog --circle content` command
 - GitHub issue reading filtered by circle label
 - Prioritization during operational circle wakes
 - Assignment via issue comments/labels
 
 ### Phase F — Circle Retrospectives
+
 - Retrospective as a special operational circle wake kind
 - Triggered after milestones or on cadence (weekly/biweekly)
 - Keep/stop/start/tension output format
 - Retrospective artifacts persisted + fed into next planning wake
 
 ### Phase G — Strategy Plugin Interface
+
 - `StrategyPlugin` interface in `@murmuration/core`
 - OKR plugin as the first implementation (in `examples/strategy-okr/`)
 - `NoOpStrategyPlugin` as default (no measurement framework)

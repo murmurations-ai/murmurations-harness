@@ -183,11 +183,13 @@ export class GovernanceStateStore {
   readonly #onSync: GovernanceSyncCallbacks | undefined;
   #persistPending: Promise<void> | null = null;
 
-  public constructor(options: {
-    readonly now?: () => Date;
-    readonly persistDir?: string | undefined;
-    readonly onSync?: GovernanceSyncCallbacks | undefined;
-  } = {}) {
+  public constructor(
+    options: {
+      readonly now?: () => Date;
+      readonly persistDir?: string | undefined;
+      readonly onSync?: GovernanceSyncCallbacks | undefined;
+    } = {},
+  ) {
     this.#now = options.now ?? ((): Date => new Date());
     this.#persistDir = options.persistDir;
     this.#onSync = options.onSync;
@@ -284,7 +286,11 @@ export class GovernanceStateStore {
     };
     this.#items.set(item.id, item);
     this.#persistPending = this.#persist(item);
-    try { this.#onSync?.onCreate?.(item); } catch { /* fire-and-forget */ }
+    try {
+      this.#onSync?.onCreate?.(item);
+    } catch {
+      /* fire-and-forget */
+    }
     return item;
   }
 
@@ -336,7 +342,11 @@ export class GovernanceStateStore {
     };
     this.#items.set(itemId, updated);
     this.#persistPending = this.#persist(updated);
-    try { this.#onSync?.onTransition?.(updated, transition); } catch { /* fire-and-forget */ }
+    try {
+      this.#onSync?.onTransition?.(updated, transition);
+    } catch {
+      /* fire-and-forget */
+    }
     return updated;
   }
 

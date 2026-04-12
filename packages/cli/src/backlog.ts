@@ -57,7 +57,9 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
   }
 
   if (doRefresh && !backlogRepo) {
-    console.error("murmuration backlog: no repo configured. Use --repo owner/repo or set backlog_repo: in the group doc.");
+    console.error(
+      "murmuration backlog: no repo configured. Use --repo owner/repo or set backlog_repo: in the group doc.",
+    );
     process.exit(2);
   }
 
@@ -127,6 +129,8 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
   for (const [idx, item] of items.entries()) {
     const labels = item.labels.filter((l) => l !== backlogLabel).join(", ");
     const labelStr = labels ? ` [${labels}]` : "";
-    console.log(`  ${String(idx + 1).padStart(2)}. #${String(item.number).padEnd(5)} ${item.title.slice(0, 60)}${labelStr}`);
+    console.log(
+      `  ${String(idx + 1).padStart(2)}. #${String(item.number).padEnd(5)} ${item.title.slice(0, 60)}${labelStr}`,
+    );
   }
 };

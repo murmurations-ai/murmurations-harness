@@ -346,8 +346,16 @@ describe("DefaultSignalAggregator", () => {
 
   it("partitions action items assigned to the waking agent into actionItems", async () => {
     const issues = [
-      fakeIssue({ n: 259, title: "Action: do something", labels: ["action-item", "assigned:07-wren"] }),
-      fakeIssue({ n: 260, title: "Action: other thing", labels: ["action-item", "assigned:02-content"] }),
+      fakeIssue({
+        n: 259,
+        title: "Action: do something",
+        labels: ["action-item", "assigned:07-wren"],
+      }),
+      fakeIssue({
+        n: 260,
+        title: "Action: other thing",
+        labels: ["action-item", "assigned:02-content"],
+      }),
       fakeIssue({ n: 100, title: "Regular issue", labels: ["bug"] }),
     ];
     const agg = new DefaultSignalAggregator({
@@ -370,9 +378,7 @@ describe("DefaultSignalAggregator", () => {
   });
 
   it("returns empty actionItems when no action items are assigned", async () => {
-    const issues = [
-      fakeIssue({ n: 1, title: "Bug", labels: ["bug"] }),
-    ];
+    const issues = [fakeIssue({ n: 1, title: "Bug", labels: ["bug"] })];
     const agg = new DefaultSignalAggregator({
       rootDir,
       github: makeFakeGithub(issues),

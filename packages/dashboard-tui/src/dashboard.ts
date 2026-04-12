@@ -52,8 +52,12 @@ const renderOverview = (
 ): string => {
   const runningCount = agents.filter((a) => a.state === "running" || a.state === "waking").length;
   const failCount = agents.filter((a) => a.consecutiveFailures > 0).length;
-  const stalledCount = agents.filter((a) => a.stale && (a.state === "running" || a.state === "waking")).length;
-  const idleStale = agents.filter((a) => a.stale && a.state !== "running" && a.state !== "waking").length;
+  const stalledCount = agents.filter(
+    (a) => a.stale && (a.state === "running" || a.state === "waking"),
+  ).length;
+  const idleStale = agents.filter(
+    (a) => a.stale && a.state !== "running" && a.state !== "waking",
+  ).length;
   const reviewDue = governance.filter((g) => g.reviewDue).length;
 
   let status: string;

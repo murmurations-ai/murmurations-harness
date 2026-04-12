@@ -60,23 +60,23 @@ GitHub is the collaboration layer. Everything collaborative lives there — as i
 
 ### What lives in GitHub
 
-| What | How |
-|---|---|
-| **Work items** | Issues with circle/priority/assignment labels |
-| **Source directives** | Issues with `source-directive` label |
-| **Governance items** | Issues with `governance:*` + `state:*` labels |
-| **Meeting outcomes** | Issues with `circle-meeting` label (decisions, action items, assignments) |
-| **Agent artifacts** | Committed files (digests, drafts, designs, reports) |
-| **Governance decisions** | Committed files in `governance/decisions/` |
+| What                     | How                                                                       |
+| ------------------------ | ------------------------------------------------------------------------- |
+| **Work items**           | Issues with circle/priority/assignment labels                             |
+| **Source directives**    | Issues with `source-directive` label                                      |
+| **Governance items**     | Issues with `governance:*` + `state:*` labels                             |
+| **Meeting outcomes**     | Issues with `circle-meeting` label (decisions, action items, assignments) |
+| **Agent artifacts**      | Committed files (digests, drafts, designs, reports)                       |
+| **Governance decisions** | Committed files in `governance/decisions/`                                |
 
 ### What stays local
 
-| What | Why |
-|---|---|
-| Agent runtime state | Which agent is running *right now* on *this machine* |
-| Cost telemetry | Too high-frequency for GitHub |
-| Daemon log | Operational debug |
-| Backlog cache | Local cache of GitHub issues |
+| What                | Why                                                  |
+| ------------------- | ---------------------------------------------------- |
+| Agent runtime state | Which agent is running _right now_ on _this machine_ |
+| Cost telemetry      | Too high-frequency for GitHub                        |
+| Daemon log          | Operational debug                                    |
+| Backlog cache       | Local cache of GitHub issues                         |
 
 ### Multi-instance
 
@@ -92,60 +92,60 @@ Every agent action type has explicit **output requirements** — what artifacts 
 
 #### Individual Agent Wake
 
-| Output | How it's verified |
-|---|---|
-| **Committed file** | `createCommitOnBranch` returns a commit OID |
-| **Issue created** | `createIssue` returns an issue number |
+| Output                      | How it's verified                           |
+| --------------------------- | ------------------------------------------- |
+| **Committed file**          | `createCommitOnBranch` returns a commit OID |
+| **Issue created**           | `createIssue` returns an issue number       |
 | **Issue labelled/assigned** | `addLabels` / issue comment with assignment |
-| **Issue comment** | `createIssueComment` returns a comment URL |
-| **Governance event filed** | GovernanceGitHubSync creates a GitHub issue |
+| **Issue comment**           | `createIssueComment` returns a comment URL  |
+| **Governance event filed**  | GovernanceGitHubSync creates a GitHub issue |
 
-The wake summary captures what was produced. The dashboard counts *artifacts*, not *wakes*.
+The wake summary captures what was produced. The dashboard counts _artifacts_, not _wakes_.
 
 #### Circle Meeting (Operational)
 
 A circle meeting is not done when it produces minutes. It's done when:
 
-| Output requirement | How |
-|---|---|
-| **Issues prioritized** | Each discussed issue gets a `priority:*` label |
-| **Top items assigned** | Top 3 issues get assignee labels or comments |
-| **New tasks created** | Action items become new GitHub issues |
-| **Blocked items flagged** | Blocked issues get `blocked` label |
-| **Meeting minutes posted** | GitHub issue with structured decisions |
+| Output requirement         | How                                            |
+| -------------------------- | ---------------------------------------------- |
+| **Issues prioritized**     | Each discussed issue gets a `priority:*` label |
+| **Top items assigned**     | Top 3 issues get assignee labels or comments   |
+| **New tasks created**      | Action items become new GitHub issues          |
+| **Blocked items flagged**  | Blocked issues get `blocked` label             |
+| **Meeting minutes posted** | GitHub issue with structured decisions         |
 
 The circle-wake runner should give the facilitator **write access** to execute these actions — not just produce text describing what should happen.
 
 #### Circle Meeting (Governance)
 
-| Output requirement | How |
-|---|---|
-| **Each item receives positions** | Issue comments from each member |
-| **Tally computed** | Consent/concern/objection counts posted |
-| **State advanced** | Label swap (`state:consent-round` → `state:ratified`) |
-| **Decision record posted** | Closing comment with review date |
-| **Item closed or amended** | Issue closed if ratified, reopened if amended |
+| Output requirement               | How                                                   |
+| -------------------------------- | ----------------------------------------------------- |
+| **Each item receives positions** | Issue comments from each member                       |
+| **Tally computed**               | Consent/concern/objection counts posted               |
+| **State advanced**               | Label swap (`state:consent-round` → `state:ratified`) |
+| **Decision record posted**       | Closing comment with review date                      |
+| **Item closed or amended**       | Issue closed if ratified, reopened if amended         |
 
 #### Source Directive
 
-| Output requirement | How |
-|---|---|
-| **Directive issue created** | GitHub issue with `source-directive` label |
-| **Each targeted agent responds** | Issue comments from agents on their wakes |
-| **Directive resolved** | Issue closed when all targets have responded |
+| Output requirement               | How                                          |
+| -------------------------------- | -------------------------------------------- |
+| **Directive issue created**      | GitHub issue with `source-directive` label   |
+| **Each targeted agent responds** | Issue comments from agents on their wakes    |
+| **Directive resolved**           | Issue closed when all targets have responded |
 
 ### Measuring Real Work
 
 The dashboard tracks **work output**, not **activity count**:
 
-| Metric | What it measures |
-|---|---|
-| **Files committed today** | Agent artifact production |
-| **Issues created/closed** | Work item throughput |
-| **Issues labelled** | Prioritization and triage |
-| **Governance items resolved** | Decision-making velocity |
-| **Content published** | Value delivered to audience |
-| **Cost per artifact** | Efficiency |
+| Metric                        | What it measures            |
+| ----------------------------- | --------------------------- |
+| **Files committed today**     | Agent artifact production   |
+| **Issues created/closed**     | Work item throughput        |
+| **Issues labelled**           | Prioritization and triage   |
+| **Governance items resolved** | Decision-making velocity    |
+| **Content published**         | Value delivered to audience |
+| **Cost per artifact**         | Efficiency                  |
 
 An agent that runs daily but produces no artifacts is not working — it's idling. The dashboard should make this visible.
 
@@ -160,17 +160,17 @@ Every circle meeting contribution (member round + facilitator synthesis) returns
 ```typescript
 interface MeetingAction {
   kind: "label-issue" | "create-issue" | "close-issue" | "comment-issue";
-  issueNumber?: number;       // for label/close/comment
-  label?: string;             // for label-issue (e.g. "priority:high", "assigned:01-research")
-  removeLabel?: string;       // for label-issue (swap, e.g. remove "priority:low")
-  title?: string;             // for create-issue
-  body?: string;              // for create-issue or comment-issue
-  labels?: string[];          // for create-issue
+  issueNumber?: number; // for label/close/comment
+  label?: string; // for label-issue (e.g. "priority:high", "assigned:01-research")
+  removeLabel?: string; // for label-issue (swap, e.g. remove "priority:low")
+  title?: string; // for create-issue
+  body?: string; // for create-issue or comment-issue
+  labels?: string[]; // for create-issue
 }
 
 interface MemberContribution {
-  content: string;            // prose — goes into meeting minutes
-  actions: MeetingAction[];   // work — executed against GitHub by the runner
+  content: string; // prose — goes into meeting minutes
+  actions: MeetingAction[]; // work — executed against GitHub by the runner
 }
 ```
 
@@ -183,11 +183,13 @@ This means a circle meeting that says "we should prioritize issue #42" must emit
 Meetings, directives, and governance rounds frequently produce **action items** — concrete tasks that specific agents, circles, or Source must complete. These are not meeting notes. They are GitHub issues.
 
 Every action item must specify:
+
 - **Who** — an agent ID, circle ID, or "source"
 - **What** — a concrete, verifiable deliverable
 - **By when** — optional deadline (label or milestone)
 
 The runner creates a GitHub issue for each action item with:
+
 - Title: the deliverable
 - Labels: `action-item`, `assigned:<who>`, `circle:<circle>`, optionally `priority:<level>`
 - Body: context from the meeting, link back to the meeting minutes issue
@@ -204,8 +206,8 @@ Individual agent wakes can also return structured actions alongside their digest
 interface WakeAction {
   kind: "create-issue" | "label-issue" | "comment-issue" | "close-issue" | "commit-file";
   // same fields as MeetingAction, plus:
-  filePath?: string;          // for commit-file
-  fileContent?: string;       // for commit-file
+  filePath?: string; // for commit-file
+  fileContent?: string; // for commit-file
 }
 ```
 
@@ -242,7 +244,7 @@ Wake starts:
 
 Wake ends:
   outputs: structured actions executed + artifacts produced
-  
+
 Post-wake validation:
   - Did the agent produce the expected artifact type?
   - Were the structured actions actually executed (not just proposed)?
@@ -255,10 +257,10 @@ The validation hook runs **after** the executor completes and **before** the wak
 ```typescript
 interface WakeValidationResult {
   valid: boolean;
-  artifactCount: number;        // GitHub mutations + commits executed
-  expectedOutputKind: string;   // e.g. "digest", "draft", "label-update"
-  actualOutputKind: string;     // what was actually produced
-  mismatch?: string;            // if valid=false, why
+  artifactCount: number; // GitHub mutations + commits executed
+  expectedOutputKind: string; // e.g. "digest", "draft", "label-update"
+  actualOutputKind: string; // what was actually produced
+  mismatch?: string; // if valid=false, why
 }
 ```
 
@@ -297,14 +299,14 @@ This is the self-correction mechanism that prevents governance theater. Without 
 
 **Key metrics the strategy plugin tracks:**
 
-| Metric | What it reveals |
-|---|---|
-| **Artifact rate** (artifacts/wake) | Is the agent producing value? |
-| **Idle-wake ratio** | How often does the agent run without output? |
-| **Action item completion rate** | Are meetings creating work that gets done? |
-| **Time-to-close on assigned issues** | Is the feedback loop tight or loose? |
-| **Cost per artifact** | Is the agent efficient? |
-| **Downstream consumption** | Does anyone use what this agent produces? |
+| Metric                               | What it reveals                              |
+| ------------------------------------ | -------------------------------------------- |
+| **Artifact rate** (artifacts/wake)   | Is the agent producing value?                |
+| **Idle-wake ratio**                  | How often does the agent run without output? |
+| **Action item completion rate**      | Are meetings creating work that gets done?   |
+| **Time-to-close on assigned issues** | Is the feedback loop tight or loose?         |
+| **Cost per artifact**                | Is the agent efficient?                      |
+| **Downstream consumption**           | Does anyone use what this agent produces?    |
 
 These metrics are not vanity — they are the inputs to retrospectives and governance. An agent with a 90% idle-wake ratio will surface as a tension. A circle that creates action items nobody completes will surface as a tension. The system corrects itself through governance, not through Source micromanagement.
 
@@ -330,12 +332,14 @@ If you can't answer "what should we work on tomorrow?" with a `gh issue list` co
 ## Governance is Pluggable
 
 The active governance plugin provides:
+
 - **Language** — what events are called (tensions, reports, motions)
 - **State machine** — what states exist and valid transitions
 - **Decision protocol** — how decisions are made (consent, approval, vote)
 - **Review cadence** — when decisions expire and need revisiting
 
 The harness provides:
+
 - **Plumbing** — events, state store, GitHub sync, routing
 - **Lifecycle** — creation, transition, persistence, timeout enforcement
 
@@ -363,20 +367,20 @@ Each agent declares the tools, skills, and context sources it needs to do its jo
 ```yaml
 # role.md frontmatter
 tools:
-  cli:              # command-line tools available to the agent
-    - gh            # GitHub CLI
-    - gcloud        # Google Cloud
-  mcp:              # MCP servers the agent can use
-    - notion        # Notion workspace access
-    - slack         # Slack messaging
-    - linear        # Linear project management
-  skills:           # harness-defined capabilities
-    - commit        # can commit files to the repo
-    - label-issue   # can add/remove labels
-    - create-issue  # can create new issues
-  context:          # additional context sources
-    - upstream: ["01-research"]   # reads output from these agents
-    - docs: ["docs/style-guide.md"]  # reference documents
+  cli: # command-line tools available to the agent
+    - gh # GitHub CLI
+    - gcloud # Google Cloud
+  mcp: # MCP servers the agent can use
+    - notion # Notion workspace access
+    - slack # Slack messaging
+    - linear # Linear project management
+  skills: # harness-defined capabilities
+    - commit # can commit files to the repo
+    - label-issue # can add/remove labels
+    - create-issue # can create new issues
+  context: # additional context sources
+    - upstream: ["01-research"] # reads output from these agents
+    - docs: ["docs/style-guide.md"] # reference documents
 ```
 
 **Tooling in the system prompt:** The harness injects the agent's declared tools into its system prompt so the LLM knows what actions are available. An agent without `commit` in its skills won't try to commit files.
@@ -394,6 +398,7 @@ tools:
 The harness currently uses "circle" (S3 terminology) for organizational units. This will be renamed to a governance-neutral term (tracked as harness#50). The concept is generic: a **group of agents that share a domain of work** and can convene for meetings.
 
 Each group has:
+
 - **Members** — agent IDs
 - **Facilitator** — the agent that synthesizes meeting output
 - **Work queue** — GitHub issues labelled for this group
@@ -416,6 +421,7 @@ Groups hold two kinds of meetings, each with distinct triggers and outputs:
 **Purpose:** Change how the circle operates. Process tensions, proposals, and structural decisions through the active governance model.
 
 **Triggers:** Both scheduled and demand-driven:
+
 - **Scheduled** — governance cadence defined in circle config (e.g. weekly). The meeting automatically picks up all tensions and proposals that accumulated since the last governance meeting.
 - **Demand (Source-initiated)** — Source convenes an ad-hoc governance meeting via `murmuration circle-wake --governance` or a directive. Used for urgent structural decisions.
 - **Review-triggered** — ratified decisions with expired review dates surface automatically for re-evaluation.
@@ -427,6 +433,7 @@ Groups hold two kinds of meetings, each with distinct triggers and outputs:
 ### Meeting ↔ Individual Wake Separation
 
 Agents participate in two distinct modes (tracked via `WakeMode`):
+
 - **Meeting mode** (`circle-member` / `circle-facilitator`) — contribute perspective, synthesize, don't execute action items
 - **Individual mode** (`individual`) — execute action items, produce artifacts, do role-specific work
 
@@ -455,11 +462,12 @@ Agents read from GitHub and write to GitHub. The harness routes and tracks.
 Every LLM call and GitHub API call is tracked per-wake via `WakeCostBuilder`. The pricing catalog (`@murmuration/llm/pricing`) resolves tokens to USD micros.
 
 Each agent declares a budget ceiling in `role.md`:
+
 ```yaml
 budget:
-  max_cost_micros: 500000    # 50¢ per wake
+  max_cost_micros: 500000 # 50¢ per wake
   max_github_api_calls: 100
-  on_breach: "abort"         # or "warn"
+  on_breach: "abort" # or "warn"
 ```
 
 The dashboard shows cost per agent, per day, per wake. The strategy plugin (when implemented) correlates cost with artifact production to measure efficiency.

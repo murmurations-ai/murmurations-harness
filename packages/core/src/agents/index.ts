@@ -134,13 +134,12 @@ export class AgentStateStore {
   }
 
   /** Transition an agent to a new state. */
-  public transition(
-    agentId: string,
-    to: AgentLifecycleState,
-    wakeId?: string,
-  ): void {
+  public transition(agentId: string, to: AgentLifecycleState, wakeId?: string): void {
     const agent = this.#agents.get(agentId);
-    if (!agent) throw new Error(`AgentStateStore: unknown agentId "${agentId}" — register before transitioning`);
+    if (!agent)
+      throw new Error(
+        `AgentStateStore: unknown agentId "${agentId}" — register before transitioning`,
+      );
 
     const now = this.#now().toISOString();
     let updates: Partial<AgentRecord> = { currentState: to };
@@ -195,7 +194,11 @@ export class AgentStateStore {
   public recordWakeOutcome(
     wakeId: string,
     outcome: WakeOutcome,
-    options: { errorMessage?: string | undefined; costMicros?: number | undefined; artifactCount?: number | undefined } = {},
+    options: {
+      errorMessage?: string | undefined;
+      costMicros?: number | undefined;
+      artifactCount?: number | undefined;
+    } = {},
   ): void {
     const wake = this.#wakes.get(wakeId);
     if (!wake) return;
@@ -205,9 +208,7 @@ export class AgentStateStore {
     const durationMs = now.getTime() - startedAt.getTime();
 
     const terminalState: AgentLifecycleState =
-      outcome === "success" ? "completed"
-        : outcome === "timeout" ? "timed-out"
-          : "failed";
+      outcome === "success" ? "completed" : outcome === "timeout" ? "timed-out" : "failed";
 
     this.#wakes.set(wakeId, {
       ...wake,
@@ -221,8 +222,7 @@ export class AgentStateStore {
 
     const agent = this.#agents.get(wake.agentId);
     if (agent) {
-      const consecutiveFailures =
-        outcome === "success" ? 0 : agent.consecutiveFailures + 1;
+      const consecutiveFailures = outcome === "success" ? 0 : agent.consecutiveFailures + 1;
       const artifacts = options.artifactCount ?? 0;
       const isIdle = outcome === "success" && artifacts === 0;
       this.#agents.set(wake.agentId, {

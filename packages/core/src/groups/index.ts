@@ -170,10 +170,18 @@ const extractBareJsonArray = (text: string): string | null => {
   for (let i = matches.length - 1; i >= 0; i--) {
     try {
       const parsed: unknown = JSON.parse(matches[i]!);
-      if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === "object" && parsed[0] !== null && "kind" in parsed[0]) {
+      if (
+        Array.isArray(parsed) &&
+        parsed.length > 0 &&
+        typeof parsed[0] === "object" &&
+        parsed[0] !== null &&
+        "kind" in parsed[0]
+      ) {
         return matches[i]!;
       }
-    } catch { /* not valid JSON */ }
+    } catch {
+      /* not valid JSON */
+    }
   }
   return null;
 };
@@ -222,7 +230,6 @@ For items that are fully resolved, also close them:
 For items that need amendments, post a comment with the required changes:
   {"kind": "comment-issue", "issueNumber": NNN, "body": "Amendment required: ..."}`;
 
-
 // ---------------------------------------------------------------------------
 // Group Wake Runner
 // ---------------------------------------------------------------------------
@@ -240,9 +247,15 @@ export interface GovernanceMeetingPrompts {
    *  Should tell the facilitator how to tally and what recommendations to produce. */
   readonly facilitatorInstructions: string;
   /** Parse positions from a member's contribution text. Returns positions for all items. */
-  readonly parsePositions: (content: string, governanceQueue: readonly GovernanceItem[]) => GovernancePosition[];
+  readonly parsePositions: (
+    content: string,
+    governanceQueue: readonly GovernanceItem[],
+  ) => GovernancePosition[];
   /** Tally positions across all members and produce recommendations. */
-  readonly tallyPositions: (positions: readonly GovernancePosition[], governanceQueue: readonly GovernanceItem[]) => GovernanceTally[];
+  readonly tallyPositions: (
+    positions: readonly GovernancePosition[],
+    governanceQueue: readonly GovernanceItem[],
+  ) => GovernanceTally[];
 }
 
 export interface GroupWakeRunnerDeps {
@@ -277,30 +290,40 @@ export const runGroupWake = async (
   let totalInput = 0;
   let totalOutput = 0;
 
-  const groupContext = context.kind === "governance"
-    ? `This is a GOVERNANCE MEETING for the ${context.groupId} group.\n\nGovernance queue (${String(context.governanceQueue.length)} items):\n${context.governanceQueue.map((item) => {
-        const issueNum = context.governanceIssueMap?.get(item.id);
-        const issueRef = issueNum ? ` (GitHub #${String(issueNum)})` : "";
-        return `  - [${item.id.slice(0, 8)}]${issueRef} ${item.kind} | state: ${item.currentState} | ${JSON.stringify(item.payload)}`;
-      }).join("\n") || "  (empty)"}`
-    : `This is an OPERATIONAL MEETING for the ${context.groupId} group.`;
+  const groupContext =
+    context.kind === "governance"
+      ? `This is a GOVERNANCE MEETING for the ${context.groupId} group.\n\nGovernance queue (${String(context.governanceQueue.length)} items):\n${
+          context.governanceQueue
+            .map((item) => {
+              const issueNum = context.governanceIssueMap?.get(item.id);
+              const issueRef = issueNum ? ` (GitHub #${String(issueNum)})` : "";
+              return `  - [${item.id.slice(0, 8)}]${issueRef} ${item.kind} | state: ${item.currentState} | ${JSON.stringify(item.payload)}`;
+            })
+            .join("\n") || "  (empty)"
+        }`
+      : `This is an OPERATIONAL MEETING for the ${context.groupId} group.`;
 
   const directiveSection = context.directiveBody
     ? `\n\nSOURCE DIRECTIVE:\n${context.directiveBody}\n\nRespond to the Source directive as part of your contribution.`
     : "";
 
-  const signalSummary = context.signals.length > 0
-    ? `\n\nRecent signals (${String(context.signals.length)} items):\n${context.signals.slice(0, 10).map((s) => `  - [${s.kind}] ${JSON.stringify(s).slice(0, 100)}`).join("\n")}`
-    : "";
+  const signalSummary =
+    context.signals.length > 0
+      ? `\n\nRecent signals (${String(context.signals.length)} items):\n${context.signals
+          .slice(0, 10)
+          .map((s) => `  - [${s.kind}] ${JSON.stringify(s).slice(0, 100)}`)
+          .join("\n")}`
+      : "";
 
   // Phase 1: Member round
   for (const memberId of context.members) {
     if (signal?.aborted) break;
     if (memberId === context.facilitator) continue; // facilitator speaks last
 
-    const priorContributions = contributions.length > 0
-      ? `\n\nPrior contributions from group members:\n${contributions.map((c) => `### ${c.agentId}\n${c.content}`).join("\n\n")}`
-      : "";
+    const priorContributions =
+      contributions.length > 0
+        ? `\n\nPrior contributions from group members:\n${contributions.map((c) => `### ${c.agentId}\n${c.content}`).join("\n\n")}`
+        : "";
 
     const userPrompt = `${groupContext}${directiveSection}${signalSummary}${priorContributions}
 
@@ -308,9 +331,11 @@ export const runGroupWake = async (
 
 You are ${memberId}, a member of the ${context.groupId} group. Provide your contribution to this ${context.kind} meeting.
 
-${context.kind === "governance"
-        ? (deps.governancePrompts?.memberInstructions ?? DEFAULT_GOV_MEMBER_INSTRUCTIONS)
-        : "Share your perspective on the group.s current priorities, what's working, and what needs attention."}
+${
+  context.kind === "governance"
+    ? (deps.governancePrompts?.memberInstructions ?? DEFAULT_GOV_MEMBER_INSTRUCTIONS)
+    : "Share your perspective on the group.s current priorities, what's working, and what needs attention."
+}
 
 Keep your contribution focused and concise (3-5 paragraphs).`;
 
@@ -333,9 +358,7 @@ Keep your contribution focused and concise (3-5 paragraphs).`;
   }
 
   // Phase 2: Facilitator synthesis
-  const allContributions = contributions
-    .map((c) => `### ${c.agentId}\n${c.content}`)
-    .join("\n\n");
+  const allContributions = contributions.map((c) => `### ${c.agentId}\n${c.content}`).join("\n\n");
 
   const facilitatorPrompt = `${groupContext}${directiveSection}
 
@@ -347,13 +370,15 @@ ${allContributions}
 
 You are ${context.facilitator}, the facilitator of the ${context.groupId} group. Synthesize all member contributions into a meeting summary.
 
-${context.kind === "governance"
+${
+  context.kind === "governance"
     ? (deps.governancePrompts?.facilitatorInstructions ?? DEFAULT_GOV_FACILITATOR_INSTRUCTIONS)
     : `Produce:
 1. KEY DECISIONS — what the group agreed on
 2. ACTION ITEMS — who does what by when (each becomes a GitHub issue)
 3. TENSIONS — any new governance items to file
-4. NEXT MEETING — what to revisit`}
+4. NEXT MEETING — what to revisit`
+}
 
 End with a one-paragraph meeting summary.
 
@@ -390,7 +415,11 @@ Only reference issue numbers from the Open Issues list above. Do not invent issu
   // provided, positions are left empty — the facilitator's prose synthesis
   // is the authoritative output.
   let tallies: GovernanceTally[] = [];
-  if (context.kind === "governance" && context.governanceQueue.length > 0 && deps.governancePrompts) {
+  if (
+    context.kind === "governance" &&
+    context.governanceQueue.length > 0 &&
+    deps.governancePrompts
+  ) {
     const allPositions: GovernancePosition[] = [];
     for (const c of contributions) {
       const parsed = deps.governancePrompts.parsePositions(c.content, context.governanceQueue);
