@@ -153,7 +153,7 @@ export interface ParsedMeetingActions {
   readonly truncated: boolean;
 }
 
-export const parseMeetingActions = (text: string): MeetingAction[] =>
+export const parseMeetingActions = (text: string): readonly MeetingAction[] =>
   parseMeetingActionsWithMeta(text).actions;
 
 /**
