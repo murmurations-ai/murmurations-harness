@@ -231,6 +231,83 @@ The distinction matters: a "successful" wake that produces no artifacts is **not
 
 Over time, the idle-wake ratio per agent tells you which agents are producing value and which are governance theater.
 
+### Post-Wake Validation Hooks
+
+Every agent wake has **defined inputs and expected outputs**. A post-wake validation hook checks whether the agent actually accomplished what it set out to do:
+
+```
+Wake starts:
+  inputs:  signal bundle (issues, directives, inbox messages)
+  intent:  what the agent should produce based on its role + signals
+
+Wake ends:
+  outputs: structured actions executed + artifacts produced
+  
+Post-wake validation:
+  - Did the agent produce the expected artifact type?
+  - Were the structured actions actually executed (not just proposed)?
+  - Did the output change the state of the world?
+  - Was the output relevant to the inputs?
+```
+
+The validation hook runs **after** the executor completes and **before** the wake is recorded as "success." It produces a `WakeValidationResult`:
+
+```typescript
+interface WakeValidationResult {
+  valid: boolean;
+  artifactCount: number;        // GitHub mutations + commits executed
+  expectedOutputKind: string;   // e.g. "digest", "draft", "label-update"
+  actualOutputKind: string;     // what was actually produced
+  mismatch?: string;            // if valid=false, why
+}
+```
+
+A wake that runs, produces tokens, but fails validation is recorded as **"idle"** — not "success." The agent burned budget without producing value.
+
+### Feedback Loop: Metrics → Retrospectives → Governance
+
+The validation results feed into a measurable feedback loop:
+
+```
+┌──────────────────────────────────────────────────────┐
+│                    WORK LOOP                          │
+│                                                       │
+│  Meeting → Action Items (issues) → Agent Wakes →     │
+│  Post-Wake Validation → Metrics                       │
+│                                                       │
+├──────────────────────────────────────────────────────┤
+│                 FEEDBACK LOOP                         │
+│                                                       │
+│  Metrics → Strategy Plugin → Retrospective →          │
+│  Tensions filed → Governance → Structural Change →    │
+│  Better meetings / schedules / roles                  │
+└──────────────────────────────────────────────────────┘
+```
+
+**How it works:**
+
+1. **Metrics accumulate** — per-agent artifact count, idle-wake ratio, cost-per-artifact, action items completed vs created, time-to-close on assigned issues
+2. **Strategy plugin surfaces gaps** — "Agent X has 80% idle wakes this week" or "Circle Y created 12 action items but closed 2"
+3. **Retrospective consumes metrics** — the circle retrospective wake gets concrete data, not just vibes. "What worked" has numbers. "What didn't" has evidence.
+4. **Tensions filed from evidence** — "Research agent produces digests nobody reads" isn't an opinion, it's a metric (0 downstream references). Filed as a governance event.
+5. **Governance processes tensions** — the active governance model handles it (consent round for S3, directive for Chain of Command, vote for Parliamentary)
+6. **Structural changes result** — agent schedule adjusted, role rewritten, circle membership changed, budget reallocated
+
+This is the self-correction mechanism that prevents governance theater. Without it, agents can underperform indefinitely. With it, every underperformance surfaces as a tension that the system must process.
+
+**Key metrics the strategy plugin tracks:**
+
+| Metric | What it reveals |
+|---|---|
+| **Artifact rate** (artifacts/wake) | Is the agent producing value? |
+| **Idle-wake ratio** | How often does the agent run without output? |
+| **Action item completion rate** | Are meetings creating work that gets done? |
+| **Time-to-close on assigned issues** | Is the feedback loop tight or loose? |
+| **Cost per artifact** | Is the agent efficient? |
+| **Downstream consumption** | Does anyone use what this agent produces? |
+
+These metrics are not vanity — they are the inputs to retrospectives and governance. An agent with a 90% idle-wake ratio will surface as a tension. A circle that creates action items nobody completes will surface as a tension. The system corrects itself through governance, not through Source micromanagement.
+
 ### Queryable Work Queue
 
 After a circle meeting executes its actions, the prioritized backlog is **queryable from GitHub**:

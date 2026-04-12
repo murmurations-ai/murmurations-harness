@@ -146,6 +146,16 @@ type:content-idea, type:research-digest, stage:*
 | | After meetings, `gh issue list --label priority:high --label circle:X` returns work | | |
 | | `gh issue list --label action-item --label assigned:01-research` returns agent tasks | | |
 | | Document the query patterns in LABEL-TAXONOMY.md | | |
+| 2.8 | **Post-wake validation hooks** | `packages/core/src/daemon/index.ts`, `packages/core/src/agents/index.ts` | TODO |
+| | Validation hook runs after executor completes, before recording "success" | | |
+| | Checks: did the agent produce artifacts? Were actions executed? | | |
+| | `WakeValidationResult` with artifactCount, expectedOutputKind, valid flag | | |
+| | Idle wakes (valid=false) increment `idleWakes` counter, not `successfulWakes` | | |
+| 2.9 | **Metrics → Retrospective → Governance feedback loop** | Strategy plugin + circle retrospectives | TODO |
+| | Strategy plugin surfaces per-agent metrics (artifact rate, idle-wake ratio, cost/artifact) | | |
+| | Retrospective wake consumes metrics as concrete data (not vibes) | | |
+| | Evidence-based tensions filed → governance processes them → structural changes result | | |
+| | Closes the self-correction loop: underperformance → tension → governance → improvement | | |
 
 **Label conventions for structured actions:**
 ```
