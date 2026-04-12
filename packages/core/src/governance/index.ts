@@ -147,6 +147,17 @@ export interface GovernanceDecisionRecord {
 // ---------------------------------------------------------------------------
 
 /** Filter for querying governance items. All fields are optional (&& logic). */
+/**
+ * Callbacks for syncing governance state to an external system
+ * (GitHub issues, etc.). The GovernanceStateStore fires these
+ * on every create/transition. Implementations must be fire-and-forget
+ * (never throw, never block governance operations).
+ */
+export interface GovernanceSyncCallbacks {
+  onCreate?(item: GovernanceItem): void;
+  onTransition?(item: GovernanceItem, transition: GovernanceStateTransition): void;
+}
+
 export interface GovernanceItemFilter {
   readonly state?: string;
   readonly kind?: string;
@@ -169,11 +180,17 @@ export class GovernanceStateStore {
   readonly #graphs = new Map<string, GovernanceStateGraph>();
   readonly #now: () => Date;
   readonly #persistDir: string | undefined;
+  readonly #onSync: GovernanceSyncCallbacks | undefined;
   #persistPending: Promise<void> | null = null;
 
-  public constructor(options: { readonly now?: () => Date; readonly persistDir?: string } = {}) {
+  public constructor(options: {
+    readonly now?: () => Date;
+    readonly persistDir?: string | undefined;
+    readonly onSync?: GovernanceSyncCallbacks | undefined;
+  } = {}) {
     this.#now = options.now ?? ((): Date => new Date());
     this.#persistDir = options.persistDir;
+    this.#onSync = options.onSync;
   }
 
   /**
@@ -257,6 +274,7 @@ export class GovernanceStateStore {
     };
     this.#items.set(item.id, item);
     this.#persistPending = this.#persist(item);
+    try { this.#onSync?.onCreate?.(item); } catch { /* fire-and-forget */ }
     return item;
   }
 
@@ -308,6 +326,7 @@ export class GovernanceStateStore {
     };
     this.#items.set(itemId, updated);
     void this.#persist(updated);
+    try { this.#onSync?.onTransition?.(updated, transition); } catch { /* fire-and-forget */ }
     return updated;
   }
 
