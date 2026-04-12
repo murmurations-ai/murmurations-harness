@@ -374,6 +374,61 @@ const EVENT_FALLBACK_DELAY_MS = 2000;
  * but the precedence is deterministic and documented here so it
  * can't silently change.
  */
+
+/**
+ * Discover group configs from governance/groups/*.md files.
+ * Parses group name, members, facilitator, and governance cron.
+ */
+const discoverGroupConfigs = async (
+  rootDir: string,
+): Promise<import("@murmuration/core").GroupConfig[]> => {
+  const { readdir, readFile: rf } = await import("node:fs/promises");
+  const groupsDir = resolve(rootDir, "governance", "groups");
+  let entries: string[];
+  try {
+    entries = await readdir(groupsDir);
+  } catch {
+    return [];
+  }
+  const configs: import("@murmuration/core").GroupConfig[] = [];
+  for (const entry of entries.filter((e) => e.endsWith(".md")).sort()) {
+    try {
+      const content = await rf(resolve(groupsDir, entry), "utf8");
+      const groupId = entry.replace(/\.md$/, "");
+
+      // Extract members from "- agent-id" lines under "## Members"
+      const membersMatch = /## Members\n([\s\S]*?)(?=\n##|\n---|\n$)/i.exec(content);
+      const members: string[] = [];
+      if (membersMatch?.[1]) {
+        for (const line of membersMatch[1].split("\n")) {
+          const m = /^\s*-\s*(.+)/.exec(line);
+          if (m?.[1]) members.push(m[1].trim());
+        }
+      }
+
+      const facMatch = /facilitator:\s*"?([^"\n]+)"?/i.exec(content);
+      const facilitator = facMatch?.[1]?.trim() ?? members[0] ?? groupId;
+
+      const nameMatch = /^#\s+(.+)/m.exec(content);
+      const name = nameMatch?.[1]?.trim() ?? groupId;
+
+      const govCronMatch = /governance_cron:\s*"?([^"\n]+)"?/i.exec(content);
+      const governanceCron = govCronMatch?.[1]?.trim();
+
+      configs.push({
+        groupId,
+        name,
+        members,
+        facilitator,
+        ...(governanceCron ? { governanceCron } : {}),
+      });
+    } catch {
+      // skip unparseable group files
+    }
+  }
+  return configs;
+};
+
 const triggerFromFrontmatter = (
   wakeSchedule: {
     readonly cron?: string | undefined;
@@ -940,6 +995,31 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     return receipts;
   };
 
+  // Discover group configs for governance meeting scheduling
+  const groupConfigs = await discoverGroupConfigs(exampleRoot);
+
+  // Build onGovernanceMeetingDue callback — invokes group-wake runner
+  const onGovernanceMeetingDue: DaemonConfig["onGovernanceMeetingDue"] = async (
+    groupId,
+    _pendingItems,
+  ) => {
+    process.stdout.write(
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "daemon.governance.meeting.invoking",
+        groupId,
+        pendingItems: _pendingItems.length,
+      })}\n`,
+    );
+    // Dynamic import to avoid circular dependency with group-wake
+    const { runGroupWakeCommand } = await import("./group-wake.js");
+    await runGroupWakeCommand(
+      ["--group", groupId, "--governance", "--root", exampleRoot],
+      exampleRoot,
+    );
+  };
+
   const needsRebuild = effectiveExecutor !== provisionalExecutor || githubClient !== undefined;
   const effectiveDaemon: Daemon = needsRebuild
     ? new Daemon({
@@ -961,6 +1041,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
           persistDir: resolve(exampleRoot, ".murmuration", "agents"),
         }),
         onWakeActions,
+        ...(groupConfigs.length > 0 ? { groups: groupConfigs, onGovernanceMeetingDue } : {}),
       })
     : firstPassDaemon;
 
