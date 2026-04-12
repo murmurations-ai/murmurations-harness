@@ -27,6 +27,50 @@ import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
 const GEMINI_KEY = makeSecretKey("GEMINI_API_KEY");
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
+/** Find the GitHub repo from the first available agent's role.md github_scopes. */
+const findRepoFromAgents = async (rootDir: string, memberIds: readonly string[]): Promise<{ owner: string; repo: string } | null> => {
+  const { readFile: rf } = await import("node:fs/promises");
+  for (const memberId of memberIds) {
+    try {
+      const content = await rf(join(rootDir, "agents", memberId, "role.md"), "utf8");
+      // Match the YAML github_scopes pattern: owner: "xxx" / repo: "yyy"
+      const ownerMatch = /owner:\s*"([^"]+)"/.exec(content);
+      const repoMatch = /repo:\s*"([^"]+)"/.exec(content);
+      if (ownerMatch?.[1] && repoMatch?.[1]) {
+        return { owner: ownerMatch[1], repo: repoMatch[1] };
+      }
+    } catch { /* skip */ }
+  }
+  return null;
+};
+
+/** Fetch the circle's GitHub issues backlog (by label). */
+const fetchCircleBacklog = async (
+  rootDir: string,
+  _circleId: string,
+  repoInfo: { owner: string; repo: string },
+): Promise<string> => {
+  try {
+    const envPath = join(rootDir, ".env");
+    if (!existsSync(envPath)) return "(no .env — cannot fetch backlog)";
+    const { DotenvSecretsProvider } = await import("@murmuration/secrets-dotenv");
+    const provider = new DotenvSecretsProvider({ envPath });
+    await provider.load({ required: [makeSecretKey("GITHUB_TOKEN")], optional: [] });
+    const { createGithubClient, makeRepoCoordinate } = await import("@murmuration/github");
+    const gh = createGithubClient({ token: provider.get(makeSecretKey("GITHUB_TOKEN")) });
+    const repo = makeRepoCoordinate(repoInfo.owner, repoInfo.repo);
+    const result = await gh.listIssues(repo, { state: "open", perPage: 30 });
+    if (!result.ok) return `(backlog fetch failed: ${result.error.code})`;
+    const issues = result.value;
+    if (issues.length === 0) return "(no open issues)";
+    return issues
+      .map((i) => `- #${String(i.number.value)} ${i.title} [${i.labels.join(", ")}]`)
+      .join("\n");
+  } catch (err) {
+    return `(backlog fetch error: ${err instanceof Error ? err.message : String(err)})`;
+  }
+};
+
 /** Parse a simple circle config from a circle doc's content. */
 const parseCircleConfig = (circleId: string, content: string): CircleConfig => {
   // Extract members from "- agent-id" lines under "## Members"
@@ -114,15 +158,29 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
     governanceQueue.push(...pending.filter((i) => !["resolved", "ratified", "rejected", "withdrawn", "completed"].includes(i.currentState)));
   }
 
+  // Fetch the circle's GitHub issues backlog for context
+  const repoInfo = await findRepoFromAgents(root, config.members);
+  let backlogContext = "";
+  if (repoInfo) {
+    console.log(`  Fetching backlog from ${repoInfo.owner}/${repoInfo.repo}...`);
+    backlogContext = await fetchCircleBacklog(root, circleId!, repoInfo);
+  }
+
+  // Build the effective directive with backlog context
+  const effectiveDirective = [
+    directiveBody ?? "",
+    backlogContext ? `\n\n## Open Issues (${repoInfo?.owner}/${repoInfo?.repo})\n\n${backlogContext}` : "",
+  ].filter(Boolean).join("") || undefined;
+
   // Build context
   const context: CircleWakeContext = {
-    circleId,
+    circleId: circleId!,
     kind,
     members: config.members,
     facilitator: config.facilitator,
     signals: [],
     governanceQueue,
-    ...(directiveBody ? { directiveBody } : {}),
+    ...(effectiveDirective ? { directiveBody: effectiveDirective } : {}),
   };
 
   // Run the circle wake
@@ -205,18 +263,8 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
   ].join("\n");
 
   const meetingLabel = kind === "governance" ? "governance-meeting" : "circle-meeting";
-  // Derive repo from first member's role.md signal scopes
-  let repoOwner = "unknown";
-  let repoName = "unknown";
-  try {
-    const { readFile: rf } = await import("node:fs/promises");
-    const firstMember = config.members[0] ?? "";
-    const roleContent = await rf(join(root, "agents", firstMember, "role.md"), "utf8");
-    const ownerMatch = /owner:\s*"?([^"\n]+)"?/.exec(roleContent);
-    const repoMatch = /repo:\s*"?([^"\n]+)"?/.exec(roleContent);
-    if (ownerMatch?.[1]) repoOwner = ownerMatch[1].trim();
-    if (repoMatch?.[1]) repoName = repoMatch[1].trim();
-  } catch { /* fallback to unknown */ }
+  const repoOwner = repoInfo?.owner ?? "unknown";
+  const repoName = repoInfo?.repo ?? "unknown";
 
   try {
     if (!secretsProvider?.has(GITHUB_TOKEN)) throw new Error("no GITHUB_TOKEN");
