@@ -217,12 +217,22 @@ export class GovernanceStateStore {
           reviewAt: string | null;
           history: (GovernanceStateTransition & { at: string })[];
         };
-        // Rehydrate dates from ISO strings.
+        // Rehydrate dates from ISO strings with validation.
+        const createdAt = new Date(raw.createdAt as unknown as string);
+        const reviewAt = raw.reviewAt ? new Date(raw.reviewAt) : null;
+        if (Number.isNaN(createdAt.getTime())) {
+          console.warn(`governance: skipping item "${raw.id}" — invalid createdAt`);
+          continue;
+        }
+        if (reviewAt && Number.isNaN(reviewAt.getTime())) {
+          console.warn(`governance: skipping item "${raw.id}" — invalid reviewAt`);
+          continue;
+        }
         const item: GovernanceItem = {
           ...raw,
           createdBy: { kind: "agent-id", value: raw.createdBy.value } as AgentId,
-          createdAt: new Date(raw.createdAt as unknown as string),
-          reviewAt: raw.reviewAt ? new Date(raw.reviewAt) : null,
+          createdAt,
+          reviewAt,
           history: raw.history.map((h) => ({
             ...h,
             at: new Date(h.at as unknown as string),

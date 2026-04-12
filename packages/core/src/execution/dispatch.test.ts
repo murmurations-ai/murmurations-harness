@@ -138,6 +138,29 @@ describe("DispatchExecutor", () => {
     await expect(dispatch.spawn(makeContext("unknown"))).rejects.toThrow(/no executor registered/);
   });
 
+  it("kill delegates to the correct inner executor", async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await
+    const runner: AgentRunner<FakeClients> = async () => ({ wakeSummary: "ok" });
+    const executor: AgentExecutor = new InProcessExecutor<FakeClients>({
+      resolveRunner: () => runner,
+      resolveClients: () => ({ tag: "a" }),
+      instanceId: "exec-kill-test",
+    });
+    const dispatch = new DispatchExecutor(new Map([["agent-a", executor]]));
+    const handle = await dispatch.spawn(makeContext("agent-a"));
+    // kill should not throw for a valid handle
+    await expect(dispatch.kill(handle, "test")).resolves.toBeUndefined();
+  });
+
+  it("kill silently succeeds for unknown handle (idempotent)", async () => {
+    const dispatch = new DispatchExecutor(new Map());
+    const fakeHandle = {
+      __executor: "nonexistent",
+      wakeId: makeWakeId("22222222-2222-2222-2222-222222222222"),
+    };
+    await expect(dispatch.kill(fakeHandle, "cleanup")).resolves.toBeUndefined();
+  });
+
   it("capabilities reports dispatch + merged flags", () => {
     const executorA: AgentExecutor = new InProcessExecutor<FakeClients>({
       // eslint-disable-next-line @typescript-eslint/require-await

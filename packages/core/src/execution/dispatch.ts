@@ -71,7 +71,15 @@ export class DispatchExecutor implements AgentExecutor {
   public async kill(handle: AgentSpawnHandle, reason: string): Promise<void> {
     for (const executor of this.#executors.values()) {
       if (executor.capabilities().id === handle.__executor) {
-        return executor.kill(handle, reason);
+        try {
+          return await executor.kill(handle, reason);
+        } catch (err) {
+          if (err instanceof HandleUnknownError) throw err;
+          throw new HandleUnknownError(
+            `dispatch: kill failed for handle.__executor "${handle.__executor}": ${err instanceof Error ? err.message : String(err)}`,
+            { wakeId: handle.wakeId },
+          );
+        }
       }
     }
     // Already finished or unknown — idempotent per the interface contract.

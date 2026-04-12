@@ -12,6 +12,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { resolve, dirname } from "node:path";
 import { formatUSDMicros } from "../cost/usd.js";
 import { RunArtifactWriter, DispatchRunArtifactWriter } from "./runs.js";
 import { AgentStateStore } from "../agents/index.js";
@@ -278,16 +279,13 @@ export const registeredAgentFromLoadedIdentity = (
  * Kept inline to avoid a new helper file for a one-line operation.
  */
 const resolveRolePath = (rolePath: string, ref: string): string => {
-  // Use the dirname of the role.md file as the base.
-  const dir = rolePath.substring(0, Math.max(rolePath.lastIndexOf("/"), 0));
-  if (ref.startsWith("/")) return ref;
-  if (ref.startsWith("./") || ref.startsWith("../")) {
-    // Simple relative resolution without importing node:path — good enough
-    // for the hello-world case and Research Agent #1.
-    const cleaned = ref.replace(/^\.\//, "");
-    return `${dir}/${cleaned}`;
+  const dir = dirname(rolePath);
+  const resolved = resolve(dir, ref);
+  // Prevent path traversal outside the agent directory.
+  if (!resolved.startsWith(dir)) {
+    throw new Error(`resolveRolePath: ref "${ref}" escapes agent directory "${dir}"`);
   }
-  return `${dir}/${ref}`;
+  return resolved;
 };
 
 // ---------------------------------------------------------------------------
