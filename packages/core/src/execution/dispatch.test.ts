@@ -155,8 +155,11 @@ describe("DispatchExecutor", () => {
   it("kill silently succeeds for unknown handle (idempotent)", async () => {
     const dispatch = new DispatchExecutor(new Map());
     const fakeHandle = {
+      kind: "agent-spawn-handle" as const,
       __executor: "nonexistent",
       wakeId: makeWakeId("22222222-2222-2222-2222-222222222222"),
+      agentId: makeAgentId("ghost"),
+      startedAt: new Date(),
     };
     await expect(dispatch.kill(fakeHandle, "cleanup")).resolves.toBeUndefined();
   });

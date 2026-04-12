@@ -48,9 +48,38 @@ export interface CircleWakeContext {
   readonly directiveBody?: string; // if a Source directive triggered this
 }
 
+// ---------------------------------------------------------------------------
+// Structured actions — the harness executes these against GitHub
+// ---------------------------------------------------------------------------
+
+/** An action that changes GitHub state. Returned by LLM, executed by the runner. */
+export interface MeetingAction {
+  readonly kind: "label-issue" | "create-issue" | "close-issue" | "comment-issue";
+  readonly issueNumber?: number;
+  readonly label?: string;
+  readonly removeLabel?: string;
+  readonly title?: string;
+  readonly body?: string;
+  readonly labels?: readonly string[];
+}
+
+/** Result of executing a single MeetingAction against GitHub. */
+export interface ActionReceipt {
+  readonly action: MeetingAction;
+  readonly success: boolean;
+  readonly error?: string;
+  /** For create-issue: the new issue number. */
+  readonly issueNumber?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Member contributions
+// ---------------------------------------------------------------------------
+
 export interface MemberContribution {
   readonly agentId: string;
   readonly content: string;
+  readonly actions: readonly MeetingAction[];
   readonly inputTokens: number;
   readonly outputTokens: number;
 }
@@ -80,12 +109,78 @@ export interface CircleWakeResult {
   readonly kind: CircleWakeKind;
   readonly contributions: readonly MemberContribution[];
   readonly synthesis: string;
+  /** Structured actions from the facilitator synthesis. */
+  readonly actions: readonly MeetingAction[];
+  /** Execution receipts — one per action attempted. */
+  readonly receipts: readonly ActionReceipt[];
   readonly totalInputTokens: number;
   readonly totalOutputTokens: number;
   readonly governanceEvents: readonly { kind: string; payload: unknown }[];
   /** Consent round tallies, one per governance item (governance meetings only). */
   readonly tallies: readonly ConsentTally[];
 }
+
+// ---------------------------------------------------------------------------
+// Action parsing — extract structured actions from LLM output
+// ---------------------------------------------------------------------------
+
+const VALID_ACTION_KINDS = new Set(["label-issue", "create-issue", "close-issue", "comment-issue"]);
+
+/**
+ * Parse structured actions from LLM output. Looks for a JSON array
+ * in a ```actions or ```json fenced block, or a bare JSON array.
+ * Returns empty array if no valid actions found (never throws).
+ */
+export const parseMeetingActions = (text: string): MeetingAction[] => {
+  // Try fenced code block first: ```actions\n[...]\n``` or ```json\n[...]\n```
+  const fencedMatch = /```(?:actions|json)\s*\n(\[[\s\S]*?\])\s*\n```/.exec(text);
+  const jsonStr = fencedMatch?.[1] ?? extractBareJsonArray(text);
+  if (!jsonStr) return [];
+
+  try {
+    const parsed: unknown = JSON.parse(jsonStr);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isValidMeetingAction);
+  } catch {
+    return [];
+  }
+};
+
+/** Try to extract a bare JSON array from the text (last [...] block). */
+const extractBareJsonArray = (text: string): string | null => {
+  // Find the last [...] block that looks like JSON
+  const matches = text.match(/\[[\s\S]*?\]/g);
+  if (!matches) return null;
+  // Try from last to first (facilitator's action block is usually at the end)
+  for (let i = matches.length - 1; i >= 0; i--) {
+    try {
+      const parsed: unknown = JSON.parse(matches[i]!);
+      if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === "object" && parsed[0] !== null && "kind" in parsed[0]) {
+        return matches[i]!;
+      }
+    } catch { /* not valid JSON */ }
+  }
+  return null;
+};
+
+const isValidMeetingAction = (item: unknown): item is MeetingAction => {
+  if (typeof item !== "object" || item === null) return false;
+  const obj = item as Record<string, unknown>;
+  if (typeof obj.kind !== "string" || !VALID_ACTION_KINDS.has(obj.kind)) return false;
+  // Validate required fields per kind
+  switch (obj.kind) {
+    case "label-issue":
+      return typeof obj.issueNumber === "number" && typeof obj.label === "string";
+    case "create-issue":
+      return typeof obj.title === "string";
+    case "close-issue":
+      return typeof obj.issueNumber === "number";
+    case "comment-issue":
+      return typeof obj.issueNumber === "number" && typeof obj.body === "string";
+    default:
+      return false;
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Circle Wake Runner
@@ -172,6 +267,7 @@ Keep your contribution focused and concise (3-5 paragraphs).`;
     contributions.push({
       agentId: memberId,
       content: response.content,
+      actions: parseMeetingActions(response.content),
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
     });
@@ -202,11 +298,29 @@ ${context.kind === "governance"
 - Produce a clear decision recommendation for each item`
     : `Produce:
 1. KEY DECISIONS — what the circle agreed on
-2. ACTION ITEMS — who does what by when
+2. ACTION ITEMS — who does what by when (each becomes a GitHub issue)
 3. TENSIONS — any new tensions to file for governance
 4. NEXT MEETING — what to revisit`}
 
-End with a one-paragraph meeting summary.`;
+End with a one-paragraph meeting summary.
+
+IMPORTANT: After your prose summary, you MUST include a structured actions block. This block will be executed against GitHub to make the meeting decisions real. Output a fenced JSON array like this:
+
+\`\`\`actions
+[
+  {"kind": "label-issue", "issueNumber": 42, "label": "priority:high"},
+  {"kind": "label-issue", "issueNumber": 42, "label": "assigned:01-research"},
+  {"kind": "create-issue", "title": "Action item: ...", "body": "Context from meeting...", "labels": ["action-item", "assigned:02-content-production", "circle:${context.circleId}"]},
+  {"kind": "comment-issue", "issueNumber": 42, "body": "Meeting decision: ..."},
+  {"kind": "close-issue", "issueNumber": 99}
+]
+\`\`\`
+
+Action kinds: "label-issue" (add a label), "create-issue" (new issue with title+body+labels), "comment-issue" (post a comment), "close-issue".
+For prioritization, use labels: priority:critical, priority:high, priority:medium, priority:low.
+For assignments, use labels: assigned:<agent-id> (e.g. assigned:01-research).
+Each action item MUST become a create-issue action with an "action-item" label and an "assigned:<who>" label.
+Only reference issue numbers from the Open Issues list above. Do not invent issue numbers.`;
 
   const synthesis = await deps.callLLM({
     systemPrompt: `You are ${context.facilitator}, facilitator of the ${context.circleId} circle. You synthesize member contributions into clear meeting outcomes.`,
@@ -259,11 +373,16 @@ End with a one-paragraph meeting summary.`;
     }
   }
 
+  // Parse structured actions from the facilitator's synthesis
+  const actions = parseMeetingActions(synthesis.content);
+
   return {
     circleId: context.circleId,
     kind: context.kind,
     contributions,
     synthesis: synthesis.content,
+    actions,
+    receipts: [], // populated by the caller after executing actions
     totalInputTokens: totalInput,
     totalOutputTokens: totalOutput,
     governanceEvents: [],
