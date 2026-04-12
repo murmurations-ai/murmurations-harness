@@ -115,6 +115,22 @@ describe("scrubLogRecord", () => {
     expect(JSON.stringify(out)).not.toContain("shouldNeverAppear");
   });
 
+  it("scrubs sensitive fields in nested objects", () => {
+    const out = scrubLogRecord({
+      agentId: "01-research",
+      payload: {
+        apiKey: "supersecretvalue12345",
+        nested: { password: "hunter2hunter2" },
+        safe: "visible",
+      },
+    });
+    const payload = out.payload as Record<string, unknown>;
+    expect(payload.apiKey).toBe("[REDACTED:scrubbed-by-name]");
+    expect(payload.safe).toBe("visible");
+    const nested = payload.nested as Record<string, unknown>;
+    expect(nested.password).toBe("[REDACTED:scrubbed-by-name]");
+  });
+
   it("SecretValue objects passed as fields already serialize to redacted form", () => {
     const secret = makeSecretValue("rawbytes-12345");
     const out = scrubLogRecord({ token: secret });

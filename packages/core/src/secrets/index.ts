@@ -257,19 +257,24 @@ export const SCRUB_MIN_LENGTH = 8;
  *     via `toJSON`, so the scrubber need not special-case it.
  */
 export const scrubLogRecord = (data: Record<string, unknown>): Record<string, unknown> => {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (
-      typeof value === "string" &&
-      SENSITIVE_FIELD_NAME_RE.test(key) &&
-      value.length >= SCRUB_MIN_LENGTH
-    ) {
-      out[key] = "[REDACTED:scrubbed-by-name]";
-      continue;
+  const scrub = (obj: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (
+        typeof value === "string" &&
+        SENSITIVE_FIELD_NAME_RE.test(key) &&
+        value.length >= SCRUB_MIN_LENGTH
+      ) {
+        out[key] = "[REDACTED:scrubbed-by-name]";
+        continue;
+      }
+      if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+        out[key] = scrub(value as Record<string, unknown>);
+        continue;
+      }
+      out[key] = value;
     }
-    out[key] = value;
-  }
-  // The REDACT symbol bucket is dropped entirely — it never appears
-  // in the output record.
-  return out;
+    return out;
+  };
+  return scrub(data);
 };

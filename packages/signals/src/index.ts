@@ -269,15 +269,18 @@ export class DefaultSignalAggregator implements SignalAggregator {
 // Helpers
 // ---------------------------------------------------------------------------
 
+const TITLE_MAX_CHARS = 200;
+const LABEL_MAX_CHARS = 100;
+
 const issueToSignal = (issue: GithubIssue, trust: SignalTrustLevel, fetchedAt: Date): Signal => ({
   kind: "github-issue",
   id: `github-issue:${issue.repo.owner.value}/${issue.repo.name.value}#${String(issue.number.value)}`,
   trust,
   fetchedAt,
   number: issue.number.value,
-  title: issue.title,
+  title: sanitizeText(issue.title, TITLE_MAX_CHARS),
   url: issue.htmlUrl,
-  labels: issue.labels,
+  labels: issue.labels.map((l) => sanitizeText(l, LABEL_MAX_CHARS)),
   excerpt: sanitizeText(issue.body ?? "", EXCERPT_MAX_CHARS),
 });
 

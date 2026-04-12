@@ -609,7 +609,10 @@ const buildChildEnv = (input: BuildChildEnvInput): Record<string, string> => {
   env.MURMURATION_SPAWN_CONTEXT = serializeContext(context);
 
   // (5) Per-wake overrides from the spawn context.
+  // Block environment variables that can hijack the child process.
+  const BLOCKED_ENV_RE = /^(LD_|DYLD_|NODE_OPTIONS$|NODE_REPL_HISTORY$)/i;
   for (const [key, value] of Object.entries(context.environment)) {
+    if (BLOCKED_ENV_RE.test(key)) continue;
     env[key] = value;
   }
 
