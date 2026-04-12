@@ -234,6 +234,30 @@ export interface GithubClient {
     options?: CallOptions,
   ): Promise<Result<GithubCreatedCommit, GithubClientError>>;
 
+  /** Add labels to an issue. */
+  addLabels(
+    repo: RepoCoordinate,
+    issueNumber: IssueNumber,
+    labels: readonly string[],
+    options?: CallOptions,
+  ): Promise<Result<readonly string[], GithubClientError>>;
+
+  /** Remove a label from an issue. */
+  removeLabel(
+    repo: RepoCoordinate,
+    issueNumber: IssueNumber,
+    label: string,
+    options?: CallOptions,
+  ): Promise<Result<void, GithubClientError>>;
+
+  /** Update an issue's state (open/closed). */
+  updateIssueState(
+    repo: RepoCoordinate,
+    issueNumber: IssueNumber,
+    state: "open" | "closed",
+    options?: CallOptions,
+  ): Promise<Result<void, GithubClientError>>;
+
   lastRateLimit(): GithubRateLimitSnapshot | null;
 }
 
@@ -438,6 +462,56 @@ class GithubClientImpl implements GithubClient {
     return parseCreatedIssue(raw.value.body, repo);
   }
 
+  public async addLabels(
+    repo: RepoCoordinate,
+    issueNumber: IssueNumber,
+    labels: readonly string[],
+    options: CallOptions = {},
+  ): Promise<Result<readonly string[], GithubClientError>> {
+    const repoKey = repoKeyOf(repo);
+    const denial = this.#checkWriteScope("label", repoKey, null, options);
+    if (denial) return denial;
+
+    const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/issues/${String(issueNumber.value)}/labels`;
+    const raw = await this.#requestMutation(url, "POST", { labels: [...labels] }, options);
+    if (!raw.ok) return raw;
+    const body = raw.value.body as unknown;
+    if (!Array.isArray(body)) return { ok: true, value: [] };
+    return { ok: true, value: (body as Array<{ name?: string }>).map((l) => l.name ?? "").filter(Boolean) };
+  }
+
+  public async removeLabel(
+    repo: RepoCoordinate,
+    issueNumber: IssueNumber,
+    label: string,
+    options: CallOptions = {},
+  ): Promise<Result<void, GithubClientError>> {
+    const repoKey = repoKeyOf(repo);
+    const denial = this.#checkWriteScope("label", repoKey, null, options);
+    if (denial) return denial;
+
+    const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/issues/${String(issueNumber.value)}/labels/${encodeURIComponent(label)}`;
+    const raw = await this.#requestMutation(url, "DELETE", undefined, options);
+    if (!raw.ok) return raw;
+    return { ok: true, value: undefined };
+  }
+
+  public async updateIssueState(
+    repo: RepoCoordinate,
+    issueNumber: IssueNumber,
+    state: "open" | "closed",
+    options: CallOptions = {},
+  ): Promise<Result<void, GithubClientError>> {
+    const repoKey = repoKeyOf(repo);
+    const denial = this.#checkWriteScope("issue", repoKey, null, options);
+    if (denial) return denial;
+
+    const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/issues/${String(issueNumber.value)}`;
+    const raw = await this.#requestMutation(url, "PATCH", { state }, options);
+    if (!raw.ok) return raw;
+    return { ok: true, value: undefined };
+  }
+
   public async createCommitOnBranch(
     repo: RepoCoordinate,
     branch: string,
@@ -595,8 +669,8 @@ class GithubClientImpl implements GithubClient {
 
   async #requestMutation(
     url: string,
-    method: "POST",
-    body: Record<string, unknown>,
+    method: "POST" | "PATCH" | "DELETE",
+    body: Record<string, unknown> | undefined,
     options: CallOptions,
   ): Promise<Result<RawResponse, GithubClientError>> {
     const costHook = options.costHook ?? this.#defaultCostHook;
@@ -617,7 +691,7 @@ class GithubClientImpl implements GithubClient {
       res = await this.#fetch(url, {
         method,
         headers: this.#buildMutationHeaders(),
-        body: JSON.stringify(body),
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
       });
     } catch (cause) {

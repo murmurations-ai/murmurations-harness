@@ -86,6 +86,9 @@ const makeFakeGithub = (issues: readonly GithubIssue[]): GithubClient => ({
   createIssueComment: mutationDenied,
   createIssue: mutationDenied,
   createCommitOnBranch: mutationDenied,
+  addLabels: mutationDenied,
+  removeLabel: mutationDenied,
+  updateIssueState: mutationDenied,
   lastRateLimit: () => null,
 });
 
@@ -109,6 +112,9 @@ const makeFailingGithub = (): GithubClient => ({
   createIssueComment: mutationDenied,
   createIssue: mutationDenied,
   createCommitOnBranch: mutationDenied,
+  addLabels: mutationDenied,
+  removeLabel: mutationDenied,
+  updateIssueState: mutationDenied,
   lastRateLimit: () => null,
 });
 /* eslint-enable @typescript-eslint/require-await */

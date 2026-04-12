@@ -20,8 +20,17 @@ import {
   type CircleWakeContext,
   type CircleWakeKind,
   type GovernanceItem,
+  type MeetingAction,
+  type ActionReceipt,
   GovernanceStateStore,
 } from "@murmuration/core";
+import {
+  createGithubClient,
+  makeRepoCoordinate,
+  makeIssueNumber,
+  type GithubClient,
+  type RepoCoordinate,
+} from "@murmuration/github";
 import { createLLMClient, type LLMClient } from "@murmuration/llm";
 import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
 
@@ -124,6 +133,93 @@ const parseCircleConfig = (circleId: string, content: string): CircleConfig => {
   const name = nameMatch?.[1]?.trim() ?? circleId;
 
   return { circleId, name, members, facilitator };
+};
+
+// ---------------------------------------------------------------------------
+// Action executor — turns structured actions into GitHub state changes
+// ---------------------------------------------------------------------------
+
+const executeActions = async (
+  actions: readonly MeetingAction[],
+  gh: GithubClient,
+  repo: RepoCoordinate,
+): Promise<ActionReceipt[]> => {
+  const receipts: ActionReceipt[] = [];
+
+  for (const action of actions) {
+    try {
+      switch (action.kind) {
+        case "label-issue": {
+          if (!action.issueNumber || !action.label) {
+            receipts.push({ action, success: false, error: "missing issueNumber or label" });
+            break;
+          }
+          const result = await gh.addLabels(repo, makeIssueNumber(action.issueNumber), [action.label]);
+          if (result.ok) {
+            console.log(`    \x1b[32m✓\x1b[0m label-issue #${String(action.issueNumber)} +${action.label}`);
+            receipts.push({ action, success: true });
+          } else {
+            console.log(`    \x1b[31m✗\x1b[0m label-issue #${String(action.issueNumber)}: ${result.error.code}`);
+            receipts.push({ action, success: false, error: result.error.code });
+          }
+          break;
+        }
+        case "create-issue": {
+          if (!action.title) {
+            receipts.push({ action, success: false, error: "missing title" });
+            break;
+          }
+          const issueInput: Record<string, unknown> = { title: action.title };
+          if (action.body) issueInput.body = action.body;
+          if (action.labels && action.labels.length > 0) issueInput.labels = [...action.labels];
+          const result = await gh.createIssue(repo, issueInput as { title: string; body?: string; labels?: string[] });
+          if (result.ok) {
+            const num = result.value.number.value;
+            console.log(`    \x1b[32m✓\x1b[0m create-issue #${String(num)}: ${action.title}`);
+            receipts.push({ action, success: true, issueNumber: num });
+          } else {
+            console.log(`    \x1b[31m✗\x1b[0m create-issue: ${result.error.code}`);
+            receipts.push({ action, success: false, error: result.error.code });
+          }
+          break;
+        }
+        case "close-issue": {
+          if (!action.issueNumber) {
+            receipts.push({ action, success: false, error: "missing issueNumber" });
+            break;
+          }
+          const result = await gh.updateIssueState(repo, makeIssueNumber(action.issueNumber), "closed");
+          if (result.ok) {
+            console.log(`    \x1b[32m✓\x1b[0m close-issue #${String(action.issueNumber)}`);
+            receipts.push({ action, success: true });
+          } else {
+            console.log(`    \x1b[31m✗\x1b[0m close-issue #${String(action.issueNumber)}: ${result.error.code}`);
+            receipts.push({ action, success: false, error: result.error.code });
+          }
+          break;
+        }
+        case "comment-issue": {
+          if (!action.issueNumber || !action.body) {
+            receipts.push({ action, success: false, error: "missing issueNumber or body" });
+            break;
+          }
+          const result = await gh.createIssueComment(repo, makeIssueNumber(action.issueNumber), { body: action.body });
+          if (result.ok) {
+            console.log(`    \x1b[32m✓\x1b[0m comment-issue #${String(action.issueNumber)}`);
+            receipts.push({ action, success: true });
+          } else {
+            console.log(`    \x1b[31m✗\x1b[0m comment-issue #${String(action.issueNumber)}: ${result.error.code}`);
+            receipts.push({ action, success: false, error: result.error.code });
+          }
+          break;
+        }
+      }
+    } catch (err) {
+      receipts.push({ action, success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return receipts;
 };
 
 export const runCircleWakeCommand = async (args: readonly string[], rootDir: string): Promise<void> => {
@@ -271,6 +367,28 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
   console.log(result.synthesis);
   console.log("");
 
+  // Execute structured actions from the facilitator
+  let receipts: ActionReceipt[] = [];
+  if (result.actions.length > 0 && repoInfo && secretsProvider?.has(GITHUB_TOKEN)) {
+    console.log(`\n--- Executing ${String(result.actions.length)} action(s) ---\n`);
+    const actionGh = createGithubClient({
+      token: secretsProvider.get(GITHUB_TOKEN),
+      writeScopes: {
+        issueComments: [`${repoInfo.owner}/${repoInfo.repo}`],
+        branchCommits: [],
+        labels: [`${repoInfo.owner}/${repoInfo.repo}`],
+        issues: [`${repoInfo.owner}/${repoInfo.repo}`],
+      },
+    });
+    const actionRepo = makeRepoCoordinate(repoInfo.owner, repoInfo.repo);
+    receipts = await executeActions(result.actions, actionGh, actionRepo);
+    const succeeded = receipts.filter((r) => r.success).length;
+    const failed = receipts.filter((r) => !r.success).length;
+    console.log(`\n  ${String(succeeded)} succeeded, ${String(failed)} failed`);
+  } else if (result.actions.length > 0) {
+    console.log(`\n--- ${String(result.actions.length)} action(s) proposed but no GitHub access — skipped ---`);
+  }
+
   // Print consent round tallies for governance meetings
   if (result.tallies.length > 0) {
     console.log(`\n--- Consent Round Tallies ---\n`);
@@ -301,6 +419,24 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
     "",
     ...result.contributions.map((c) => `## ${c.agentId}\n\n${c.content}\n`),
     `## Facilitator Synthesis\n\n${result.synthesis}`,
+    ...(receipts.length > 0
+      ? [
+          "\n## Actions Executed\n",
+          ...receipts.map((r) => {
+            const icon = r.success ? "✅" : "❌";
+            const detail = r.action.kind === "create-issue" && r.issueNumber
+              ? ` → #${String(r.issueNumber)}`
+              : r.action.kind === "label-issue"
+                ? ` #${String(r.action.issueNumber)} +${r.action.label ?? ""}`
+                : r.action.kind === "close-issue"
+                  ? ` #${String(r.action.issueNumber)}`
+                  : r.action.kind === "comment-issue"
+                    ? ` #${String(r.action.issueNumber)}`
+                    : "";
+            return `- ${icon} **${r.action.kind}**${detail}${r.error ? ` — ${r.error}` : ""}`;
+          }),
+        ]
+      : []),
     ...(result.tallies.length > 0
       ? [
           "\n## Consent Round Tallies\n",
