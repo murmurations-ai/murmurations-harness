@@ -444,6 +444,12 @@ export interface BootDaemonOptions {
    * all events).
    */
   readonly governancePath?: string;
+  /**
+   * If true, override each agent's wake schedule with an immediate
+   * delay-once trigger (100ms). Used for testing and Source-initiated
+   * off-cycle wakes without editing identity files.
+   */
+  readonly now?: boolean;
 }
 
 /**
@@ -526,7 +532,9 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   for (const agentDir of agentDirs) {
     const loaded = await loader.load(agentDir);
     const wakeSchedule = loaded.frontmatter.wake_schedule ?? { delayMs: EVENT_FALLBACK_DELAY_MS };
-    const trigger: WakeTrigger = triggerFromFrontmatter(wakeSchedule, loaded.agentId.value);
+    const trigger: WakeTrigger = options.now
+      ? { kind: "delay-once", delayMs: 100 }
+      : triggerFromFrontmatter(wakeSchedule, loaded.agentId.value);
     allRegistered.push(registeredAgentFromLoadedIdentity(loaded, trigger));
   }
 

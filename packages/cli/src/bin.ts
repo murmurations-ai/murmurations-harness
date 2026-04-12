@@ -28,6 +28,7 @@ interface StartArgs {
   readonly agentDir: string | undefined;
   readonly dryRun: boolean;
   readonly once: boolean;
+  readonly now: boolean;
   readonly governancePath: string | undefined;
 }
 
@@ -36,6 +37,7 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
   let agentDir: string | undefined;
   let dryRun = false;
   let once = false;
+  let now = false;
   let governancePath: string | undefined;
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
@@ -58,11 +60,13 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
       dryRun = true;
     } else if (arg === "--once") {
       once = true;
+    } else if (arg === "--now") {
+      now = true;
     } else {
       throw new Error(`unknown argument: ${arg ?? "(undefined)"}`);
     }
   }
-  return { rootDir, agentDir, dryRun, once, governancePath };
+  return { rootDir, agentDir, dryRun, once, now, governancePath };
 };
 
 const usage = (): string =>
@@ -86,6 +90,7 @@ start options:
   --dry-run        Construct every GithubClient without writeScopes so
                    all mutations default-deny at the client layer
   --once           Exit cleanly after the first wake of any agent completes
+  --now            Trigger an immediate wake (overrides cron/interval schedule)
   --governance <path>  Path to a governance plugin module (default: no-op).
                    The module must export a GovernancePlugin as default.
 
@@ -105,6 +110,7 @@ const main = async (): Promise<void> => {
         ...(args.agentDir !== undefined ? { agentDir: args.agentDir } : {}),
         ...(args.dryRun ? { dryRun: true } : {}),
         ...(args.once ? { once: true } : {}),
+        ...(args.now ? { now: true, once: true } : {}),
         ...(args.governancePath !== undefined ? { governancePath: args.governancePath } : {}),
       });
       break;
