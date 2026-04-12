@@ -29,6 +29,7 @@ import {
   AgentStateStore,
   Daemon,
   DispatchExecutor,
+  GovernanceGitHubSync,
   DispatchRunArtifactWriter,
   IdentityLoader,
   InProcessExecutor,
@@ -806,6 +807,38 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       })) ?? [],
   );
 
+  // Construct governance GitHub sync if we have a write-capable github client
+  const governanceSync = githubClient
+    ? new GovernanceGitHubSync({
+        github: {
+          createIssue: async (input) => {
+            const result = await githubClient.createIssue(
+              makeRepoCoordinate(
+                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
+                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
+              ),
+              { title: input.title, body: input.body, labels: [...input.labels] },
+            );
+            if (!result.ok) return { ok: false, error: result.error.message };
+            return { ok: true, issueNumber: result.value.number.value, htmlUrl: result.value.htmlUrl };
+          },
+          createIssueComment: async (issueNumber, body) => {
+            const { makeIssueNumber } = await import("@murmuration/github");
+            const result = await githubClient.createIssueComment(
+              makeRepoCoordinate(
+                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
+                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
+              ),
+              makeIssueNumber(issueNumber),
+              { body },
+            );
+            if (!result.ok) return { ok: false, error: result.error.message };
+            return { ok: true };
+          },
+        },
+      })
+    : undefined;
+
   const needsRebuild = effectiveExecutor !== provisionalExecutor || githubClient !== undefined;
   const effectiveDaemon: Daemon = needsRebuild
     ? new Daemon({
@@ -822,7 +855,8 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         ...(secretsBlock ? { secrets: secretsBlock } : {}),
         ...(governancePlugin ? { governance: governancePlugin } : {}),
         governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
-    agentStateStore: new AgentStateStore({ persistDir: resolve(exampleRoot, ".murmuration", "agents") }),
+        ...(governanceSync ? { governanceSync } : {}),
+        agentStateStore: new AgentStateStore({ persistDir: resolve(exampleRoot, ".murmuration", "agents") }),
       })
     : firstPassDaemon;
 

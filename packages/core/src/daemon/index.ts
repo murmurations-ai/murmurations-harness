@@ -353,6 +353,8 @@ export interface DaemonConfig {
    * daemon restart. Typically `<rootDir>/.murmuration/governance/`.
    */
   readonly governancePersistDir?: string;
+  /** Optional sync callbacks for GitHub-backed governance. */
+  readonly governanceSync?: import("../governance/index.js").GovernanceSyncCallbacks;
   /**
    * Directive store for Source → agent communication. If present,
    * the daemon injects pending directives into agent signal bundles
@@ -420,6 +422,7 @@ export class Daemon {
     this.#agentStateStore = config.agentStateStore;
     this.#governanceStore = new GovernanceStateStore({
       ...(config.governancePersistDir ? { persistDir: config.governancePersistDir } : {}),
+      ...(config.governanceSync ? { onSync: config.governanceSync } : {}),
     });
   }
 

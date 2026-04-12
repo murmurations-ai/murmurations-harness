@@ -25,6 +25,7 @@ import { createLLMClient, type LLMClient } from "@murmuration/llm";
 import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
 
 const GEMINI_KEY = makeSecretKey("GEMINI_API_KEY");
+const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
 /** Parse a simple circle config from a circle doc's content. */
 const parseCircleConfig = (circleId: string, content: string): CircleConfig => {
@@ -81,16 +82,17 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
   if (directiveBody) console.log(`  Directive: "${directiveBody}"`);
   console.log("");
 
-  // Load LLM client
+  // Load secrets + clients
   const envPath = join(root, ".env");
   let llmClient: LLMClient | undefined;
+  let secretsProvider: DotenvSecretsProvider | undefined;
   if (existsSync(envPath)) {
-    const provider = new DotenvSecretsProvider({ envPath });
-    await provider.load({ required: [], optional: [GEMINI_KEY] });
-    if (provider.has(GEMINI_KEY)) {
+    secretsProvider = new DotenvSecretsProvider({ envPath });
+    await secretsProvider.load({ required: [], optional: [GEMINI_KEY, GITHUB_TOKEN] });
+    if (secretsProvider.has(GEMINI_KEY)) {
       llmClient = createLLMClient({
         provider: "gemini",
-        token: provider.get(GEMINI_KEY),
+        token: secretsProvider.get(GEMINI_KEY),
         model: "gemini-2.5-flash",
       });
     }
@@ -180,15 +182,9 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
   console.log(`Tokens: ${String(result.totalInputTokens)} in / ${String(result.totalOutputTokens)} out`);
   console.log(`Cost: ~$${(((result.totalInputTokens * 0.15 + result.totalOutputTokens * 0.6) / 1_000_000)).toFixed(4)}`);
 
-  // Write meeting minutes to .murmuration/runs/<circleId>/
-  const { writeFile: wf, mkdir } = await import("node:fs/promises");
+  // Post meeting minutes as a GitHub issue
   const dayUtc = new Date().toISOString().slice(0, 10);
-  const meetingDir = join(root, ".murmuration", "runs", `circle-${circleId}`, dayUtc);
-  await mkdir(meetingDir, { recursive: true });
-  const meetingId = `meeting-${randomUUID().slice(0, 8)}`;
   const minutes = [
-    `# ${config.name} — ${kind} meeting — ${dayUtc}`,
-    "",
     `**Members:** ${config.members.join(", ")}`,
     `**Facilitator:** ${config.facilitator}`,
     directiveBody ? `**Directive:** ${directiveBody}` : "",
@@ -203,7 +199,62 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
           ),
         ]
       : []),
+    "",
+    `---`,
+    `_Tokens: ${String(result.totalInputTokens)} in / ${String(result.totalOutputTokens)} out_`,
   ].join("\n");
-  await wf(join(meetingDir, `${meetingId}.md`), minutes, "utf8");
-  console.log(`\nMeeting minutes: .murmuration/runs/circle-${circleId}/${dayUtc}/${meetingId}.md`);
+
+  const meetingLabel = kind === "governance" ? "governance-meeting" : "circle-meeting";
+  // Derive repo from first member's role.md signal scopes
+  let repoOwner = "unknown";
+  let repoName = "unknown";
+  try {
+    const { readFile: rf } = await import("node:fs/promises");
+    const firstMember = config.members[0] ?? "";
+    const roleContent = await rf(join(root, "agents", firstMember, "role.md"), "utf8");
+    const ownerMatch = /owner:\s*"?([^"\n]+)"?/.exec(roleContent);
+    const repoMatch = /repo:\s*"?([^"\n]+)"?/.exec(roleContent);
+    if (ownerMatch?.[1]) repoOwner = ownerMatch[1].trim();
+    if (repoMatch?.[1]) repoName = repoMatch[1].trim();
+  } catch { /* fallback to unknown */ }
+
+  try {
+    if (!secretsProvider?.has(GITHUB_TOKEN)) throw new Error("no GITHUB_TOKEN");
+    const { makeRepoCoordinate, createGithubClient: createGH } = await import("@murmuration/github");
+    const meetingGh = createGH({
+      token: secretsProvider.get(GITHUB_TOKEN),
+      writeScopes: {
+        issueComments: [`${repoOwner}/${repoName}`],
+        branchCommits: [],
+        labels: [],
+        issues: [`${repoOwner}/${repoName}`],
+      },
+    });
+    const issueResult = await meetingGh.createIssue(
+      makeRepoCoordinate(repoOwner, repoName),
+      {
+        title: `[${kind.toUpperCase()} MEETING] ${config.name} — ${dayUtc}`,
+        labels: [meetingLabel, `circle:${circleId}`],
+        body: minutes,
+      },
+    );
+    if (issueResult.ok) {
+      console.log(`\nMeeting minutes: ${issueResult.value.htmlUrl}`);
+    } else {
+      console.log(`\nFailed to create meeting issue: ${issueResult.error.code}`);
+      // Fallback: write locally
+      const { writeFile: wf, mkdir } = await import("node:fs/promises");
+      const meetingDir = join(root, ".murmuration", "runs", `circle-${circleId}`, dayUtc);
+      await mkdir(meetingDir, { recursive: true });
+      await wf(join(meetingDir, `meeting-${randomUUID().slice(0, 8)}.md`), `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`, "utf8");
+      console.log(`  (saved locally as fallback)`);
+    }
+  } catch {
+    // Fallback: write locally if GitHub fails
+    const { writeFile: wf, mkdir } = await import("node:fs/promises");
+    const meetingDir = join(root, ".murmuration", "runs", `circle-${circleId}`, dayUtc);
+    await mkdir(meetingDir, { recursive: true });
+    await wf(join(meetingDir, `meeting-${randomUUID().slice(0, 8)}.md`), `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`, "utf8");
+    console.log(`\nMeeting minutes saved locally (GitHub unavailable).`);
+  }
 };
