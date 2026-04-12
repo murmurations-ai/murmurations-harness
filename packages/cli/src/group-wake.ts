@@ -154,9 +154,14 @@ const executeActions = async (
             receipts.push({ action, success: false, error: "missing issueNumber or label" });
             break;
           }
+          // Remove old label first if this is a label swap
+          if (action.removeLabel) {
+            await gh.removeLabel(repo, makeIssueNumber(action.issueNumber), action.removeLabel);
+          }
           const result = await gh.addLabels(repo, makeIssueNumber(action.issueNumber), [action.label]);
           if (result.ok) {
-            console.log(`    \x1b[32m✓\x1b[0m label-issue #${String(action.issueNumber)} +${action.label}`);
+            const swap = action.removeLabel ? ` (-${action.removeLabel})` : "";
+            console.log(`    \x1b[32m✓\x1b[0m label-issue #${String(action.issueNumber)} +${action.label}${swap}`);
             receipts.push({ action, success: true });
           } else {
             console.log(`    \x1b[31m✗\x1b[0m label-issue #${String(action.issueNumber)}: ${result.error.code}`);

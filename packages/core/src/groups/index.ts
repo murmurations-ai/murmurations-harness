@@ -45,6 +45,8 @@ export interface GroupWakeContext {
   readonly facilitator: string;
   readonly signals: readonly Signal[];
   readonly governanceQueue: readonly GovernanceItem[];
+  /** Map from governance item ID to GitHub issue number (for state-transition actions). */
+  readonly governanceIssueMap?: ReadonlyMap<string, number>;
   readonly directiveBody?: string; // if a Source directive triggered this
 }
 
@@ -211,7 +213,15 @@ const DEFAULT_GOV_FACILITATOR_INSTRUCTIONS = `For each governance item:
 - Summarize the positions from all members
 - Count positions by type
 - Produce a clear recommendation based on the positions
-- State whether the item should advance, be amended, or be tabled`;
+- State whether the item should advance, be amended, or be tabled
+
+For items that should advance to their next state, include state transition actions in your actions block:
+  {"kind": "label-issue", "issueNumber": NNN, "label": "state:NEW_STATE", "removeLabel": "state:OLD_STATE"}
+For items that are fully resolved, also close them:
+  {"kind": "close-issue", "issueNumber": NNN}
+For items that need amendments, post a comment with the required changes:
+  {"kind": "comment-issue", "issueNumber": NNN, "body": "Amendment required: ..."}`;
+
 
 // ---------------------------------------------------------------------------
 // Group Wake Runner
@@ -268,7 +278,11 @@ export const runGroupWake = async (
   let totalOutput = 0;
 
   const groupContext = context.kind === "governance"
-    ? `This is a GOVERNANCE MEETING for the ${context.groupId} group.\n\nGovernance queue (${String(context.governanceQueue.length)} items):\n${context.governanceQueue.map((item) => `  - [${item.id.slice(0, 8)}] ${item.kind} | state: ${item.currentState} | ${JSON.stringify(item.payload)}`).join("\n") || "  (empty)"}`
+    ? `This is a GOVERNANCE MEETING for the ${context.groupId} group.\n\nGovernance queue (${String(context.governanceQueue.length)} items):\n${context.governanceQueue.map((item) => {
+        const issueNum = context.governanceIssueMap?.get(item.id);
+        const issueRef = issueNum ? ` (GitHub #${String(issueNum)})` : "";
+        return `  - [${item.id.slice(0, 8)}]${issueRef} ${item.kind} | state: ${item.currentState} | ${JSON.stringify(item.payload)}`;
+      }).join("\n") || "  (empty)"}`
     : `This is an OPERATIONAL MEETING for the ${context.groupId} group.`;
 
   const directiveSection = context.directiveBody

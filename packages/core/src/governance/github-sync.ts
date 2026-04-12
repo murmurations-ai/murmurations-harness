@@ -32,8 +32,8 @@ export interface GovernanceSyncGitHub {
 
 export interface GovernanceGitHubSyncConfig {
   readonly github: GovernanceSyncGitHub;
-  /** Circle ID for labelling. */
-  readonly defaultCircle?: string;
+  /** Group ID for labelling. */
+  readonly defaultGroup?: string;
 }
 
 /**
@@ -42,13 +42,18 @@ export interface GovernanceGitHubSyncConfig {
  */
 export class GovernanceGitHubSync {
   readonly #github: GovernanceSyncGitHub;
-  readonly #defaultCircle: string | undefined;
+  readonly #defaultGroup: string | undefined;
   /** Map governance item ID → GitHub issue number for comments. */
   readonly #issueMap = new Map<string, number>();
 
   public constructor(config: GovernanceGitHubSyncConfig) {
     this.#github = config.github;
-    this.#defaultCircle = config.defaultCircle;
+    this.#defaultGroup = config.defaultGroup;
+  }
+
+  /** Read-only view of the governance item ID → GitHub issue number mapping. */
+  public get issueMap(): ReadonlyMap<string, number> {
+    return this.#issueMap;
   }
 
   /** Create a GitHub issue for a new governance item. */
@@ -62,7 +67,7 @@ export class GovernanceGitHubSync {
         `state:${item.currentState}`,
         `agent:${item.createdBy.value}`,
       ];
-      if (this.#defaultCircle) labels.push(`group:${this.#defaultCircle}`);
+      if (this.#defaultGroup) labels.push(`group:${this.#defaultGroup}`);
 
       const body = [
         `**Filed by:** ${item.createdBy.value}`,
