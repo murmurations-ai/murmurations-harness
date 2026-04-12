@@ -325,7 +325,7 @@ export class GovernanceStateStore {
       history: [...item.history, transition],
     };
     this.#items.set(itemId, updated);
-    void this.#persist(updated);
+    this.#persistPending = this.#persist(updated);
     try { this.#onSync?.onTransition?.(updated, transition); } catch { /* fire-and-forget */ }
     return updated;
   }

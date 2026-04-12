@@ -136,7 +136,7 @@ export class AgentStateStore {
     wakeId?: string,
   ): void {
     const agent = this.#agents.get(agentId);
-    if (!agent) return;
+    if (!agent) throw new Error(`AgentStateStore: unknown agentId "${agentId}" — register before transitioning`);
 
     const now = this.#now().toISOString();
     let updates: Partial<AgentRecord> = { currentState: to };

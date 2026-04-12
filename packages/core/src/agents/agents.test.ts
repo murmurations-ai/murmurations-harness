@@ -100,6 +100,11 @@ describe("AgentStateStore", () => {
     expect(wakes[2]?.wakeId).toBe("w1");
   });
 
+  it("throws on transition with unknown agentId", () => {
+    const store = new AgentStateStore();
+    expect(() => store.transition("ghost", "idle")).toThrow(/unknown agentId "ghost"/);
+  });
+
   it("getAllAgents returns all registered agents", () => {
     const store = new AgentStateStore();
     store.register("a", 1000);

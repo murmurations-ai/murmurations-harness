@@ -36,6 +36,9 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
     process.exit(2);
   }
 
+  const repoIdx = args.indexOf("--repo");
+  const repoArg = repoIdx >= 0 ? args[repoIdx + 1] : undefined;
+
   const doRefresh = args.includes("--refresh");
   const backlogDir = join(root, ".murmuration", "backlogs");
   const backlogFile = join(backlogDir, `${circleId}.json`);
@@ -43,7 +46,7 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
   // Load circle config to get backlog label + repo
   const circleDocPath = join(root, "governance", "circles", `${circleId}.md`);
   let backlogLabel = `circle: ${circleId}`;
-  let backlogRepo = "xeeban/emergent-praxis"; // default, should be configurable
+  let backlogRepo = repoArg ?? "";
 
   if (existsSync(circleDocPath)) {
     const content = await readFile(circleDocPath, "utf8");
@@ -51,6 +54,11 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
     if (labelMatch) backlogLabel = labelMatch[1]!.trim();
     const repoMatch = /backlog_repo:\s*"?([^"\n]+)"?/i.exec(content);
     if (repoMatch) backlogRepo = repoMatch[1]!.trim();
+  }
+
+  if (doRefresh && !backlogRepo) {
+    console.error("murmuration backlog: no repo configured. Use --repo owner/repo or set backlog_repo: in the circle doc.");
+    process.exit(2);
   }
 
   if (doRefresh) {
