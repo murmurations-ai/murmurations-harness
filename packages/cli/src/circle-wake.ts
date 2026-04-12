@@ -132,7 +132,7 @@ export const runCircleWakeCommand = async (args: readonly string[], rootDir: str
         model: "gemini-2.5-flash",
         messages: [{ role: "user", content: userPrompt }],
         systemPromptOverride: systemPrompt,
-        maxOutputTokens: 4000,
+        maxOutputTokens: 8000,
         temperature: 0.3,
       });
       if (!r.ok) throw new Error(`LLM failed for ${agentId}: ${r.error.code}`);
