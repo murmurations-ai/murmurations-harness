@@ -1,6 +1,6 @@
 # Consolidated Execution Plan
 
-**Status:** Active — updated 2026-04-12
+**Status:** Active — updated 2026-04-17
 **Inputs:** Intelligence Circle architecture review (2026-04-12), MURMURATION-HARNESS-SPEC.md, PHASE-2-PLAN.md, CIRCLE-WAKE-SPEC.md, GITHUB-AS-SYSTEM-OF-RECORD.md
 **For:** Coding agents implementing the next phases
 
@@ -59,8 +59,19 @@
 - [x] Activity panel (reads from AgentStateStore)
 - [x] Reads from AgentStateStore (not log scraping)
 
+### Security & Reliability ✅
+- [x] Path traversal prevention in resolveRolePath
+- [x] Signal sanitization (titles, labels, excerpts) before LLM injection
+- [x] Subprocess env filtering (blocks LD_PRELOAD, DYLD_*, NODE_OPTIONS)
+- [x] Recursive log scrubbing (nested sensitive fields)
+- [x] Agent circuit breaker (skip wakes after 3 consecutive failures)
+- [x] GovernanceStateStore flush tracks transitions (no race)
+- [x] AgentStateStore throws on unknown agentId (no ghost tracking)
+- [x] DispatchExecutor.kill() normalizes errors per interface contract
+- [x] Date validation on governance item deserialization
+
 ### Testing ✅
-- [x] 244+ tests across 19 test files
+- [x] 255+ tests across 19 test files
 - [x] All passing through `pnpm check` (typecheck + lint + format + test)
 
 ---
@@ -73,24 +84,16 @@
 
 | Step | What | Files | Status |
 |---|---|---|---|
-| 1.1 | **Directives → GitHub issues** | `packages/cli/src/directive.ts`, `packages/core/src/directives/` | TODO |
-| | CLI creates issue with `source-directive` + scope labels | | |
-| | Remove DirectiveStore, remove daemon directive injection | | |
-| | Signal aggregator already surfaces labelled issues as signals | | |
-| 1.2 | **Governance → GitHub issues** | `packages/core/src/governance/index.ts` | TODO |
-| | GovernanceStateStore reads/writes via GitHub issues | | |
-| | State transitions = label swaps + issue comments | | |
-| | Consent rounds = structured comments | | |
-| | Decision records = closing comments | | |
-| 1.3 | **Meeting minutes → GitHub** | `packages/cli/src/circle-wake.ts` | TODO |
-| | Circle meetings create issues or commit files | | |
-| | Action items from meetings → separate issues | | |
-| 1.4 | **Agent outputs → committed files** | shared runner's `commitPathPrefix` option | PARTIAL |
-| | Each agent's role.md or runner config declares where it commits artifacts | | |
-| | The shared runner's `commitPathPrefix` already supports this — extend to all artifact-producing agents | | |
-| | The specific folder structure is an operator decision, not a harness decision — each murmuration chooses its own repo tree layout (see repo tree section in GITHUB-AS-SYSTEM-OF-RECORD.md) | | |
-| 1.5 | **Label taxonomy** | `docs/LABEL-TAXONOMY.md` | TODO |
-| | Publish the canonical label set | | |
+| 1.1 | **Directives → GitHub issues** | `packages/cli/src/directive.ts` | ✅ DONE |
+| | CLI creates issue with `source-directive` + scope labels. DirectiveStore removed. | | |
+| 1.2 | **Governance → GitHub issues** | `packages/core/src/governance/github-sync.ts` | ✅ DONE |
+| | GovernanceGitHubSync creates issues on item creation, posts comments on transitions. | | |
+| 1.3 | **Meeting minutes → GitHub** | `packages/cli/src/circle-wake.ts` | ✅ DONE |
+| | Circle meetings post minutes as GitHub issues. | | |
+| 1.4 | **Agent outputs → committed files** | shared runner's `commitPathPrefix` option | ✅ DONE |
+| | Operator decision — each murmuration chooses its own repo tree layout. | | |
+| 1.5 | **Label taxonomy** | `docs/LABEL-TAXONOMY.md` | ✅ DONE (generic) |
+| | Operator-defined labels. Harness provides conventions, not enforcement. | | |
 
 **Label taxonomy (from GITHUB-AS-SYSTEM-OF-RECORD.md):**
 ```
@@ -154,15 +157,35 @@ type:content-idea, type:research-digest, stage:*
 
 ---
 
-## Open Issues (harness repo)
+## Closed Issues (this session, 2026-04-17)
 
-| # | Title | Phase |
+| # | Title | Fix |
 |---|---|---|
-| 25 | Wire per-wake GitHub cost hook | ✅ Done |
-| 26 | DotenvSecretsProvider warn on malformed .env | ✅ Done |
-| 27 | Phase 2E gate — dual-run week | Active (daily digests accumulating) |
-| 29 | AgentStateStore | ✅ Done |
-| 30 | Raise token ceilings + truncation detection | ✅ Ceilings raised; adaptive detection TODO |
+| 32 | Agent circuit breaker | a0e40fe — 3-failure threshold |
+| 37 | Sanitize signals for LLM injection | ca25cee |
+| 41 | Path traversal in resolveRolePath | 5c1d0ed |
+| 42 | Env injection via context.environment | ca25cee |
+| 44 | Recursive log scrubbing | ca25cee |
+| 46 | GovernanceStateStore flush race | a9c60dd |
+| 47 | AgentStateStore ghost transitions | a9c60dd |
+| 48 | GovernancePlugin contract tests | dc6a2c9 |
+| 49 | GovernanceSyncCallbacks test coverage | dc6a2c9 |
+| 51 | DispatchExecutor.kill() error handling | 5c1d0ed |
+| 52 | GovernanceStateStore date validation | 5c1d0ed |
+| 55 | directive.ts regex parsing | a0e40fe — uses IdentityLoader |
+| 56/36 | circle-wake Gemini hardcode | 30bfad1 — reads from role.md |
+| 57 | backlog.ts hardcoded repo | a9c60dd |
+
+## Remaining Open Issues
+
+See `gh issue list` for the full list. Key remaining:
+- #50: Rename 'circle' to governance-neutral term
+- #38: Trust taxonomy enforcement
+- #39: Label write-scope enforcement
+- #40: Extract GovernanceStateStore interface
+- #54: AgentStateStore interface for Phase 4
+- #45: Multi-instance governance state (Phase 5)
+- #58-61: UX improvements
 
 ---
 
