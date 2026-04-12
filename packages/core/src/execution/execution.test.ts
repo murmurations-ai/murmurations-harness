@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isCompleted,
   isFailed,
+  parseSelfReflection,
   validateWake,
   isKilled,
   isTimedOut,
@@ -322,5 +323,54 @@ describe("validateWake", () => {
   it("commit-file without filePath is invalid", () => {
     const text = '```actions\n[{"kind": "commit-file", "fileContent": "hello"}]\n```';
     expect(parseWakeActions(text)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseSelfReflection
+// ---------------------------------------------------------------------------
+
+describe("parseSelfReflection", () => {
+  it("parses a standard self-reflection block", () => {
+    const text = `Some output here.
+
+## Self-Reflection
+EFFECTIVENESS: high
+OBSERVATION: All action items were addressed.
+GOVERNANCE_EVENT: Editorial Calendar did not provide a brief.`;
+
+    const r = parseSelfReflection(text);
+    expect(r.effectiveness).toBe("high");
+    expect(r.observation).toBe("All action items were addressed.");
+    expect(r.governanceEvent).toBe("Editorial Calendar did not provide a brief.");
+  });
+
+  it("parses legacy TENSION format", () => {
+    const text = `## Self-Reflection
+EFFECTIVENESS: medium
+OBSERVATION: Partially completed.
+TENSION: Pipeline is blocked by missing QA artifact.`;
+
+    const r = parseSelfReflection(text);
+    expect(r.effectiveness).toBe("medium");
+    expect(r.governanceEvent).toBe("Pipeline is blocked by missing QA artifact.");
+  });
+
+  it("returns null governanceEvent when none filed", () => {
+    const text = `## Self-Reflection
+EFFECTIVENESS: low
+OBSERVATION: No signals received.
+GOVERNANCE_EVENT: none`;
+
+    const r = parseSelfReflection(text);
+    expect(r.effectiveness).toBe("low");
+    expect(r.governanceEvent).toBeNull();
+  });
+
+  it("returns unknown effectiveness when not parseable", () => {
+    const r = parseSelfReflection("no self-reflection block at all");
+    expect(r.effectiveness).toBe("unknown");
+    expect(r.observation).toBe("");
+    expect(r.governanceEvent).toBeNull();
   });
 });

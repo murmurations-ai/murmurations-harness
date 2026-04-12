@@ -518,6 +518,45 @@ export const validateWake = (
   return { productive, artifactCount, actionItemsAddressed, actionItemsAssigned };
 };
 
+// ---------------------------------------------------------------------------
+// Self-reflection parsing — extract structured reflection from wake output
+// ---------------------------------------------------------------------------
+
+/**
+ * Parsed self-reflection from an agent's wake output.
+ * The harness defines the format; the governance plugin interprets
+ * the governance event if one was filed.
+ */
+export interface SelfReflection {
+  readonly effectiveness: "high" | "medium" | "low" | "unknown";
+  readonly observation: string;
+  /** The governance event text, or null if none filed. */
+  readonly governanceEvent: string | null;
+}
+
+/**
+ * Parse the self-reflection block from an agent's wake output.
+ * Looks for the standard format:
+ *   EFFECTIVENESS: high / medium / low
+ *   OBSERVATION: one sentence
+ *   GOVERNANCE_EVENT: none — OR a description
+ *
+ * Also accepts legacy TENSION: format for backwards compatibility.
+ */
+export const parseSelfReflection = (text: string): SelfReflection => {
+  const effectivenessMatch = /EFFECTIVENESS:\s*(high|medium|low)/i.exec(text);
+  const observationMatch = /OBSERVATION:\s*(.+)/i.exec(text);
+  const govMatch = /GOVERNANCE_EVENT:\s*(.+)/i.exec(text) ?? /TENSION:\s*(.+)/i.exec(text);
+
+  const effectiveness = (effectivenessMatch?.[1]?.toLowerCase() ??
+    "unknown") as SelfReflection["effectiveness"];
+  const observation = observationMatch?.[1]?.trim() ?? "";
+  const govText = govMatch?.[1]?.trim() ?? "none";
+  const governanceEvent = govText.toLowerCase() !== "none" && govText.length > 5 ? govText : null;
+
+  return { effectiveness, observation, governanceEvent };
+};
+
 const VALID_WAKE_ACTION_KINDS = new Set([
   "label-issue",
   "create-issue",
