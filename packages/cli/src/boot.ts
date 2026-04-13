@@ -20,7 +20,7 @@
  * gate test still runs without a real GITHUB_TOKEN on the machine.
  */
 
-import { existsSync, readFileSync as fsReadFileSync, unlinkSync } from "node:fs";
+import { existsSync, openSync, readFileSync as fsReadFileSync, unlinkSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -1287,7 +1287,14 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
                     agentId,
                     "--now",
                   ],
-                  { detached: true, stdio: "ignore" },
+                  {
+                    detached: true,
+                    stdio: [
+                      "ignore",
+                      openSync(join(exampleRoot, ".murmuration", `wake-${agentId}.log`), "a"),
+                      openSync(join(exampleRoot, ".murmuration", `wake-${agentId}.log`), "a"),
+                    ],
+                  },
                 );
                 child.unref();
                 return { waking: true, agentId, pid: child.pid };
