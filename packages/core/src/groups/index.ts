@@ -56,6 +56,8 @@ export interface RetrospectiveMetrics {
   readonly agentMetrics: readonly AgentMetricsSnapshot[];
   /** Period this retrospective covers (e.g. "2026-04-07 to 2026-04-12"). */
   readonly period: string;
+  /** Strategy alignment assessment, if a strategy plugin is configured. */
+  readonly alignment?: import("../strategy/index.js").AlignmentAssessment;
 }
 
 export interface GroupWakeContext {
@@ -394,7 +396,19 @@ export const runGroupWake = async (
       : context.kind === "retrospective"
         ? `This is a RETROSPECTIVE for the ${context.groupId} group.${
             context.retrospectiveMetrics
-              ? `\n\nPeriod: ${context.retrospectiveMetrics.period}\n\n## Agent Metrics\n\n${context.retrospectiveMetrics.agentMetrics.map((m) => `  - ${m.agentId}: ${String(m.totalWakes)} wakes, ${String(m.totalArtifacts)} artifacts, ${String(m.idleWakes)} idle (${String(Math.round(m.idleRate * 100))}%), ${String(m.consecutiveFailures)} consecutive failures`).join("\n")}`
+              ? `\n\nPeriod: ${context.retrospectiveMetrics.period}\n\n## Agent Metrics\n\n${context.retrospectiveMetrics.agentMetrics.map((m) => `  - ${m.agentId}: ${String(m.totalWakes)} wakes, ${String(m.totalArtifacts)} artifacts, ${String(m.idleWakes)} idle (${String(Math.round(m.idleRate * 100))}%), ${String(m.consecutiveFailures)} consecutive failures`).join("\n")}${
+                  context.retrospectiveMetrics.alignment
+                    ? `\n\n## Strategy Alignment\n\n${context.retrospectiveMetrics.alignment.summary}${
+                        context.retrospectiveMetrics.alignment.objectives.length > 0
+                          ? `\n\n${context.retrospectiveMetrics.alignment.objectives.map((o) => `  - ${o.title}: ${o.current ?? "not measured"} / ${o.target ?? "no target"} (${o.progress !== null ? `${String(Math.round(o.progress * 100))}%` : "N/A"})`).join("\n")}`
+                          : ""
+                      }${
+                        context.retrospectiveMetrics.alignment.suggestions.length > 0
+                          ? `\n\nSuggestions:\n${context.retrospectiveMetrics.alignment.suggestions.map((s) => `  - ${s}`).join("\n")}`
+                          : ""
+                      }`
+                    : ""
+                }`
               : ""
           }`
         : `This is an OPERATIONAL MEETING for the ${context.groupId} group.`;

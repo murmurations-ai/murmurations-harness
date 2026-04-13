@@ -27,3 +27,4 @@ export * from "./daemon/index.js";
 // by creating GitHub issues with the "source-directive" label.
 export * from "./groups/index.js";
 export * from "./agents/index.js";
+export * from "./strategy/index.js";
