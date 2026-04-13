@@ -80,8 +80,42 @@ const formatCountdown = (target: Date | null): string => {
 };
 
 export const readPipelineState = async (rootDir: string): Promise<readonly AgentStatus[]> => {
-  // Primary: read from AgentStateStore (formal state machine)
-  // Fallback: discover agents from agents/*/role.md + index.jsonl
+  // Try daemon socket first (live data from running daemon)
+  const { queryDaemon } = await import("./socket-client.js");
+  const socketResult = await queryDaemon(rootDir, "status");
+  if (socketResult && typeof socketResult === "object" && "agents" in socketResult) {
+    const r = socketResult as {
+      agents: {
+        agentId: string;
+        state: string;
+        totalWakes: number;
+        totalArtifacts: number;
+        idleWakes: number;
+        consecutiveFailures: number;
+      }[];
+    };
+    const results: AgentStatus[] = [];
+    for (const a of r.agents) {
+      const schedule = await parseCronFromRole(rootDir, a.agentId);
+      const nextWake = schedule.cron ? computeNextFire(schedule.cron, schedule.tz) : null;
+      results.push({
+        agentId: a.agentId,
+        state: a.state,
+        lastWake: null,
+        outcome: null,
+        costMicros: 0,
+        costFormatted: "$0.00",
+        stale: false,
+        consecutiveFailures: a.consecutiveFailures,
+        totalWakes: a.totalWakes,
+        nextWake,
+        nextWakeCountdown: formatCountdown(nextWake),
+      });
+    }
+    return results;
+  }
+
+  // Fallback: read from files (daemon not running or no socket)
   interface StateAgentRecord {
     agentId: string;
     currentState: string;
