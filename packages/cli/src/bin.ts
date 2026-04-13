@@ -48,7 +48,17 @@ const resolveRoot = (args: readonly string[], fallback = "."): string => {
   return fallback;
 };
 
-/** Stop a running daemon by reading its pidfile and sending SIGTERM. */
+/** Check if a process is still running. */
+const isRunning = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Stop a running daemon. Sends SIGTERM, waits for exit, falls back to SIGKILL. */
 const stopDaemon = async (rootDir: string): Promise<void> => {
   const pidfile = resolve(rootDir, ".murmuration", "daemon.pid");
   if (!existsSync(pidfile)) {
@@ -62,27 +72,55 @@ const stopDaemon = async (rootDir: string): Promise<void> => {
     console.error("murmuration stop: invalid pidfile content");
     process.exit(1);
   }
+
+  if (!isRunning(pid)) {
+    console.log(
+      `murmuration stop: daemon (PID ${String(pid)}) is not running — cleaning up stale pidfile`,
+    );
+    try {
+      await (await import("node:fs/promises")).unlink(pidfile);
+    } catch {
+      /* ok */
+    }
+    return;
+  }
+
+  // Send SIGTERM
   try {
     process.kill(pid, "SIGTERM");
     console.log(`murmuration stop: sent SIGTERM to daemon (PID ${String(pid)})`);
   } catch (err: unknown) {
-    const code = (err as { code?: string }).code;
-    if (code === "ESRCH") {
-      console.log(
-        `murmuration stop: daemon (PID ${String(pid)}) is not running — cleaning up stale pidfile`,
-      );
-      try {
-        await (await import("node:fs/promises")).unlink(pidfile);
-      } catch {
-        /* ok */
-      }
-    } else {
-      console.error(
-        `murmuration stop: failed to send SIGTERM to PID ${String(pid)} — ${err instanceof Error ? err.message : String(err)}`,
-      );
-      process.exit(1);
-    }
+    console.error(
+      `murmuration stop: failed to signal PID ${String(pid)} — ${err instanceof Error ? err.message : String(err)}`,
+    );
+    process.exit(1);
   }
+
+  // Wait for process to exit (up to 10 seconds)
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline && isRunning(pid)) {
+    await new Promise((r) => setTimeout(r, 250));
+  }
+
+  // If still running, SIGKILL
+  if (isRunning(pid)) {
+    console.log(`murmuration stop: daemon did not exit after 10s — sending SIGKILL`);
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  // Clean up pidfile
+  try {
+    await (await import("node:fs/promises")).unlink(pidfile);
+  } catch {
+    /* ok */
+  }
+
+  console.log(`murmuration stop: daemon stopped`);
 };
 
 /** Show daemon status from pidfile + agent state store. */
