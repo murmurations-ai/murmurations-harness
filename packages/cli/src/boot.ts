@@ -1165,7 +1165,11 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   };
 
   // Shared status builder for socket + HTTP
-  const buildStatus = (): unknown => {
+  const buildStatus = async (): Promise<unknown> => {
+    // Reload from disk so wake-now child process writes are visible
+    await agentStateStore.load().catch(() => {
+      /* best effort */
+    });
     const agents = agentStateStore.getAllAgents().map((a) => ({
       agentId: a.agentId,
       state: a.currentState,
@@ -1216,7 +1220,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const daemonSocket = new DaemonSocket(socketPath, (method, params) => {
     switch (method) {
       case "status":
-        return Promise.resolve(buildStatus());
+        return buildStatus();
       case "stop":
         process.kill(process.pid, "SIGTERM");
         return Promise.resolve({ stopping: true });
@@ -1239,7 +1243,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     httpPort > 0 && !once
       ? new DaemonHttp({
           port: httpPort,
-          statusHandler: () => Promise.resolve(buildStatus()),
+          statusHandler: () => buildStatus(),
           commandHandler: async (method, params) => {
             switch (method) {
               case "directive": {
