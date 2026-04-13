@@ -1088,10 +1088,12 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     });
   });
 
-  // Write pidfile so `murmuration stop` and `murmuration restart` can find us
+  // Write pidfile — skip for --once/--now wakes (child processes shouldn't clobber the daemon's pid)
   const pidfilePath = resolve(exampleRoot, ".murmuration", "daemon.pid");
   await mkdir(resolve(exampleRoot, ".murmuration"), { recursive: true });
-  await writeFile(pidfilePath, String(process.pid), "utf8");
+  if (!once) {
+    await writeFile(pidfilePath, String(process.pid), "utf8");
+  }
 
   // Start daemon control socket
   const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
