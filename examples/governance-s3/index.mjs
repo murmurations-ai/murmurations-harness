@@ -38,37 +38,56 @@ export const S3_HELD = "held";
 // S3 state graphs
 // ---------------------------------------------------------------------------
 
-/** Tension lifecycle — the core S3 governance item. */
+/**
+ * Tension lifecycle — the driver for governance work.
+ * A tension is NOT decided on directly — it's resolved when a
+ * proposal addressing it is ratified. The tension tracks awareness,
+ * not decisions.
+ *
+ *   open → proposal-needed → resolved (proposal ratified)
+ *        → withdrawn
+ */
 const TENSION_GRAPH = {
   kind: "tension",
   initialState: "open",
   terminalStates: ["resolved", "withdrawn"],
   defaultReviewDays: 90,
   transitions: [
-    { from: "open", to: "deliberating", trigger: "agent-action" },
-    { from: "deliberating", to: "consent-round", trigger: "agent-action" },
-    { from: "consent-round", to: "resolved", trigger: "consent-achieved" },
-    { from: "consent-round", to: "deliberating", trigger: "objection-raised" },
+    { from: "open", to: "proposal-needed", trigger: "agent-action" },
+    { from: "proposal-needed", to: "resolved", trigger: "agent-action" },
+    { from: "open", to: "resolved", trigger: "agent-action" },
     { from: "open", to: "withdrawn", trigger: "agent-action" },
-    { from: "deliberating", to: "withdrawn", trigger: "agent-action" },
-    // Timeout: tensions stuck in deliberating for 7 days auto-escalate
-    // to Source via the "source" routing target.
-    { from: "deliberating", to: "deliberating", trigger: "timeout", timeoutMs: 7 * 86_400_000 },
+    { from: "proposal-needed", to: "withdrawn", trigger: "agent-action" },
+    // Timeout: tensions without a proposal for 7 days escalate to Source
+    { from: "proposal-needed", to: "proposal-needed", trigger: "timeout", timeoutMs: 7 * 86_400_000 },
   ],
 };
 
-/** Proposal lifecycle — a formalized response to a tension. */
+/**
+ * Proposal lifecycle — a formalized response to a tension.
+ * This is where consent happens. The circle deliberates, then
+ * runs a consent round. No objections = ratified.
+ *
+ *   drafted → deliberating → consent-round → ratified
+ *                           ↗ (objection)  ← consent-round → back to deliberating
+ *           → rejected
+ *           → withdrawn
+ */
 const PROPOSAL_GRAPH = {
   kind: "proposal",
   initialState: "drafted",
   terminalStates: ["ratified", "rejected", "withdrawn"],
   defaultReviewDays: 90,
   transitions: [
-    { from: "drafted", to: "consent-round", trigger: "agent-action" },
+    { from: "drafted", to: "deliberating", trigger: "agent-action" },
+    { from: "deliberating", to: "consent-round", trigger: "agent-action" },
     { from: "consent-round", to: "ratified", trigger: "consent-achieved" },
-    { from: "consent-round", to: "drafted", trigger: "objection-raised" },
+    { from: "consent-round", to: "deliberating", trigger: "objection-raised" },
     { from: "consent-round", to: "rejected", trigger: "agent-action" },
     { from: "drafted", to: "withdrawn", trigger: "agent-action" },
+    { from: "deliberating", to: "withdrawn", trigger: "agent-action" },
+    // Timeout: deliberation stuck for 7 days escalates
+    { from: "deliberating", to: "deliberating", trigger: "timeout", timeoutMs: 7 * 86_400_000 },
   ],
 };
 
