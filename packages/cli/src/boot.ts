@@ -1269,6 +1269,27 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
                 await runGroupWakeCommand(args, exampleRoot);
                 return { convened: true, groupId, kind };
               }
+              case "wake-now": {
+                const agentId = params.agentId as string | undefined;
+                if (!agentId) throw new Error("wake-now requires agentId");
+                // Spawn a separate --now process for this agent
+                const { spawn: cpSpawn } = await import("node:child_process");
+                const child = cpSpawn(
+                  process.execPath,
+                  [
+                    resolve(dirname(import.meta.url.replace("file://", "")), "bin.js"),
+                    "start",
+                    "--root",
+                    exampleRoot,
+                    "--agent",
+                    agentId,
+                    "--now",
+                  ],
+                  { detached: true, stdio: "ignore" },
+                );
+                child.unref();
+                return { waking: true, agentId, pid: child.pid };
+              }
               case "stop":
                 process.kill(process.pid, "SIGTERM");
                 return { stopping: true };

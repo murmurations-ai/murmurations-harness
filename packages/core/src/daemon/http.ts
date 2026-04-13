@@ -347,7 +347,8 @@ async function refresh() {
         st('Wakes', a.totalWakes) + st('Artifacts', a.totalArtifacts) +
         st('Art/Wake', ar) + st('Idle', ir + '%') + st('Failures', a.consecutiveFailures) +
         '<div class="bar"><div class="bar-fill' + (ir > 50 ? ' warn' : '') +
-        '" style="width:' + Math.max(5, (a.totalArtifacts / Math.max(a.totalWakes, 1)) * 100) + '%"></div></div></div>';
+        '" style="width:' + Math.max(5, (a.totalArtifacts / Math.max(a.totalWakes, 1)) * 100) + '%"></div></div>' +
+        '<div style="margin-top:8px"><button onclick="wakeNow(\\'' + a.agentId + '\\')" style="font-size:0.75rem;padding:3px 8px;background:#21262d;color:#58a6ff;border:1px solid #30363d;border-radius:4px;cursor:pointer">Wake Now</button></div></div>';
     }).join('');
   } catch (e) {
     document.getElementById('meta').textContent = 'Disconnected: ' + e.message;
@@ -409,6 +410,12 @@ function sendGroupWake() {
   closeModal('group-modal');
   sendCmd('group-wake', { groupId, kind, ...(directive ? {directive} : {}) });
   document.getElementById('gw-directive').value = '';
+}
+
+function wakeNow(agentId) {
+  if (confirm('Wake ' + agentId + ' now?')) {
+    sendCmd('wake-now', { agentId });
+  }
 }
 
 // Populate group dropdown + directive scope on data load
