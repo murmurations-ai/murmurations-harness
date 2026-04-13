@@ -414,6 +414,18 @@ export interface AgentSpawnContext {
    */
   readonly currentSchedule?: string;
   /**
+   * Summary of the agent's write capabilities so it knows what it can
+   * and cannot do. If empty, the agent should flag the gap via a
+   * governance event rather than silently failing.
+   */
+  readonly writeCapabilities?: {
+    readonly canCommit: boolean;
+    readonly commitPaths: readonly string[];
+    readonly canCommentIssues: boolean;
+    readonly canCreateIssues: boolean;
+    readonly canLabelIssues: boolean;
+  };
+  /**
    * Free-form, stable-per-wake environment key/value pairs (e.g. feature
    * flags, debug switches). Executors MUST pass these through to the
    * spawned session but MUST NOT interpret them.
