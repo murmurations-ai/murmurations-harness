@@ -179,7 +179,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1><span id="dot"></span>Murmuration Dashboard</h1>
+<h1><span id="dot"></span><span id="title">Murmuration Dashboard</span></h1>
 <div class="meta" id="meta">Loading...</div>
 
 <div class="overview" id="overview"></div>
@@ -198,7 +198,10 @@ async function refresh() {
     const r = await fetch('/api/status');
     const d = await r.json();
     const m = d.murmuration || {};
-    document.getElementById('meta').textContent = 'v' + d.version + ' | PID ' + d.pid + ' | ' + new Date().toLocaleTimeString();
+    document.getElementById('title').textContent = (d.name || 'Murmuration') + ' Dashboard';
+    document.title = (d.name || 'Murmuration') + ' Dashboard';
+    const ghLink = d.githubUrl ? ' | <a href="' + d.githubUrl + '/issues" style="color:#58a6ff" target="_blank">GitHub Issues</a>' : '';
+    document.getElementById('meta').innerHTML = 'v' + d.version + ' | PID ' + d.pid + ' | ' + new Date().toLocaleTimeString() + ghLink;
 
     // 1. Overview
     const idleRate = m.totalWakes > 0 ? Math.round((m.idleWakes / m.totalWakes) * 100) : 0;

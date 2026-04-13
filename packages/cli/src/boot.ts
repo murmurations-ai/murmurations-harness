@@ -1125,9 +1125,17 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       idleWakes: members.reduce((s, m) => s + m.idleWakes, 0),
       members: members.map((m) => m.agentId),
     }));
+    // Derive murmuration name and GitHub URL
+    const firstScope = allRegistered[0]?.signalScopes?.githubScopes?.[0];
+    const githubUrl = firstScope
+      ? `https://github.com/${firstScope.owner}/${firstScope.repo}`
+      : null;
     return {
       version: HARNESS_VERSION,
       pid: process.pid,
+      name: process.env.MURMURATION_NAME ?? exampleRoot.split("/").pop() ?? "murmuration",
+      rootDir: exampleRoot,
+      ...(githubUrl ? { githubUrl } : {}),
       agentCount: agents.length,
       murmuration: { totalWakes, totalArtifacts, idleWakes: totalIdle, groupCount: groups.length },
       groups,
