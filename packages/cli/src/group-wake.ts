@@ -282,7 +282,12 @@ export const runGroupWakeCommand = async (
   }
 
   const isGovernance = args.includes("--governance");
-  const kind: GroupWakeKind = isGovernance ? "governance" : "operational";
+  const isRetrospective = args.includes("--retrospective");
+  const kind: GroupWakeKind = isGovernance
+    ? "governance"
+    : isRetrospective
+      ? "retrospective"
+      : "operational";
 
   const directiveIdx = args.indexOf("--directive");
   const directiveBody = directiveIdx >= 0 ? args[directiveIdx + 1] : undefined;
@@ -380,6 +385,33 @@ export const runGroupWakeCommand = async (
   const effectiveDirective =
     [directiveBody ?? "", backlogSection].filter(Boolean).join("") || undefined;
 
+  // Load retrospective metrics if this is a retrospective
+  let retrospectiveMetrics: import("@murmuration/core").RetrospectiveMetrics | undefined;
+  if (isRetrospective) {
+    const { AgentStateStore } = await import("@murmuration/core");
+    const stateStore = new AgentStateStore({
+      persistDir: join(root, ".murmuration", "agents"),
+    });
+    await stateStore.load();
+    const agentMetrics = config.members.map((memberId) => {
+      const agent = stateStore.getAgent(memberId);
+      const totalWakes = agent?.totalWakes ?? 0;
+      return {
+        agentId: memberId,
+        totalWakes,
+        totalArtifacts: agent?.totalArtifacts ?? 0,
+        idleWakes: agent?.idleWakes ?? 0,
+        consecutiveFailures: agent?.consecutiveFailures ?? 0,
+        artifactRate: totalWakes > 0 ? (agent?.totalArtifacts ?? 0) / totalWakes : 0,
+        idleRate: totalWakes > 0 ? (agent?.idleWakes ?? 0) / totalWakes : 0,
+      };
+    });
+    retrospectiveMetrics = {
+      agentMetrics,
+      period: `up to ${new Date().toISOString().slice(0, 10)}`,
+    };
+  }
+
   // Build context
   const context: GroupWakeContext = {
     groupId,
@@ -389,6 +421,7 @@ export const runGroupWakeCommand = async (
     signals: [],
     governanceQueue,
     ...(effectiveDirective ? { directiveBody: effectiveDirective } : {}),
+    ...(retrospectiveMetrics ? { retrospectiveMetrics } : {}),
   };
 
   // Run the group wake

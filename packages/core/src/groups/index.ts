@@ -36,7 +36,27 @@ export interface GroupConfig {
 // Circle wake context + result
 // ---------------------------------------------------------------------------
 
-export type GroupWakeKind = "operational" | "governance";
+export type GroupWakeKind = "operational" | "governance" | "retrospective";
+
+/** Per-agent metrics snapshot for retrospective meetings. */
+export interface AgentMetricsSnapshot {
+  readonly agentId: string;
+  readonly totalWakes: number;
+  readonly totalArtifacts: number;
+  readonly idleWakes: number;
+  readonly consecutiveFailures: number;
+  /** Artifact rate: artifacts per wake. 0 if no wakes. */
+  readonly artifactRate: number;
+  /** Idle rate: idle wakes / total wakes. 0 if no wakes. */
+  readonly idleRate: number;
+}
+
+/** Group-level metrics for retrospective context. */
+export interface RetrospectiveMetrics {
+  readonly agentMetrics: readonly AgentMetricsSnapshot[];
+  /** Period this retrospective covers (e.g. "2026-04-07 to 2026-04-12"). */
+  readonly period: string;
+}
 
 export interface GroupWakeContext {
   readonly groupId: string;
@@ -48,6 +68,8 @@ export interface GroupWakeContext {
   /** Map from governance item ID to GitHub issue number (for state-transition actions). */
   readonly governanceIssueMap?: ReadonlyMap<string, number>;
   readonly directiveBody?: string; // if a Source directive triggered this
+  /** Metrics for retrospective meetings. Ignored for other kinds. */
+  readonly retrospectiveMetrics?: RetrospectiveMetrics;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +293,34 @@ For items that need amendments, post a comment with the required changes:
   {"kind": "comment-issue", "issueNumber": NNN, "body": "Amendment required: ..."}`;
 
 // ---------------------------------------------------------------------------
+// Default retrospective prompts
+// ---------------------------------------------------------------------------
+
+const DEFAULT_RETRO_MEMBER_INSTRUCTIONS = `Review the metrics and your experience since the last retrospective. Respond with:
+
+## KEEP
+What's working well? What should we continue doing?
+
+## STOP
+What's not working? What should we stop doing?
+
+## START
+What should we try? What new practices, tools, or changes would help?
+
+Be specific and reference concrete examples. Cite metrics where relevant.`;
+
+const DEFAULT_RETRO_FACILITATOR_INSTRUCTIONS = `Synthesize all member contributions into a retrospective summary.
+
+Produce:
+1. **KEEP** — practices the group agrees to continue (with supporting evidence)
+2. **STOP** — practices to discontinue (with the problem they cause)
+3. **START** — new practices to try (with the expected improvement)
+4. **GOVERNANCE EVENTS** — any findings that need structural change should be filed as governance events
+
+For each START item, create a GitHub issue as an action item so it gets tracked.
+For each finding that needs structural change (role changes, schedule changes, process changes), file it as a governance event in the actions block.`;
+
+// ---------------------------------------------------------------------------
 // Group Wake Runner
 // ---------------------------------------------------------------------------
 
@@ -341,7 +391,13 @@ export const runGroupWake = async (
             })
             .join("\n") || "  (empty)"
         }`
-      : `This is an OPERATIONAL MEETING for the ${context.groupId} group.`;
+      : context.kind === "retrospective"
+        ? `This is a RETROSPECTIVE for the ${context.groupId} group.${
+            context.retrospectiveMetrics
+              ? `\n\nPeriod: ${context.retrospectiveMetrics.period}\n\n## Agent Metrics\n\n${context.retrospectiveMetrics.agentMetrics.map((m) => `  - ${m.agentId}: ${String(m.totalWakes)} wakes, ${String(m.totalArtifacts)} artifacts, ${String(m.idleWakes)} idle (${String(Math.round(m.idleRate * 100))}%), ${String(m.consecutiveFailures)} consecutive failures`).join("\n")}`
+              : ""
+          }`
+        : `This is an OPERATIONAL MEETING for the ${context.groupId} group.`;
 
   const directiveSection = context.directiveBody
     ? `\n\nSOURCE DIRECTIVE:\n${context.directiveBody}\n\nRespond to the Source directive as part of your contribution.`
@@ -374,7 +430,9 @@ You are ${memberId}, a member of the ${context.groupId} group. Provide your cont
 ${
   context.kind === "governance"
     ? (deps.governancePrompts?.memberInstructions ?? DEFAULT_GOV_MEMBER_INSTRUCTIONS)
-    : "Share your perspective on the group.s current priorities, what's working, and what needs attention."
+    : context.kind === "retrospective"
+      ? DEFAULT_RETRO_MEMBER_INSTRUCTIONS
+      : "Share your perspective on the group's current priorities, what's working, and what needs attention."
 }
 
 Keep your contribution focused and concise (3-5 paragraphs).`;
@@ -413,7 +471,9 @@ You are ${context.facilitator}, the facilitator of the ${context.groupId} group.
 ${
   context.kind === "governance"
     ? (deps.governancePrompts?.facilitatorInstructions ?? DEFAULT_GOV_FACILITATOR_INSTRUCTIONS)
-    : `Produce:
+    : context.kind === "retrospective"
+      ? DEFAULT_RETRO_FACILITATOR_INSTRUCTIONS
+      : `Produce:
 1. KEY DECISIONS — what the group agreed on
 2. ACTION ITEMS — who does what by when (each becomes a GitHub issue)
 3. TENSIONS — any new governance items to file
