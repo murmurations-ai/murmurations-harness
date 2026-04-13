@@ -125,7 +125,8 @@ const main = async (): Promise<void> => {
     case "--version":
     case "-v":
     case "version": {
-      process.stdout.write("murmuration 0.0.0 (phase-2d)\n");
+      const { HARNESS_VERSION } = await import("@murmuration/core");
+      process.stdout.write(`murmuration-harness v${HARNESS_VERSION}\n`);
       break;
     }
     case "init": {

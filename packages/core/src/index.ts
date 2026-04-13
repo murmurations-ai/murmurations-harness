@@ -10,6 +10,9 @@
  * Spec: https://github.com/murmurations-ai/murmurations-harness/blob/main/docs/MURMURATION-HARNESS-SPEC.md
  */
 
+/** Harness version. Bumped on each release. */
+export const HARNESS_VERSION = "0.1.0" as const;
+
 export * from "./execution/index.js";
 export * from "./execution/subprocess.js";
 export * from "./execution/in-process.js";
