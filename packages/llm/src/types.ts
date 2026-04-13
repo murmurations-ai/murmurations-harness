@@ -61,9 +61,7 @@ export interface LLMClientCapabilities {
   readonly maxContextTokens: number;
 }
 
-/** Errors-as-values result shape. Local to the package per ADR-0014. */
-export type Result<T, E> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: E };
+/** Re-exported from @murmuration/core for backwards compatibility. */
+export type { Result } from "@murmuration/core";
 
 export type { ModelTier };

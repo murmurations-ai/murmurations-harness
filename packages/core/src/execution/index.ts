@@ -22,6 +22,15 @@ import type { WakeCostRecord } from "../cost/record.js";
  */
 
 // ---------------------------------------------------------------------------
+// Errors-as-values Result type (shared across all packages)
+// ---------------------------------------------------------------------------
+
+/** Errors-as-values result shape. Canonical definition — re-exported by @murmuration/github and @murmuration/llm. */
+export type Result<T, E> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly error: E };
+
+// ---------------------------------------------------------------------------
 // Branded primitives
 // ---------------------------------------------------------------------------
 

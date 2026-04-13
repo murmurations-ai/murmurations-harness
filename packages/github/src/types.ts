@@ -6,10 +6,8 @@
 
 import type { IssueNumber, RepoCoordinate } from "./branded.js";
 
-/** Errors-as-values result shape. Defined locally to avoid a core churn. */
-export type Result<T, E> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: E };
+/** Re-exported from @murmuration/core for backwards compatibility. */
+export type { Result } from "@murmuration/core";
 
 /** The subset of GitHub's issue resource the harness reads. */
 export interface GithubIssue {

@@ -106,7 +106,7 @@ _Define the non-negotiable principles every agent in this murmuration must follo
 _What does this murmuration optimize for?_
 
 - (add your values here)
-`,
+${governance !== "none" ? `\n## Governance model\n\n${governance}\n\nTo activate, boot with: \`murmuration start --governance <path-to-plugin>\`\n` : ""}`,
     "utf8",
   );
 
