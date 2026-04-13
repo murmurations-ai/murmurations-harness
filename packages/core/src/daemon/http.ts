@@ -377,7 +377,7 @@ async function refresh() {
         st('Art/Wake', ar) + st('Idle', ir + '%') + st('Failures', a.consecutiveFailures) +
         '<div class="bar"><div class="bar-fill' + (ir > 50 ? ' warn' : '') +
         '" style="width:' + Math.max(5, (a.totalArtifacts / Math.max(a.totalWakes, 1)) * 100) + '%"></div></div>' +
-        '<div style="margin-top:8px"><button onclick="wakeNow(\\'' + a.agentId + '\\')" style="font-size:0.75rem;padding:3px 8px;background:#21262d;color:#58a6ff;border:1px solid #30363d;border-radius:4px;cursor:pointer">Wake Now</button></div></div>';
+        '<div style="margin-top:8px"><button data-wake="' + a.agentId + '" onclick="wakeNow(\\'' + a.agentId + '\\')" style="font-size:0.75rem;padding:3px 8px;background:#21262d;color:#58a6ff;border:1px solid #30363d;border-radius:4px;cursor:pointer">Wake Now</button></div></div>';
     }).join('');
   } catch (e) {
     document.getElementById('meta').textContent = 'Disconnected: ' + e.message;
@@ -415,9 +415,10 @@ async function sendCmd(method, params) {
       body: JSON.stringify({ method, params })
     });
     const d = await r.json();
-    if (d.ok) { alert(method + ' sent successfully'); refresh(); }
-    else alert('Error: ' + (d.error || 'unknown'));
-  } catch(e) { alert('Failed: ' + e.message); }
+    if (!d.ok) console.error(method + ' failed:', d.error);
+    refresh();
+    return d;
+  } catch(e) { console.error('Command failed:', e.message); return { ok: false }; }
 }
 
 function sendDirective() {
@@ -426,7 +427,7 @@ function sendDirective() {
   const scope = opt.dataset.scope || '--all';
   const target = opt.dataset.target || '';
   const message = document.getElementById('dir-message').value;
-  if (!message.trim()) { alert('Message is required'); return; }
+  if (!message.trim()) return;
   closeModal('directive-modal');
   sendCmd('directive', { scope, target, message });
   document.getElementById('dir-message').value = '';
@@ -459,9 +460,11 @@ async function showAgent(agentId) {
 }
 
 function wakeNow(agentId) {
-  if (confirm('Wake ' + agentId + ' now?')) {
-    sendCmd('wake-now', { agentId });
-  }
+  const btn = document.querySelector('[data-wake="' + agentId + '"]');
+  if (btn) { btn.textContent = 'Waking...'; btn.disabled = true; }
+  sendCmd('wake-now', { agentId }).then(function() {
+    if (btn) { btn.textContent = 'Woken'; setTimeout(function() { btn.textContent = 'Wake Now'; btn.disabled = false; }, 5000); }
+  });
 }
 
 // Populate group dropdown + directive scope on data load
