@@ -30,6 +30,7 @@ import {
   Daemon,
   DispatchExecutor,
   GovernanceGitHubSync,
+  DaemonSocket,
   HARNESS_VERSION,
   DispatchRunArtifactWriter,
   IdentityLoader,
@@ -1036,6 +1037,10 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     );
   };
 
+  const agentStateStore = new AgentStateStore({
+    persistDir: resolve(exampleRoot, ".murmuration", "agents"),
+  });
+
   const needsRebuild = effectiveExecutor !== provisionalExecutor || githubClient !== undefined;
   const effectiveDaemon: Daemon = needsRebuild
     ? new Daemon({
@@ -1053,9 +1058,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         ...(governancePlugin ? { governance: governancePlugin } : {}),
         governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
         ...(governanceSync ? { governanceSync } : {}),
-        agentStateStore: new AgentStateStore({
-          persistDir: resolve(exampleRoot, ".murmuration", "agents"),
-        }),
+        agentStateStore,
         onWakeActions,
         ...(groupConfigs.length > 0 ? { groups: groupConfigs, onGovernanceMeetingDue } : {}),
       })
@@ -1089,13 +1092,48 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   await mkdir(resolve(exampleRoot, ".murmuration"), { recursive: true });
   await writeFile(pidfilePath, String(process.pid), "utf8");
 
-  // Clean up pidfile on exit
+  // Start daemon control socket
+  const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
+  const daemonSocket = new DaemonSocket(socketPath, (method, params) => {
+    switch (method) {
+      case "status": {
+        const agents = agentStateStore.getAllAgents();
+        return Promise.resolve({
+          version: HARNESS_VERSION,
+          pid: process.pid,
+          agentCount: agents.length,
+          agents: agents.map((a) => ({
+            agentId: a.agentId,
+            state: a.currentState,
+            totalWakes: a.totalWakes,
+            totalArtifacts: a.totalArtifacts,
+            idleWakes: a.idleWakes,
+            consecutiveFailures: a.consecutiveFailures,
+          })),
+        });
+      }
+      case "stop":
+        process.kill(process.pid, "SIGTERM");
+        return Promise.resolve({ stopping: true });
+      case "wake-now": {
+        const agentId = params.agentId as string | undefined;
+        if (!agentId) return Promise.reject(new Error("wake-now requires params.agentId"));
+        return Promise.resolve({ queued: true, agentId });
+      }
+      default:
+        return Promise.reject(new Error(`unknown method: ${method}`));
+    }
+  });
+  daemonSocket.start();
+
+  // Clean up pidfile + socket on exit
   const cleanupPid = (): void => {
     try {
       unlinkSync(pidfilePath);
     } catch {
       /* best effort */
     }
+    daemonSocket.stop();
   };
   process.on("exit", cleanupPid);
 
