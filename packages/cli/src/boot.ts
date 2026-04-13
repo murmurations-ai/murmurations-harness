@@ -1236,6 +1236,34 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       ? new DaemonHttp({
           port: httpPort,
           statusHandler: () => Promise.resolve(buildStatus()),
+          commandHandler: async (method, params) => {
+            switch (method) {
+              case "directive": {
+                const { runDirective } = await import("./directive.js");
+                const scope = (params.scope as string | undefined) ?? "--all";
+                const message = (params.message as string | undefined) ?? "";
+                const args = [scope, message, "--root", exampleRoot].filter(Boolean);
+                await runDirective(args, exampleRoot);
+                return { sent: true };
+              }
+              case "group-wake": {
+                const { runGroupWakeCommand } = await import("./group-wake.js");
+                const groupId = (params.groupId as string | undefined) ?? "";
+                const kind = (params.kind as string | undefined) ?? "operational";
+                const args = ["--group", groupId, "--root", exampleRoot];
+                if (kind === "governance") args.push("--governance");
+                if (kind === "retrospective") args.push("--retrospective");
+                if (params.directive) args.push("--directive", params.directive as string);
+                await runGroupWakeCommand(args, exampleRoot);
+                return { convened: true, groupId, kind };
+              }
+              case "stop":
+                process.kill(process.pid, "SIGTERM");
+                return { stopping: true };
+              default:
+                throw new Error(`unknown command: ${method}`);
+            }
+          },
         })
       : null;
   if (daemonHttp) {
