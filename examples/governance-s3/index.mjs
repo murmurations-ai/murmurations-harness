@@ -81,6 +81,13 @@ const S3GovernancePlugin = {
   name: "self-organizing",
   version: "0.1.0",
 
+  terminology: {
+    group: "circle",
+    groupPlural: "circles",
+    governanceItem: "proposal",
+    governanceEvent: "tension",
+  },
+
   stateGraphs() {
     return [TENSION_GRAPH, PROPOSAL_GRAPH];
   },
