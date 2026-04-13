@@ -252,7 +252,7 @@ async function refresh() {
       govHtml += '<div class="group-card"><h3>Pending ' + itemLabel + 's (' + pending.length + ')</h3>';
       govHtml += pending.map(i => {
         const label = '[' + i.kind + '] ' + (i.topic || '(no topic)').slice(0, 60);
-        const link = ghIssuesUrl ? '<a href="' + ghIssuesUrl + '?q=is:open+label:%22governance:' + i.kind + '%22" style="color:#8b949e" target="_blank">' + label + '</a>' : label;
+        const link = ghIssuesUrl ? '<a href="' + ghIssuesUrl + '?q=is:open+%5B' + i.kind.toUpperCase() + '%5D+in:title" style="color:#8b949e" target="_blank">' + label + '</a>' : label;
         return '<div class="stat"><span class="label">' + link + '</span><span class="value state-running">' + i.state + '</span></div>';
       }).join('');
       govHtml += '</div>';
@@ -261,7 +261,7 @@ async function refresh() {
       govHtml += '<div class="group-card"><h3>Recent Decisions</h3>';
       govHtml += recent.map(i => {
         const label = '[' + i.kind + '] ' + (i.topic || '(no topic)').slice(0, 60);
-        const link = ghIssuesUrl ? '<a href="' + ghIssuesUrl + '?q=is:closed+label:%22governance:' + i.kind + '%22" style="color:#8b949e" target="_blank">' + label + '</a>' : label;
+        const link = ghIssuesUrl ? '<a href="' + ghIssuesUrl + '?q=is:closed+%5B' + i.kind.toUpperCase() + '%5D+in:title" style="color:#8b949e" target="_blank">' + label + '</a>' : label;
         return '<div class="stat"><span class="label">' + link + '</span><span class="value state-idle">' + i.state + '</span></div>';
       }).join('');
       govHtml += '</div>';
