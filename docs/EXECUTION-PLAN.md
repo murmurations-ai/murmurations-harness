@@ -210,17 +210,18 @@ blocked
 
 ### Phase 5 — Session Manager + Web Dashboard
 
-**The operator's daily interface.** Session manager (#68) and web dashboard share the same daemon socket infrastructure.
+**The operator's daily interface.** Three interfaces on one data layer: TUI (terminal), REPL (interactive attach), Web (browser/phone). All connect through the daemon socket.
 
 | Step | What                                                                                                                       | Status |
 | ---- | -------------------------------------------------------------------------------------------------------------------------- | ------ |
 | 5.1  | **Session registry** — `~/.murmuration/sessions.json`, `murmuration register/unregister/list`, `--name` alias for `--root` | TODO   |
 | 5.2  | **Daemon socket** — Unix domain socket at `.murmuration/daemon.sock`, JSON-RPC protocol for commands + streaming           | TODO   |
 | 5.3  | **Attach REPL** — `murmuration attach <name>`, leader key (Ctrl-M), interactive command dispatch, detach/switch            | TODO   |
-| 5.4  | Extract shared dashboard-data package from dashboard-tui                                                                   | TODO   |
-| 5.5  | SSE bridge from daemon socket → web clients                                                                                | TODO   |
-| 5.6  | pi-web-ui frontend (same 4 panels)                                                                                         | TODO   |
-| 5.7  | Remote management (phone/laptop)                                                                                           | TODO   |
+| 5.4  | **TUI → socket client** — migrate dashboard-tui from direct AgentStateStore reference to daemon socket client              | TODO   |
+| 5.5  | Extract shared dashboard-data package (consumed by TUI, REPL, and web)                                                     | TODO   |
+| 5.6  | SSE bridge from daemon socket → web clients                                                                                | TODO   |
+| 5.7  | pi-web-ui frontend (same 4 panels as TUI)                                                                                  | TODO   |
+| 5.8  | Remote management (phone/laptop)                                                                                           | TODO   |
 
 ### Phase 6 — Multi-Instance Murmurations
 
