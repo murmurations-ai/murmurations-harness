@@ -106,7 +106,26 @@ _Define the non-negotiable principles every agent in this murmuration must follo
 _What does this murmuration optimize for?_
 
 - (add your values here)
-${governance !== "none" ? `\n## Governance model\n\n${governance}\n\nTo activate, boot with: \`murmuration start --governance <path-to-plugin>\`\n` : ""}`,
+`,
+    "utf8",
+  );
+
+  // murmuration/harness.yaml — runtime config
+  const governancePluginMap: Record<string, string> = {
+    "self-organizing": "@murmuration/governance-s3",
+    "chain-of-command": "@murmuration/governance-command",
+    meritocratic: "@murmuration/governance-meritocratic",
+    consensus: "@murmuration/governance-consensus",
+    parliamentary: "@murmuration/governance-parliamentary",
+  };
+  const governancePlugin = governancePluginMap[governance];
+  await writeFile(
+    join(targetDir, "murmuration", "harness.yaml"),
+    `# Murmuration Harness configuration
+# This file is read by the daemon at boot.
+
+${governance !== "none" ? `governance:\n  model: "${governance}"\n  plugin: "${governancePlugin ?? governance}"` : "governance:\n  model: none"}
+`,
     "utf8",
   );
 

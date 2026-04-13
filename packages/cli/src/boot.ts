@@ -519,10 +519,24 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const dryRun = options.dryRun === true;
   const once = options.once === true;
 
-  // Load governance plugin if specified.
+  // Load governance plugin — from CLI flag, or from murmuration/harness.yaml
+  let governancePath = options.governancePath;
+  if (!governancePath) {
+    // Try reading from murmuration/harness.yaml
+    try {
+      const { readFile: rf } = await import("node:fs/promises");
+      const harnessYaml = await rf(resolve(exampleRoot, "murmuration", "harness.yaml"), "utf8");
+      const pluginMatch = /plugin:\s*"?([^"\n]+)"?/i.exec(harnessYaml);
+      if (pluginMatch?.[1] && pluginMatch[1] !== "none") {
+        governancePath = pluginMatch[1];
+      }
+    } catch {
+      // No harness.yaml — that's fine, use no-op governance
+    }
+  }
   let governancePlugin: import("@murmuration/core").GovernancePlugin | undefined;
-  if (options.governancePath) {
-    const pluginUrl = pathToFileURL(resolve(options.governancePath)).href;
+  if (governancePath) {
+    const pluginUrl = pathToFileURL(resolve(governancePath)).href;
     const mod = (await import(pluginUrl)) as { default?: unknown };
     const candidate: unknown = mod.default;
     if (
@@ -532,7 +546,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       typeof (candidate as { onEventsEmitted?: unknown }).onEventsEmitted !== "function"
     ) {
       process.stderr.write(
-        `murmuration: governance module at ${options.governancePath} must export a GovernancePlugin as default\n`,
+        `murmuration: governance module at ${governancePath} must export a GovernancePlugin as default\n`,
       );
       process.exit(78);
     }
