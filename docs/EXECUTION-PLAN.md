@@ -208,23 +208,30 @@ blocked
 | 4.3  | OKR plugin example                                                                                                                                                                                                                                              | Not started                    |
 | 4.4  | Dashboard strategy panel                                                                                                                                                                                                                                        | Not started                    |
 
-### Phase 5 — Web Dashboard
+### Phase 5 — Session Manager + Web Dashboard
 
-| Step | What                                                     | Status |
-| ---- | -------------------------------------------------------- | ------ |
-| 5.1  | Extract shared dashboard-data package from dashboard-tui | TODO   |
-| 5.2  | SSE endpoint on daemon for real-time activity feed       | TODO   |
-| 5.3  | pi-web-ui frontend (same 4 panels)                       | TODO   |
-| 5.4  | Remote management (phone/laptop)                         | TODO   |
+**The operator's daily interface.** Session manager (#68) and web dashboard share the same daemon socket infrastructure.
+
+| Step | What                                                                                                                       | Status |
+| ---- | -------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 5.1  | **Session registry** — `~/.murmuration/sessions.json`, `murmuration register/unregister/list`, `--name` alias for `--root` | TODO   |
+| 5.2  | **Daemon socket** — Unix domain socket at `.murmuration/daemon.sock`, JSON-RPC protocol for commands + streaming           | TODO   |
+| 5.3  | **Attach REPL** — `murmuration attach <name>`, leader key (Ctrl-M), interactive command dispatch, detach/switch            | TODO   |
+| 5.4  | Extract shared dashboard-data package from dashboard-tui                                                                   | TODO   |
+| 5.5  | SSE bridge from daemon socket → web clients                                                                                | TODO   |
+| 5.6  | pi-web-ui frontend (same 4 panels)                                                                                         | TODO   |
+| 5.7  | Remote management (phone/laptop)                                                                                           | TODO   |
 
 ### Phase 6 — Multi-Instance Murmurations
+
+**Multiple daemons in the same murmuration** (different machines, different LLM providers). The session manager handles multiple murmurations on one operator's machine; multi-instance handles multiple daemons in one murmuration.
 
 | Step | What                                                       | Status                               |
 | ---- | ---------------------------------------------------------- | ------------------------------------ |
 | 6.1  | `murmuration/harness.yaml` — instance-to-agent assignments | Specced                              |
 | 6.2  | Daemon reads only its assigned agents                      | TODO                                 |
 | 6.3  | Cross-instance signal visibility                           | TODO (GitHub handles this naturally) |
-| 6.4  | Cross-instance circle meetings                             | TODO                                 |
+| 6.4  | Cross-instance group meetings                              | TODO                                 |
 
 ### Phase 7 — Production Hardening
 
