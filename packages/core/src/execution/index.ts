@@ -388,6 +388,32 @@ export interface CostActuals {
 }
 
 // ---------------------------------------------------------------------------
+// Agent capabilities (what the agent can do)
+// ---------------------------------------------------------------------------
+
+/**
+ * Summary of an agent's available capabilities. Injected into the spawn
+ * context so the agent knows what tools and access it has. Any gap that
+ * prevents the agent from fulfilling its role should be raised as a
+ * governance event — not silently accepted.
+ */
+export interface AgentCapabilities {
+  readonly github: {
+    readonly canCommit: boolean;
+    readonly commitPaths: readonly string[];
+    readonly canCommentIssues: boolean;
+    readonly canCreateIssues: boolean;
+    readonly canLabelIssues: boolean;
+  };
+  /** CLI tools available (e.g. ["gh", "gcloud"]). From role.md tools.cli. */
+  readonly cliTools: readonly string[];
+  /** MCP servers available (e.g. ["notion", "slack"]). From role.md tools.mcp. */
+  readonly mcpServers: readonly string[];
+  /** Signal sources configured (e.g. ["github-issue", "private-note"]). */
+  readonly signalSources: readonly string[];
+}
+
+// ---------------------------------------------------------------------------
 // Spawn context (what the executor receives)
 // ---------------------------------------------------------------------------
 
@@ -414,17 +440,14 @@ export interface AgentSpawnContext {
    */
   readonly currentSchedule?: string;
   /**
-   * Summary of the agent's write capabilities so it knows what it can
-   * and cannot do. If empty, the agent should flag the gap via a
-   * governance event rather than silently failing.
+   * Summary of the agent's available capabilities — tools, access,
+   * and resources. Injected so the agent knows what it can and cannot
+   * do. Any capability gap that prevents the agent from fulfilling
+   * its role should be raised as a GOVERNANCE_EVENT requesting the
+   * missing capability. This applies to ALL capabilities: GitHub
+   * read/write, MCP servers, CLI tools, signal sources, etc.
    */
-  readonly writeCapabilities?: {
-    readonly canCommit: boolean;
-    readonly commitPaths: readonly string[];
-    readonly canCommentIssues: boolean;
-    readonly canCreateIssues: boolean;
-    readonly canLabelIssues: boolean;
-  };
+  readonly capabilities?: AgentCapabilities;
   /**
    * Free-form, stable-per-wake environment key/value pairs (e.g. feature
    * flags, debug switches). Executors MUST pass these through to the

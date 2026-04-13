@@ -1181,12 +1181,17 @@ const buildSpawnContext = async (
     wakeMode: "individual" as const,
     budget,
     currentSchedule: formatTrigger(agent.trigger),
-    writeCapabilities: {
-      canCommit: agent.githubWriteScopes.branchCommits.length > 0,
-      commitPaths: agent.githubWriteScopes.branchCommits.flatMap((b) => b.paths),
-      canCommentIssues: agent.githubWriteScopes.issueComments.length > 0,
-      canCreateIssues: agent.githubWriteScopes.issues.length > 0,
-      canLabelIssues: agent.githubWriteScopes.labels.length > 0,
+    capabilities: {
+      github: {
+        canCommit: agent.githubWriteScopes.branchCommits.length > 0,
+        commitPaths: agent.githubWriteScopes.branchCommits.flatMap((b) => b.paths),
+        canCommentIssues: agent.githubWriteScopes.issueComments.length > 0,
+        canCreateIssues: agent.githubWriteScopes.issues.length > 0,
+        canLabelIssues: agent.githubWriteScopes.labels.length > 0,
+      },
+      cliTools: [], // populated from role.md tools.cli when implemented
+      mcpServers: [], // populated from role.md tools.mcp when implemented
+      signalSources: agent.signalScopes?.sources ?? [],
     },
     environment: {},
   };
