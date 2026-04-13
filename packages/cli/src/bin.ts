@@ -17,6 +17,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { runAttach } from "./attach.js";
 import { runBacklog } from "./backlog.js";
 import { bootDaemon } from "./boot.js";
 import { runGroupWakeCommand } from "./group-wake.js";
@@ -190,6 +191,7 @@ Usage:
   murmuration status [--root|--name]     Show daemon status and agent summary
   murmuration stop [--root|--name]      Stop the running daemon gracefully
   murmuration restart [--root|--name]   Stop and restart (picks up new code)
+  murmuration attach <name>              Interactive REPL connected to a running daemon
   murmuration register <name> --root <path>  Register a murmuration by name
   murmuration unregister <name>         Remove a registered murmuration
   murmuration list                      Show all registered murmurations
@@ -282,6 +284,16 @@ const main = async (): Promise<void> => {
     }
     case "list": {
       await listSessions();
+      break;
+    }
+    case "attach": {
+      const attachName = argv[1];
+      if (!attachName || attachName.startsWith("--")) {
+        console.error("murmuration attach: <name> is required (use a registered session name)");
+        process.exit(2);
+      }
+      const attachRoot = resolveSessionRoot(attachName);
+      await runAttach(attachRoot, attachName);
       break;
     }
     case "stop": {
