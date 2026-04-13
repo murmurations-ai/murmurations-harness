@@ -22,9 +22,30 @@ import { bootDaemon } from "./boot.js";
 import { runGroupWakeCommand } from "./group-wake.js";
 import { runDirective } from "./directive.js";
 import { runInit } from "./init.js";
+import {
+  listSessions,
+  registerSession,
+  resolveSessionRoot,
+  unregisterSession,
+} from "./sessions.js";
 
 const argv = process.argv.slice(2);
 const command = argv[0];
+
+/** Resolve root dir from --root or --name (session registry). */
+const resolveRoot = (args: readonly string[], fallback = "."): string => {
+  const rootIdx = args.indexOf("--root");
+  if (rootIdx >= 0) {
+    const val = args[rootIdx + 1];
+    return val ?? fallback;
+  }
+  const nameIdx = args.indexOf("--name");
+  if (nameIdx >= 0) {
+    const val = args[nameIdx + 1];
+    if (val) return resolveSessionRoot(val);
+  }
+  return fallback;
+};
 
 /** Stop a running daemon by reading its pidfile and sending SIGTERM. */
 const stopDaemon = async (rootDir: string): Promise<void> => {
@@ -132,6 +153,11 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
       if (next === undefined) throw new Error("--root requires a value");
       rootDir = next;
       i++;
+    } else if (arg === "--name") {
+      const next = rest[i + 1];
+      if (next === undefined) throw new Error("--name requires a value");
+      rootDir = resolveSessionRoot(next);
+      i++;
     } else if (arg === "--agent") {
       const next = rest[i + 1];
       if (next === undefined) throw new Error("--agent requires a value");
@@ -161,12 +187,16 @@ Usage:
   murmuration directive --list          Show all directives and responses
   murmuration group-wake [options]     Convene a group meeting (on demand)
   murmuration backlog [options]         View/refresh a group's GitHub work queue
-  murmuration status [--root <path>]     Show daemon status and agent summary
-  murmuration stop [--root <path>]      Stop the running daemon gracefully
-  murmuration restart [--root <path>]   Stop and restart the daemon (picks up new code)
+  murmuration status [--root|--name]     Show daemon status and agent summary
+  murmuration stop [--root|--name]      Stop the running daemon gracefully
+  murmuration restart [--root|--name]   Stop and restart (picks up new code)
+  murmuration register <name> --root <path>  Register a murmuration by name
+  murmuration unregister <name>         Remove a registered murmuration
+  murmuration list                      Show all registered murmurations
 
 start options:
   --root <path>    Identity root directory (default: bundled hello-world example)
+  --name <name>    Use a registered murmuration name instead of --root
   --agent <id>     Agent dir under <root>/agents/ (default: all agents when
                    --root is set, "hello-world" when --root is omitted)
   --dry-run        Construct every GithubClient without writeScopes so
@@ -216,39 +246,55 @@ const main = async (): Promise<void> => {
       break;
     }
     case "backlog": {
-      const rootIdxB = argv.indexOf("--root");
-      const rootDirB = (rootIdxB >= 0 ? argv[rootIdxB + 1] : undefined) ?? ".";
-      await runBacklog(argv.slice(1), rootDirB);
+      await runBacklog(argv.slice(1), resolveRoot(argv.slice(1)));
       break;
     }
     case "group-wake": {
-      const rootIdx2 = argv.indexOf("--root");
-      const rootDir2 = (rootIdx2 >= 0 ? argv[rootIdx2 + 1] : undefined) ?? ".";
-      await runGroupWakeCommand(argv.slice(1), rootDir2);
+      await runGroupWakeCommand(argv.slice(1), resolveRoot(argv.slice(1)));
       break;
     }
     case "directive": {
-      const rootIdx = argv.indexOf("--root");
-      const rootDir = (rootIdx >= 0 ? argv[rootIdx + 1] : undefined) ?? ".";
-      await runDirective(argv.slice(1), rootDir);
+      await runDirective(argv.slice(1), resolveRoot(argv.slice(1)));
+      break;
+    }
+    case "register": {
+      const name = argv[1];
+      if (!name || name.startsWith("--")) {
+        console.error("murmuration register: <name> is required");
+        process.exit(2);
+      }
+      const regRoot = resolveRoot(argv.slice(2));
+      if (regRoot === ".") {
+        console.error("murmuration register: --root <path> is required");
+        process.exit(2);
+      }
+      registerSession(name, regRoot);
+      break;
+    }
+    case "unregister": {
+      const name = argv[1];
+      if (!name || name.startsWith("--")) {
+        console.error("murmuration unregister: <name> is required");
+        process.exit(2);
+      }
+      unregisterSession(name);
+      break;
+    }
+    case "list": {
+      await listSessions();
       break;
     }
     case "stop": {
-      const rootIdx3 = argv.indexOf("--root");
-      const rootDir3 = (rootIdx3 >= 0 ? argv[rootIdx3 + 1] : undefined) ?? ".";
-      await stopDaemon(rootDir3);
+      await stopDaemon(resolveRoot(argv.slice(1)));
       break;
     }
     case "restart": {
-      const rootIdx4 = argv.indexOf("--root");
-      const rootDir4 = (rootIdx4 >= 0 ? argv[rootIdx4 + 1] : undefined) ?? ".";
-      await stopDaemon(rootDir4);
-      // Small delay to let the daemon finish cleanup
+      const restartRoot = resolveRoot(argv.slice(1));
+      await stopDaemon(restartRoot);
       await new Promise((r) => setTimeout(r, 1000));
-      // Re-exec start with the original args (minus "restart" → "start")
       const restartArgs = argv.slice(1);
       await bootDaemon({
-        ...(rootDir4 !== "." ? { rootDir: rootDir4 } : {}),
+        ...(restartRoot !== "." ? { rootDir: restartRoot } : {}),
         ...(restartArgs.includes("--agent")
           ? { agentDir: restartArgs[restartArgs.indexOf("--agent") + 1] }
           : {}),
@@ -260,9 +306,7 @@ const main = async (): Promise<void> => {
       break;
     }
     case "status": {
-      const rootIdx5 = argv.indexOf("--root");
-      const rootDir5 = (rootIdx5 >= 0 ? argv[rootIdx5 + 1] : undefined) ?? ".";
-      await showStatus(rootDir5);
+      await showStatus(resolveRoot(argv.slice(1)));
       break;
     }
     default: {
