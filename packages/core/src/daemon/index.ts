@@ -1055,6 +1055,19 @@ export class Daemon {
 // Helpers
 // ---------------------------------------------------------------------------
 
+const formatTrigger = (trigger: WakeTrigger): string => {
+  switch (trigger.kind) {
+    case "cron":
+      return `cron: ${trigger.expression}${trigger.tz ? ` (${trigger.tz})` : ""}`;
+    case "interval":
+      return `interval: ${String(trigger.intervalMs)}ms`;
+    case "delay-once":
+      return `delay-once: ${String(trigger.delayMs)}ms`;
+    default:
+      return "unknown";
+  }
+};
+
 const buildSpawnContext = async (
   agent: RegisteredAgent,
   event: ScheduledWakeEvent,
@@ -1167,6 +1180,7 @@ const buildSpawnContext = async (
     wakeReason: event.wakeReason,
     wakeMode: "individual" as const,
     budget,
+    currentSchedule: formatTrigger(agent.trigger),
     environment: {},
   };
 };

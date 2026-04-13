@@ -381,6 +381,13 @@ export interface AgentSpawnContext {
   readonly wakeMode: WakeMode;
   readonly budget: CostBudget;
   /**
+   * The agent's current wake schedule as a human-readable string
+   * (e.g. "cron: 30 19 * * *" or "interval: 3600000ms"). Injected
+   * so the agent can reference it when proposing schedule changes
+   * via governance events.
+   */
+  readonly currentSchedule?: string;
+  /**
    * Free-form, stable-per-wake environment key/value pairs (e.g. feature
    * flags, debug switches). Executors MUST pass these through to the
    * spawned session but MUST NOT interpret them.
