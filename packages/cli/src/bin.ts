@@ -14,6 +14,9 @@
  *                   client layer per ADR-0017 §4 (Phase 2C6 gate)
  */
 
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { runBacklog } from "./backlog.js";
 import { bootDaemon } from "./boot.js";
 import { runGroupWakeCommand } from "./group-wake.js";
@@ -22,6 +25,84 @@ import { runInit } from "./init.js";
 
 const argv = process.argv.slice(2);
 const command = argv[0];
+
+/** Stop a running daemon by reading its pidfile and sending SIGTERM. */
+const stopDaemon = async (rootDir: string): Promise<void> => {
+  const pidfile = resolve(rootDir, ".murmuration", "daemon.pid");
+  if (!existsSync(pidfile)) {
+    console.error(
+      "murmuration stop: no running daemon found (no pidfile at .murmuration/daemon.pid)",
+    );
+    process.exit(1);
+  }
+  const pid = parseInt(readFileSync(pidfile, "utf8").trim(), 10);
+  if (isNaN(pid)) {
+    console.error("murmuration stop: invalid pidfile content");
+    process.exit(1);
+  }
+  try {
+    process.kill(pid, "SIGTERM");
+    console.log(`murmuration stop: sent SIGTERM to daemon (PID ${String(pid)})`);
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code;
+    if (code === "ESRCH") {
+      console.log(
+        `murmuration stop: daemon (PID ${String(pid)}) is not running — cleaning up stale pidfile`,
+      );
+      try {
+        await (await import("node:fs/promises")).unlink(pidfile);
+      } catch {
+        /* ok */
+      }
+    } else {
+      console.error(
+        `murmuration stop: failed to send SIGTERM to PID ${String(pid)} — ${err instanceof Error ? err.message : String(err)}`,
+      );
+      process.exit(1);
+    }
+  }
+};
+
+/** Show daemon status from pidfile + agent state store. */
+const showStatus = async (rootDir: string): Promise<void> => {
+  const pidfile = resolve(rootDir, ".murmuration", "daemon.pid");
+  const { HARNESS_VERSION } = await import("@murmuration/core");
+  console.log(`murmuration-harness v${HARNESS_VERSION}`);
+
+  if (!existsSync(pidfile)) {
+    console.log("Daemon: not running");
+    return;
+  }
+  const pid = parseInt(readFileSync(pidfile, "utf8").trim(), 10);
+  let running = false;
+  try {
+    process.kill(pid, 0); // signal 0 = check if process exists
+    running = true;
+  } catch {
+    /* not running */
+  }
+  console.log(
+    `Daemon: ${running ? `running (PID ${String(pid)})` : "not running (stale pidfile)"}`,
+  );
+
+  // Show agent summary from state store
+  const { AgentStateStore } = await import("@murmuration/core");
+  const store = new AgentStateStore({ persistDir: resolve(rootDir, ".murmuration", "agents") });
+  const loaded = await store.load();
+  if (loaded > 0) {
+    const agents = store.getAllAgents();
+    console.log(`Agents: ${String(agents.length)} registered`);
+    for (const a of agents) {
+      const idle =
+        a.totalWakes > 0
+          ? `${String(Math.round((a.idleWakes / a.totalWakes) * 100))}% idle`
+          : "no wakes";
+      console.log(
+        `  ${a.agentId.padEnd(25)} ${a.currentState.padEnd(12)} ${String(a.totalWakes).padStart(3)} wakes  ${String(a.totalArtifacts).padStart(3)} artifacts  ${idle}`,
+      );
+    }
+  }
+};
 
 interface StartArgs {
   readonly rootDir: string | undefined;
@@ -80,8 +161,9 @@ Usage:
   murmuration directive --list          Show all directives and responses
   murmuration group-wake [options]     Convene a group meeting (on demand)
   murmuration backlog [options]         View/refresh a group's GitHub work queue
-  murmuration status                    (future) Print daemon status
-  murmuration stop                      (future) Send SIGTERM to a running daemon
+  murmuration status [--root <path>]     Show daemon status and agent summary
+  murmuration stop [--root <path>]      Stop the running daemon gracefully
+  murmuration restart [--root <path>]   Stop and restart the daemon (picks up new code)
 
 start options:
   --root <path>    Identity root directory (default: bundled hello-world example)
@@ -151,11 +233,36 @@ const main = async (): Promise<void> => {
       await runDirective(argv.slice(1), rootDir);
       break;
     }
-    case "status":
     case "stop": {
-      process.stderr.write(`murmuration: \`${command}\` is not yet implemented.\n`);
-      process.stderr.write(usage());
-      process.exit(2);
+      const rootIdx3 = argv.indexOf("--root");
+      const rootDir3 = (rootIdx3 >= 0 ? argv[rootIdx3 + 1] : undefined) ?? ".";
+      await stopDaemon(rootDir3);
+      break;
+    }
+    case "restart": {
+      const rootIdx4 = argv.indexOf("--root");
+      const rootDir4 = (rootIdx4 >= 0 ? argv[rootIdx4 + 1] : undefined) ?? ".";
+      await stopDaemon(rootDir4);
+      // Small delay to let the daemon finish cleanup
+      await new Promise((r) => setTimeout(r, 1000));
+      // Re-exec start with the original args (minus "restart" → "start")
+      const restartArgs = argv.slice(1);
+      await bootDaemon({
+        ...(rootDir4 !== "." ? { rootDir: rootDir4 } : {}),
+        ...(restartArgs.includes("--agent")
+          ? { agentDir: restartArgs[restartArgs.indexOf("--agent") + 1] }
+          : {}),
+        ...(restartArgs.includes("--dry-run") ? { dryRun: true } : {}),
+        ...(restartArgs.includes("--governance")
+          ? { governancePath: restartArgs[restartArgs.indexOf("--governance") + 1] }
+          : {}),
+      });
+      break;
+    }
+    case "status": {
+      const rootIdx5 = argv.indexOf("--root");
+      const rootDir5 = (rootIdx5 >= 0 ? argv[rootIdx5 + 1] : undefined) ?? ".";
+      await showStatus(rootDir5);
       break;
     }
     default: {

@@ -20,8 +20,8 @@
  * gate test still runs without a real GITHUB_TOKEN on the machine.
  */
 
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { existsSync, unlinkSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -1083,6 +1083,21 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       shutdown("SIGTERM");
     });
   });
+
+  // Write pidfile so `murmuration stop` and `murmuration restart` can find us
+  const pidfilePath = resolve(exampleRoot, ".murmuration", "daemon.pid");
+  await mkdir(resolve(exampleRoot, ".murmuration"), { recursive: true });
+  await writeFile(pidfilePath, String(process.pid), "utf8");
+
+  // Clean up pidfile on exit
+  const cleanupPid = (): void => {
+    try {
+      unlinkSync(pidfilePath);
+    } catch {
+      /* best effort */
+    }
+  };
+  process.on("exit", cleanupPid);
 
   effectiveDaemon.start();
 
