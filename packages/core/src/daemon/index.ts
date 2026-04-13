@@ -657,7 +657,7 @@ export class Daemon {
         sourceId: "governance-inbox",
         data: evt,
         id: `gov-${randomUUID()}`,
-        trust: "trusted" as const,
+        trust: "semi-trusted" as const,
         fetchedAt: new Date(),
       }));
       context = {

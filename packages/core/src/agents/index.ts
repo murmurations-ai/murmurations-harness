@@ -59,10 +59,27 @@ export interface AgentRecord {
 }
 
 // ---------------------------------------------------------------------------
-// Store
+// Store interface + implementation
 // ---------------------------------------------------------------------------
 
-export class AgentStateStore {
+/** Interface for agent state storage — enables SSE/web dashboard implementations. */
+export interface IAgentStateStore {
+  register(agentId: string, maxWallClockMs: number): void;
+  transition(agentId: string, to: AgentLifecycleState, wakeId?: string): void;
+  recordWakeOutcome(
+    wakeId: string,
+    outcome: WakeOutcome,
+    options?: { errorMessage?: string; costMicros?: number; artifactCount?: number },
+  ): void;
+  getAgent(agentId: string): AgentRecord | undefined;
+  getAllAgents(): readonly AgentRecord[];
+  getRecentWakes(agentId: string, limit?: number): readonly AgentWakeInstance[];
+  getStalledAgents(): readonly AgentRecord[];
+  load(): Promise<number>;
+  flush(): Promise<void>;
+}
+
+export class AgentStateStore implements IAgentStateStore {
   readonly #agents = new Map<string, AgentRecord>();
   readonly #wakes = new Map<string, AgentWakeInstance>();
   readonly #wakesByAgent = new Map<string, string[]>(); // agentId → wakeId[]

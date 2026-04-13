@@ -175,7 +175,27 @@ export interface GovernanceItemFilter {
  * In-memory when `persistDir` is omitted (tests, Phase 1/2 behavior).
  * Durable when `persistDir` is set (production daemon restarts).
  */
-export class GovernanceStateStore {
+
+/** Interface for governance state storage — enables GitHub-backed or SSE implementations. */
+export interface IGovernanceStateStore {
+  registerGraph(graph: GovernanceStateGraph): void;
+  graphs(): readonly GovernanceStateGraph[];
+  create(
+    kind: string,
+    createdBy: AgentId,
+    payload: unknown,
+    options?: { reviewAt?: Date },
+  ): GovernanceItem;
+  transition(itemId: string, to: string, triggeredBy: string, reason?: string): GovernanceItem;
+  get(itemId: string): GovernanceItem | undefined;
+  query(filter?: GovernanceItemFilter): readonly GovernanceItem[];
+  buildDecisionRecord(itemId: string, summary: string): GovernanceDecisionRecord;
+  size(): number;
+  load(): Promise<number>;
+  flush(): Promise<void>;
+}
+
+export class GovernanceStateStore implements IGovernanceStateStore {
   readonly #items = new Map<string, GovernanceItem>();
   readonly #graphs = new Map<string, GovernanceStateGraph>();
   readonly #now: () => Date;

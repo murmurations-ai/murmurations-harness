@@ -215,6 +215,23 @@ export type WakeReason =
 export type WakeMode = "individual" | "group-member" | "group-facilitator";
 
 /**
+ * Render a signal for inclusion in an LLM prompt with trust-level enforcement.
+ * Untrusted content is wrapped in delimiters that instruct the LLM to treat
+ * it as data, not instructions. This prevents prompt injection from GitHub
+ * issue titles/bodies written by external users.
+ */
+export const renderSignalForPrompt = (signal: Signal): string => {
+  const json = JSON.stringify(signal).slice(0, 200);
+  if (signal.trust === "untrusted" || signal.trust === "unknown") {
+    return `<untrusted-signal>${json}</untrusted-signal>`;
+  }
+  if (signal.trust === "semi-trusted") {
+    return `<semi-trusted-signal>${json}</semi-trusted-signal>`;
+  }
+  return json;
+};
+
+/**
  * Trust level tag for a signal, per carry-forward
  * {@link https://github.com/murmurations-ai/murmurations-harness/issues/4 | #4}
  * (Security Agent #25). The Security Agent owns the authoritative
