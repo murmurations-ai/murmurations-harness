@@ -127,6 +127,10 @@ const ConsensusPlugin = {
 
     if (!tier || tier === "autonomous") return { allow: true };
 
+    if (tier === "source") {
+      return { allow: false, reason: `Action "${action}" requires the full assembly's consensus (tier: source).` };
+    }
+
     if (tier === "consent" || tier === "consensus") {
       // Consensus requires an agreed proposal
       const agreed = store.query({ kind: "proposal", state: "agreed" });

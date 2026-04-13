@@ -116,6 +116,10 @@ const MeritocraticPlugin = {
 
     if (!tier || tier === "autonomous") return { allow: true };
 
+    if (tier === "source") {
+      return { allow: false, reason: `Action "${action}" requires guild expert consensus (tier: source).` };
+    }
+
     if (tier === "consent" || tier === "expert") {
       // Check for an adopted standard covering this action
       const adopted = store.query({ kind: "standard", state: "adopted" });

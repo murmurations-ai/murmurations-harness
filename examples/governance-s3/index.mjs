@@ -116,6 +116,7 @@ const S3GovernancePlugin = {
 
     for (const event of batch.events) {
       switch (event.kind) {
+        case "agent-governance-event":
         case S3_TENSION: {
           // Create a tracked tension item in the store.
           const item = store.create("tension", batch.agentId, event.payload);
