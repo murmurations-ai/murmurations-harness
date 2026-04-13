@@ -4,6 +4,7 @@ import {
   isCompleted,
   isFailed,
   parseSelfReflection,
+  renderSignalForPrompt,
   validateWake,
   isKilled,
   isTimedOut,
@@ -372,5 +373,56 @@ GOVERNANCE_EVENT: none`;
     expect(r.effectiveness).toBe("unknown");
     expect(r.observation).toBe("");
     expect(r.governanceEvent).toBeNull();
+  });
+
+  it("prefers GOVERNANCE_EVENT over TENSION when both present", () => {
+    const text = `## Self-Reflection
+EFFECTIVENESS: high
+OBSERVATION: Done.
+GOVERNANCE_EVENT: Pipeline needs restructuring.
+TENSION: Old tension format.`;
+
+    const r = parseSelfReflection(text);
+    expect(r.governanceEvent).toBe("Pipeline needs restructuring.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// renderSignalForPrompt
+// ---------------------------------------------------------------------------
+
+describe("renderSignalForPrompt", () => {
+  const baseSignal = {
+    kind: "github-issue" as const,
+    id: "test-1",
+    fetchedAt: new Date(),
+    number: 1,
+    title: "Test",
+    url: "https://x",
+    labels: [],
+    excerpt: "",
+  };
+
+  it("renders trusted signals as bare JSON", () => {
+    const result = renderSignalForPrompt({ ...baseSignal, trust: "trusted" });
+    expect(result).not.toContain("<");
+    expect(result).toContain('"kind"');
+  });
+
+  it("wraps untrusted signals in delimiters", () => {
+    const result = renderSignalForPrompt({ ...baseSignal, trust: "untrusted" });
+    expect(result).toContain("<untrusted-signal>");
+    expect(result).toContain("</untrusted-signal>");
+  });
+
+  it("wraps unknown trust signals in untrusted delimiters", () => {
+    const result = renderSignalForPrompt({ ...baseSignal, trust: "unknown" });
+    expect(result).toContain("<untrusted-signal>");
+  });
+
+  it("wraps semi-trusted signals in semi-trusted delimiters", () => {
+    const result = renderSignalForPrompt({ ...baseSignal, trust: "semi-trusted" });
+    expect(result).toContain("<semi-trusted-signal>");
+    expect(result).toContain("</semi-trusted-signal>");
   });
 });
