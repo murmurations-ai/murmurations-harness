@@ -201,7 +201,8 @@ async function refresh() {
     document.getElementById('title').textContent = (d.name || 'Murmuration') + ' Dashboard';
     document.title = (d.name || 'Murmuration') + ' Dashboard';
     const ghLink = d.githubUrl ? ' | <a href="' + d.githubUrl + '/issues" style="color:#58a6ff" target="_blank">GitHub Issues</a>' : '';
-    document.getElementById('meta').innerHTML = 'v' + d.version + ' | PID ' + d.pid + ' | ' + new Date().toLocaleTimeString() + ghLink;
+    const gov = d.governance && d.governance !== 'none' ? ' | Governance: ' + d.governance : '';
+    document.getElementById('meta').innerHTML = 'v' + d.version + ' | PID ' + d.pid + gov + ' | ' + new Date().toLocaleTimeString() + ghLink;
 
     // 1. Overview
     const idleRate = m.totalWakes > 0 ? Math.round((m.idleWakes / m.totalWakes) * 100) : 0;

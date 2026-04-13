@@ -1136,6 +1136,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       name: process.env.MURMURATION_NAME ?? exampleRoot.split("/").pop() ?? "murmuration",
       rootDir: exampleRoot,
       ...(githubUrl ? { githubUrl } : {}),
+      governance: governancePlugin?.name ?? "none",
       agentCount: agents.length,
       murmuration: { totalWakes, totalArtifacts, idleWakes: totalIdle, groupCount: groups.length },
       groups,
