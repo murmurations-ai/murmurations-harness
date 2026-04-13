@@ -1229,12 +1229,14 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         return Promise.reject(new Error(`unknown method: ${method}`));
     }
   });
-  daemonSocket.start();
+  if (!once) {
+    daemonSocket.start();
+  }
 
   // Start HTTP server for web dashboard (SSE events + REST API)
   const httpPort = parseInt(process.env.MURMURATION_HTTP_PORT ?? "0", 10);
   const daemonHttp =
-    httpPort > 0
+    httpPort > 0 && !once
       ? new DaemonHttp({
           port: httpPort,
           statusHandler: () => Promise.resolve(buildStatus()),
