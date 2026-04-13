@@ -66,7 +66,7 @@ const MeritocraticPlugin = {
   terminology: {
     group: "guild",
     groupPlural: "guilds",
-    governanceItem: "flag",
+    governanceItem: "standard",
     governanceEvent: "flag",
   },
 
