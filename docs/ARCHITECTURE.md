@@ -345,6 +345,44 @@ The harness provides:
 
 Five named models are supported by the interface. Operators choose by providing a plugin at boot.
 
+### Self-Improvement Governance
+
+Agents can propose changes to their own operational configuration through governance. **How much autonomy agents have to self-improve depends on the active governance model** — this is not a universal mechanism, it's a governance decision.
+
+#### What's governed vs. what requires Source
+
+| Change                                          | S3 (Self-Organizing)                     | Chain of Command    | Parliamentary      |
+| ----------------------------------------------- | ---------------------------------------- | ------------------- | ------------------ |
+| **Prompt refinement** (wake.md)                 | Group consent                            | Authority approval  | Committee vote     |
+| **Wake schedule**                               | Group consent                            | Authority approval  | Committee vote     |
+| **Tool/capability access**                      | Group consent                            | Authority approval  | Committee vote     |
+| **Budget reallocation** (within Source ceiling) | Group consent                            | Authority approval  | Committee vote     |
+| **Model tier** (fast→balanced→deep)             | Group consent                            | Authority approval  | Committee vote     |
+| **Group membership**                            | Group consent                            | Authority directive | Committee vote     |
+| **Upstream/downstream wiring**                  | Group consent                            | Authority directive | Committee vote     |
+| **Signal scope changes**                        | Group consent                            | Authority approval  | Committee vote     |
+| **New agent creation**                          | Source approves soul; group defines role | Source decides      | Source + committee |
+| **Soul changes** (identity, values)             | **Source only**                          | **Source only**     | **Source only**    |
+| **Bright line changes**                         | **Source only**                          | **Source only**     | **Source only**    |
+| **Governance model changes**                    | **Source only**                          | **Source only**     | **Source only**    |
+
+In S3, groups have significant autonomy to self-organize — they can change operational configuration through consent rounds without Source involvement. In Chain of Command, the same changes require authority approval. In Parliamentary, they require committee votes. The harness provides the mechanism; the governance model determines who decides.
+
+#### Self-improvement mechanisms
+
+The harness supports these self-improvement flows through the governance event system:
+
+1. **Capability requests** — agents see their `capabilities` in the spawn context and file governance events when something is missing
+2. **Schedule proposals** — agents see `currentSchedule` and propose changes via governance
+3. **Prompt refinement** — agents that consistently underperform propose wake.md changes
+4. **Upstream rewiring** — if an agent's output has zero downstream consumption, the group can rewire the pipeline
+5. **Budget adjustment** — agents hitting token limits propose increases; the group decides based on cost-per-artifact data
+6. **Model tier escalation** — agents on "fast" that need deeper reasoning request "balanced"
+7. **Group membership** — agents propose joining or leaving groups based on their effectiveness
+8. **New agent proposals** — groups identify capability gaps and propose new agents
+
+All of these flow through the same governance pipeline: agent files event → governance meeting processes it → if approved, configuration is updated. The governance model determines _who approves_ and _how_.
+
 ---
 
 ## Identity Model
