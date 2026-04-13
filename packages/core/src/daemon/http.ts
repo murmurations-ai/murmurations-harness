@@ -184,11 +184,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
 <div class="overview" id="overview"></div>
 
-<h2>Groups</h2>
-<div class="groups" id="groups"></div>
-
 <h2 id="gov-title">Governance</h2>
 <div class="groups" id="governance"></div>
+
+<h2>Groups</h2>
+<div class="groups" id="groups"></div>
 
 <h2>Agents</h2>
 <div class="grid" id="agents"></div>
