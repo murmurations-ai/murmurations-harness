@@ -1244,6 +1244,39 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       ? new DaemonHttp({
           port: httpPort,
           statusHandler: () => buildStatus(),
+          agentDetailHandler: async (agentId) => {
+            const { readdir: rd, readFile: rf } = await import("node:fs/promises");
+            const runsDir = join(exampleRoot, ".murmuration", "runs", agentId);
+            const agent = agentStateStore.getAgent(agentId);
+            const recentDigests: { date: string; summary: string }[] = [];
+            try {
+              const dates = (await rd(runsDir))
+                .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+                .sort()
+                .reverse()
+                .slice(0, 5);
+              for (const date of dates) {
+                const files = await rd(join(runsDir, date));
+                const digestFile = files.find((f) => f.startsWith("digest-"));
+                if (digestFile) {
+                  const content = await rf(join(runsDir, date, digestFile), "utf8");
+                  const body = content.replace(/^---[\s\S]*?---\n*/, "").trim();
+                  recentDigests.push({ date, summary: body.slice(0, 500) });
+                }
+              }
+            } catch {
+              /* no runs yet */
+            }
+            return {
+              agentId,
+              state: agent?.currentState ?? "unknown",
+              totalWakes: agent?.totalWakes ?? 0,
+              totalArtifacts: agent?.totalArtifacts ?? 0,
+              idleWakes: agent?.idleWakes ?? 0,
+              consecutiveFailures: agent?.consecutiveFailures ?? 0,
+              recentDigests,
+            };
+          },
           commandHandler: async (method, params) => {
             switch (method) {
               case "directive": {

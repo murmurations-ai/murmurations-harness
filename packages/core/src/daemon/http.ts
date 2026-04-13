@@ -14,6 +14,7 @@ export interface DaemonHttpConfig {
   readonly port: number;
   readonly statusHandler: () => Promise<unknown>;
   readonly commandHandler?: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+  readonly agentDetailHandler?: (agentId: string) => Promise<unknown>;
 }
 
 export class DaemonHttp {
@@ -23,11 +24,13 @@ export class DaemonHttp {
   #server: Server | null = null;
 
   readonly #commandHandler: DaemonHttpConfig["commandHandler"];
+  readonly #agentDetailHandler: DaemonHttpConfig["agentDetailHandler"];
 
   public constructor(config: DaemonHttpConfig) {
     this.#port = config.port;
     this.#statusHandler = config.statusHandler;
     this.#commandHandler = config.commandHandler;
+    this.#agentDetailHandler = config.agentDetailHandler;
   }
 
   public start(): void {
@@ -89,6 +92,19 @@ export class DaemonHttp {
         const status = await this.#statusHandler();
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(status));
+      } catch (err: unknown) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
+    if (url.startsWith("/api/agent/") && req.method === "GET" && this.#agentDetailHandler) {
+      const agentId = url.slice("/api/agent/".length);
+      try {
+        const detail = await this.#agentDetailHandler(agentId);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(detail));
       } catch (err: unknown) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
@@ -258,6 +274,19 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
 <div class="events" id="events"></div>
 
+<div class="modal" id="agent-modal">
+  <div class="modal-box" style="max-width:600px;max-height:80vh;overflow-y:auto">
+    <h3 id="agent-detail-title">Agent</h3>
+    <div id="agent-detail-stats"></div>
+    <h3 style="margin-top:12px">Recent Work</h3>
+    <div id="agent-detail-digests" style="font-size:0.8rem;color:#8b949e"></div>
+    <div class="actions" style="margin-top:12px">
+      <button onclick="closeModal('agent-modal')">Close</button>
+      <button class="primary" id="agent-detail-wake">Wake Now</button>
+    </div>
+  </div>
+</div>
+
 <script>
 async function refresh() {
   try {
@@ -342,7 +371,7 @@ async function refresh() {
       const ir = a.totalWakes > 0 ? Math.round((a.idleWakes / a.totalWakes) * 100) : 0;
       const ar = a.totalWakes > 0 ? (a.totalArtifacts / a.totalWakes).toFixed(1) : '0';
       const sc2 = a.state === 'idle' ? 'state-idle' : a.state === 'running' ? 'state-running' : 'state-failed';
-      return '<div class="card"><h3>' + a.agentId + '</h3>' +
+      return '<div class="card"><h3><a href="#" onclick="showAgent(\\'' + a.agentId + '\\');return false" style="color:#58a6ff;text-decoration:none">' + a.agentId + '</a></h3>' +
         st('State', '<span class="' + sc2 + '">' + a.state + '</span>') +
         st('Wakes', a.totalWakes) + st('Artifacts', a.totalArtifacts) +
         st('Art/Wake', ar) + st('Idle', ir + '%') + st('Failures', a.consecutiveFailures) +
@@ -410,6 +439,23 @@ function sendGroupWake() {
   closeModal('group-modal');
   sendCmd('group-wake', { groupId, kind, ...(directive ? {directive} : {}) });
   document.getElementById('gw-directive').value = '';
+}
+
+async function showAgent(agentId) {
+  try {
+    const r = await fetch('/api/agent/' + agentId);
+    const d = await r.json();
+    document.getElementById('agent-detail-title').textContent = d.agentId;
+    document.getElementById('agent-detail-stats').innerHTML =
+      st('State', d.state) + st('Wakes', d.totalWakes) + st('Artifacts', d.totalArtifacts) +
+      st('Idle Wakes', d.idleWakes) + st('Failures', d.consecutiveFailures);
+    const digests = (d.recentDigests || []).map(function(dig) {
+      return '<div style="margin:8px 0;padding:8px;background:#0d1117;border:1px solid #21262d;border-radius:6px"><strong>' + dig.date + '</strong><pre style="white-space:pre-wrap;margin:4px 0 0;font-size:0.75rem;color:#c9d1d9">' + dig.summary.replace(/</g,'&lt;') + '</pre></div>';
+    }).join('');
+    document.getElementById('agent-detail-digests').innerHTML = digests || '<div style="color:#8b949e">No digests yet</div>';
+    document.getElementById('agent-detail-wake').onclick = function() { closeModal('agent-modal'); wakeNow(agentId); };
+    document.getElementById('agent-modal').classList.add('show');
+  } catch(e) { alert('Failed to load agent: ' + e.message); }
 }
 
 function wakeNow(agentId) {
