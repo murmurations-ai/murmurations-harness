@@ -72,7 +72,7 @@ export class NoOpStrategyPlugin implements StrategyPlugin {
     return [];
   }
 
-  public assess(): AlignmentAssessment {
+  public assess(_metrics: readonly AgentMetricsSnapshot[]): AlignmentAssessment {
     return {
       objectives: [],
       overallScore: null,
