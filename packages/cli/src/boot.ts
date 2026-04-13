@@ -1095,24 +1095,50 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   // Start daemon control socket
   const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
+  // Shared status builder for socket + HTTP
+  const buildStatus = (): unknown => {
+    const agents = agentStateStore.getAllAgents().map((a) => ({
+      agentId: a.agentId,
+      state: a.currentState,
+      totalWakes: a.totalWakes,
+      totalArtifacts: a.totalArtifacts,
+      idleWakes: a.idleWakes,
+      consecutiveFailures: a.consecutiveFailures,
+      groups: allRegistered.find((r) => r.agentId === a.agentId)?.groupMemberships ?? [],
+    }));
+    const totalWakes = agents.reduce((s, a) => s + a.totalWakes, 0);
+    const totalArtifacts = agents.reduce((s, a) => s + a.totalArtifacts, 0);
+    const totalIdle = agents.reduce((s, a) => s + a.idleWakes, 0);
+    const groupMap = new Map<string, typeof agents>();
+    for (const a of agents) {
+      for (const g of a.groups) {
+        const list = groupMap.get(g) ?? [];
+        list.push(a);
+        groupMap.set(g, list);
+      }
+    }
+    const groups = [...groupMap.entries()].map(([groupId, members]) => ({
+      groupId,
+      memberCount: members.length,
+      totalWakes: members.reduce((s, m) => s + m.totalWakes, 0),
+      totalArtifacts: members.reduce((s, m) => s + m.totalArtifacts, 0),
+      idleWakes: members.reduce((s, m) => s + m.idleWakes, 0),
+      members: members.map((m) => m.agentId),
+    }));
+    return {
+      version: HARNESS_VERSION,
+      pid: process.pid,
+      agentCount: agents.length,
+      murmuration: { totalWakes, totalArtifacts, idleWakes: totalIdle, groupCount: groups.length },
+      groups,
+      agents,
+    };
+  };
+
   const daemonSocket = new DaemonSocket(socketPath, (method, params) => {
     switch (method) {
-      case "status": {
-        const agents = agentStateStore.getAllAgents();
-        return Promise.resolve({
-          version: HARNESS_VERSION,
-          pid: process.pid,
-          agentCount: agents.length,
-          agents: agents.map((a) => ({
-            agentId: a.agentId,
-            state: a.currentState,
-            totalWakes: a.totalWakes,
-            totalArtifacts: a.totalArtifacts,
-            idleWakes: a.idleWakes,
-            consecutiveFailures: a.consecutiveFailures,
-          })),
-        });
-      }
+      case "status":
+        return Promise.resolve(buildStatus());
       case "stop":
         process.kill(process.pid, "SIGTERM");
         return Promise.resolve({ stopping: true });
@@ -1133,20 +1159,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     httpPort > 0
       ? new DaemonHttp({
           port: httpPort,
-          statusHandler: () =>
-            Promise.resolve({
-              version: HARNESS_VERSION,
-              pid: process.pid,
-              agentCount: agentStateStore.getAllAgents().length,
-              agents: agentStateStore.getAllAgents().map((a) => ({
-                agentId: a.agentId,
-                state: a.currentState,
-                totalWakes: a.totalWakes,
-                totalArtifacts: a.totalArtifacts,
-                idleWakes: a.idleWakes,
-                consecutiveFailures: a.consecutiveFailures,
-              })),
-            }),
+          statusHandler: () => Promise.resolve(buildStatus()),
         })
       : null;
   if (daemonHttp) {
