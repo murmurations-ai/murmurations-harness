@@ -30,6 +30,7 @@ import {
   Daemon,
   DispatchExecutor,
   GovernanceGitHubSync,
+  DaemonHttp,
   DaemonSocket,
   HARNESS_VERSION,
   DispatchRunArtifactWriter,
@@ -1126,7 +1127,41 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   });
   daemonSocket.start();
 
-  // Clean up pidfile + socket on exit
+  // Start HTTP server for web dashboard (SSE events + REST API)
+  const httpPort = parseInt(process.env.MURMURATION_HTTP_PORT ?? "0", 10);
+  const daemonHttp =
+    httpPort > 0
+      ? new DaemonHttp({
+          port: httpPort,
+          statusHandler: () =>
+            Promise.resolve({
+              version: HARNESS_VERSION,
+              pid: process.pid,
+              agentCount: agentStateStore.getAllAgents().length,
+              agents: agentStateStore.getAllAgents().map((a) => ({
+                agentId: a.agentId,
+                state: a.currentState,
+                totalWakes: a.totalWakes,
+                totalArtifacts: a.totalArtifacts,
+                idleWakes: a.idleWakes,
+                consecutiveFailures: a.consecutiveFailures,
+              })),
+            }),
+        })
+      : null;
+  if (daemonHttp) {
+    daemonHttp.start();
+    process.stdout.write(
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "daemon.http.started",
+        port: httpPort,
+      })}\n`,
+    );
+  }
+
+  // Clean up pidfile + socket + http on exit
   const cleanupPid = (): void => {
     try {
       unlinkSync(pidfilePath);
@@ -1134,6 +1169,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       /* best effort */
     }
     daemonSocket.stop();
+    daemonHttp?.stop();
   };
   process.on("exit", cleanupPid);
 
