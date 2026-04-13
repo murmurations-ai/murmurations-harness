@@ -246,15 +246,19 @@ async function refresh() {
     const pending = g.pending || [];
     const recent = g.recentDecisions || [];
     let govHtml = '';
+    const ghBase = d.githubUrl || '';
+    const ghIssuesLink = ghBase ? ghBase + '/issues?q=is:issue+label:governance' : '';
     if (pending.length > 0) {
-      govHtml += '<div class="group-card"><h3>Pending ' + itemLabel + 's (' + pending.length + ')</h3>';
+      const hdr = ghIssuesLink ? '<a href="' + ghIssuesLink + '+is:open" style="color:#58a6ff" target="_blank">Pending ' + itemLabel + 's (' + pending.length + ')</a>' : 'Pending ' + itemLabel + 's (' + pending.length + ')';
+      govHtml += '<div class="group-card"><h3>' + hdr + '</h3>';
       govHtml += pending.map(i =>
         '<div class="stat"><span class="label">[' + i.kind + '] ' + (i.topic || '(no topic)').slice(0, 60) + '</span><span class="value state-running">' + i.state + '</span></div>'
       ).join('');
       govHtml += '</div>';
     }
     if (recent.length > 0) {
-      govHtml += '<div class="group-card"><h3>Recent Decisions</h3>';
+      const hdr = ghIssuesLink ? '<a href="' + ghIssuesLink + '+is:closed" style="color:#58a6ff" target="_blank">Recent Decisions</a>' : 'Recent Decisions';
+      govHtml += '<div class="group-card"><h3>' + hdr + '</h3>';
       govHtml += recent.map(i =>
         '<div class="stat"><span class="label">[' + i.kind + '] ' + (i.topic || '(no topic)').slice(0, 60) + '</span><span class="value state-idle">' + i.state + '</span></div>'
       ).join('');
