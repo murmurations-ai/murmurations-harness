@@ -535,42 +535,51 @@ export class Daemon {
 
     this.#scheduler.onWake((event) => this.#handleWake(event));
 
-    // Register agents in the state store + scheduler
+    // Load persisted agent state, register agents, start scheduler.
+    // Load is async but start() is synchronous — the registration +
+    // scheduler start happens in the .then() callback so stats from
+    // the previous run are restored before register() creates fresh records.
+    const doRegisterAndStart = (): void => {
+      for (const agent of this.#agents) {
+        this.#agentStateStore?.register(agent.agentId, agent.maxWallClockMs);
+        this.#agentStateStore?.transition(agent.agentId, "idle");
+        this.#scheduler.schedule(makeAgentId(agent.agentId), agent.trigger);
+        this.#logger.info("daemon.agent.registered", {
+          agentId: agent.agentId,
+          trigger: agent.trigger,
+        });
+      }
+      this.#scheduleGovernanceCrons();
+      this.#scheduler.start();
+
+      this.#heartbeatHandle = setInterval(() => {
+        if (!this.#running) return;
+        this.#logger.info("daemon.heartbeat", {
+          inFlight: this.#inFlight.size,
+        });
+      }, this.#heartbeatMs);
+
+      this.#logger.info("daemon.ready", {
+        capabilities: this.#executor.capabilities(),
+        heartbeatMs: this.#heartbeatMs,
+      });
+    };
+
     if (this.#agentStateStore) {
-      void this.#agentStateStore.load().catch(() => {
-        /* best-effort load; missing/invalid state file is tolerated */
-      });
+      void this.#agentStateStore
+        .load()
+        .then((count) => {
+          if (count > 0) {
+            this.#logger.info("daemon.agents.restored", { count });
+          }
+          doRegisterAndStart();
+        })
+        .catch(() => {
+          doRegisterAndStart();
+        });
+    } else {
+      doRegisterAndStart();
     }
-    for (const agent of this.#agents) {
-      this.#agentStateStore?.register(agent.agentId, agent.maxWallClockMs);
-      this.#agentStateStore?.transition(agent.agentId, "idle");
-      this.#scheduler.schedule(makeAgentId(agent.agentId), agent.trigger);
-      this.#logger.info("daemon.agent.registered", {
-        agentId: agent.agentId,
-        trigger: agent.trigger,
-      });
-    }
-
-    // Schedule governance meeting checks per group
-    this.#scheduleGovernanceCrons();
-
-    this.#scheduler.start();
-
-    // Heartbeat keeps the event loop alive between scheduled wakes so
-    // the daemon does not exit spontaneously after the last wake fires.
-    // This is load-bearing for clean-shutdown testing and for real
-    // daemons that may have long idle periods between events.
-    this.#heartbeatHandle = setInterval(() => {
-      if (!this.#running) return;
-      this.#logger.info("daemon.heartbeat", {
-        inFlight: this.#inFlight.size,
-      });
-    }, this.#heartbeatMs);
-
-    this.#logger.info("daemon.ready", {
-      capabilities: this.#executor.capabilities(),
-      heartbeatMs: this.#heartbeatMs,
-    });
   }
 
   public async stop(): Promise<void> {
