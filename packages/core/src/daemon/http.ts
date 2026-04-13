@@ -391,11 +391,14 @@ async function sendCmd(method, params) {
 }
 
 function sendDirective() {
-  const scope = document.getElementById('dir-scope').value;
+  const sel = document.getElementById('dir-scope');
+  const opt = sel.options[sel.selectedIndex];
+  const scope = opt.dataset.scope || '--all';
+  const target = opt.dataset.target || '';
   const message = document.getElementById('dir-message').value;
   if (!message.trim()) { alert('Message is required'); return; }
   closeModal('directive-modal');
-  sendCmd('directive', { scope, message });
+  sendCmd('directive', { scope, target, message });
   document.getElementById('dir-message').value = '';
 }
 
@@ -414,9 +417,9 @@ function updateDropdowns(d) {
   gs.innerHTML = '<option value="">Convene Group...</option>' +
     (d.groups || []).map(g => '<option value="' + g.groupId + '">' + g.groupId + '</option>').join('');
   const ds = document.getElementById('dir-scope');
-  ds.innerHTML = '<option value="--all">All Agents</option>' +
-    (d.groups || []).map(g => '<option value="--group">Group: ' + g.groupId + '</option>').join('') +
-    d.agents.map(a => '<option value="--agent">Agent: ' + a.agentId + '</option>').join('');
+  ds.innerHTML = '<option data-scope="--all">All Agents</option>' +
+    (d.groups || []).map(g => '<option data-scope="--group" data-target="' + g.groupId + '">Group: ' + g.groupId + '</option>').join('') +
+    d.agents.map(a => '<option data-scope="--agent" data-target="' + a.agentId + '">Agent: ' + a.agentId + '</option>').join('');
 }
 </script>
 </body>

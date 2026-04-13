@@ -1241,8 +1241,20 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               case "directive": {
                 const { runDirective } = await import("./directive.js");
                 const scope = (params.scope as string | undefined) ?? "--all";
+                const target = (params.target as string | undefined) ?? "";
                 const message = (params.message as string | undefined) ?? "";
-                const args = [scope, message, "--root", exampleRoot].filter(Boolean);
+                if (!message) throw new Error("directive requires a message");
+                const args: string[] = [];
+                if (scope === "--all") {
+                  args.push("--all");
+                } else if (scope === "--group" && target) {
+                  args.push("--group", target);
+                } else if (scope === "--agent" && target) {
+                  args.push("--agent", target);
+                } else {
+                  args.push("--all");
+                }
+                args.push(message, "--root", exampleRoot);
                 await runDirective(args, exampleRoot);
                 return { sent: true };
               }
