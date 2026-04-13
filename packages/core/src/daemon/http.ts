@@ -187,6 +187,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <h2>Groups</h2>
 <div class="groups" id="groups"></div>
 
+<h2 id="gov-title">Governance</h2>
+<div class="groups" id="governance"></div>
+
 <h2>Agents</h2>
 <div class="grid" id="agents"></div>
 
@@ -201,8 +204,10 @@ async function refresh() {
     document.getElementById('title').textContent = (d.name || 'Murmuration') + ' Dashboard';
     document.title = (d.name || 'Murmuration') + ' Dashboard';
     const ghLink = d.githubUrl ? ' | <a href="' + d.githubUrl + '/issues" style="color:#58a6ff" target="_blank">GitHub Issues</a>' : '';
-    const gov = d.governance && d.governance !== 'none' ? ' | Governance: ' + d.governance : '';
-    document.getElementById('meta').innerHTML = 'v' + d.version + ' | PID ' + d.pid + gov + ' | ' + new Date().toLocaleTimeString() + ghLink;
+    const g = d.governance || {};
+    const govName = g.model || 'none';
+    const govMeta = govName !== 'none' ? ' | Governance: ' + govName : '';
+    document.getElementById('meta').innerHTML = 'v' + d.version + ' | PID ' + d.pid + govMeta + ' | ' + new Date().toLocaleTimeString() + ghLink;
 
     // 1. Overview
     const idleRate = m.totalWakes > 0 ? Math.round((m.idleWakes / m.totalWakes) * 100) : 0;
@@ -211,7 +216,8 @@ async function refresh() {
       sc(m.groupCount || 0, 'Groups') +
       sc(m.totalWakes || 0, 'Total Wakes') +
       sc(m.totalArtifacts || 0, 'Artifacts') +
-      sc(idleRate + '%', 'Idle Rate');
+      sc(idleRate + '%', 'Idle Rate') +
+      sc(g.totalItems || 0, 'Gov Items');
 
     // 2. Groups
     document.getElementById('groups').innerHTML = (d.groups || []).map(g => {
@@ -231,6 +237,33 @@ async function refresh() {
         }).join('') +
         '</div></div>';
     }).join('');
+
+    // 2b. Governance
+    const gt = g.terminology || {};
+    const itemLabel = gt.governanceItem || 'item';
+    const eventLabel = gt.governanceEvent || 'event';
+    document.getElementById('gov-title').textContent = 'Governance' + (govName !== 'none' ? ' (' + govName + ')' : '');
+    const pending = g.pending || [];
+    const recent = g.recentDecisions || [];
+    let govHtml = '';
+    if (pending.length > 0) {
+      govHtml += '<div class="group-card"><h3>Pending ' + itemLabel + 's (' + pending.length + ')</h3>';
+      govHtml += pending.map(i =>
+        '<div class="stat"><span class="label">[' + i.kind + '] ' + (i.topic || '(no topic)').slice(0, 60) + '</span><span class="value state-running">' + i.state + '</span></div>'
+      ).join('');
+      govHtml += '</div>';
+    }
+    if (recent.length > 0) {
+      govHtml += '<div class="group-card"><h3>Recent Decisions</h3>';
+      govHtml += recent.map(i =>
+        '<div class="stat"><span class="label">[' + i.kind + '] ' + (i.topic || '(no topic)').slice(0, 60) + '</span><span class="value state-idle">' + i.state + '</span></div>'
+      ).join('');
+      govHtml += '</div>';
+    }
+    if (govHtml === '') {
+      govHtml = '<div class="group-card"><h3>No governance items</h3><div class="stat"><span class="label">File a ' + eventLabel + ' to start governance</span><span class="value">—</span></div></div>';
+    }
+    document.getElementById('governance').innerHTML = govHtml;
 
     // 3. Agents
     document.getElementById('agents').innerHTML = d.agents.map(a => {

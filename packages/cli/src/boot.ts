@@ -20,9 +20,9 @@
  * gate test still runs without a real GITHUB_TOKEN on the machine.
  */
 
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync as fsReadFileSync, unlinkSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
@@ -1095,6 +1095,73 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   // Start daemon control socket
   const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
+  // Governance store reader for the status API (reads from same persist dir as daemon)
+  const govPersistDir = resolve(exampleRoot, ".murmuration", "governance");
+  const govTerminology = governancePlugin?.terminology ?? {
+    group: "group",
+    groupPlural: "groups",
+    governanceItem: "item",
+    governanceEvent: "governance event",
+  };
+
+  const readGovernanceStatus = (): unknown => {
+    try {
+      const content = fsReadFileSync(join(govPersistDir, "items.jsonl"), "utf8");
+      const items: Record<string, unknown>[] = [];
+      for (const line of content.trim().split("\n")) {
+        if (!line) continue;
+        try {
+          items.push(JSON.parse(line) as Record<string, unknown>);
+        } catch {
+          /* skip */
+        }
+      }
+
+      const graphs = governancePlugin?.stateGraphs() ?? [];
+      const terminalStates = new Set(graphs.flatMap((g) => g.terminalStates));
+
+      const pending = items.filter((i) => !terminalStates.has(i.currentState as string));
+      const resolved = items.filter((i) => terminalStates.has(i.currentState as string));
+
+      return {
+        model: governancePlugin?.name ?? "none",
+        terminology: govTerminology,
+        totalItems: items.length,
+        pending: pending.map((i) => {
+          const cb = i.createdBy as Record<string, unknown> | undefined;
+          const pl = i.payload as Record<string, unknown> | undefined;
+          return {
+            id: (i.id as string).slice(0, 8),
+            kind: i.kind,
+            state: i.currentState,
+            createdBy: (cb?.value as string | undefined) ?? "unknown",
+            topic: (pl?.topic as string | undefined) ?? "",
+          };
+        }),
+        recentDecisions: resolved
+          .slice(-5)
+          .reverse()
+          .map((i) => {
+            const pl = i.payload as Record<string, unknown> | undefined;
+            return {
+              id: (i.id as string).slice(0, 8),
+              kind: i.kind,
+              state: i.currentState,
+              topic: (pl?.topic as string | undefined) ?? "",
+            };
+          }),
+      };
+    } catch {
+      return {
+        model: governancePlugin?.name ?? "none",
+        terminology: govTerminology,
+        totalItems: 0,
+        pending: [],
+        recentDecisions: [],
+      };
+    }
+  };
+
   // Shared status builder for socket + HTTP
   const buildStatus = (): unknown => {
     const agents = agentStateStore.getAllAgents().map((a) => ({
@@ -1136,7 +1203,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       name: process.env.MURMURATION_NAME ?? exampleRoot.split("/").pop() ?? "murmuration",
       rootDir: exampleRoot,
       ...(githubUrl ? { githubUrl } : {}),
-      governance: governancePlugin?.name ?? "none",
+      governance: readGovernanceStatus(),
       agentCount: agents.length,
       murmuration: { totalWakes, totalArtifacts, idleWakes: totalIdle, groupCount: groups.length },
       groups,
