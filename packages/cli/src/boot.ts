@@ -1254,7 +1254,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
                 } else {
                   args.push("--all");
                 }
-                args.push(message, "--root", exampleRoot);
+                args.push("--root", exampleRoot, message);
                 await runDirective(args, exampleRoot);
                 return { sent: true };
               }
