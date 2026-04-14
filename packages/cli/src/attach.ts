@@ -93,10 +93,18 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
         groups: { groupId: string }[];
       }
     | undefined;
+  const schemaVersion =
+    (statusResult as { schemaVersion?: number } | undefined)?.schemaVersion ?? "?";
   console.log(
-    `[${name}] murmuration v${statusResult?.version ?? "?"} — ${String(statusResult?.agentCount ?? "?")} agents, PID ${String(statusResult?.pid ?? "?")}`,
+    `[${name}] murmuration v${statusResult?.version ?? "?"} (schema ${String(schemaVersion)}) — ${String(statusResult?.agentCount ?? "?")} agents, PID ${String(statusResult?.pid ?? "?")}`,
   );
-  console.log("Type a command or ? for help. Ctrl-C to detach.\n");
+
+  // Load user config
+  const { loadConfig } = await import("./config.js");
+  const config = loadConfig();
+  const prompt = config.ui.prompt.replace("{name}", name);
+
+  console.log(`Type a command or ? for help. Leader: ${config.ui.leader}. Ctrl-C to detach.\n`);
 
   // Cache agent/group lists for tab completion
   const agentIds = statusResult?.agents.map((a) => a.agentId) ?? [];
@@ -133,7 +141,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
       return [[], line];
     },
   });
-  rl.setPrompt(`[${name}]> `);
+  rl.setPrompt(prompt);
   rl.prompt();
 
   rl.on("line", (line) => {
@@ -265,6 +273,8 @@ const handleCommand = async (
     rl.close();
     return;
   } else if (verb === "?" || verb === "help") {
+    const { shippedReplMethods } = await import("@murmurations-ai/core");
+    const methods = shippedReplMethods();
     console.log(`Commands:
   status (s)                        Show agent status + governance summary
   directive (d) [message]           Send a Source directive (prompts for details)
@@ -274,6 +284,9 @@ const handleCommand = async (
   stop                              Stop the daemon
   quit (q)                          Detach from daemon
   help (?)                          Show this help
+
+Protocol methods (${String(methods.length)} shipped for REPL):
+${methods.map((m) => `  ${m.name.padEnd(22)} ${m.summary}`).join("\n")}
 
 Tab completion works for agent IDs and group IDs.`);
   } else {

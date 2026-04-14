@@ -367,6 +367,39 @@ const main = async (): Promise<void> => {
       await runAttach(attachRoot, attachName);
       break;
     }
+    case "config": {
+      const { loadConfig, configPath } = await import("./config.js");
+      const sub = argv[1];
+      if (sub === "edit") {
+        const editor = process.env.EDITOR ?? "vi";
+        const { spawnSync } = await import("node:child_process");
+        spawnSync(editor, [configPath()], { stdio: "inherit" });
+      } else if (sub === "path") {
+        console.log(configPath());
+      } else {
+        const cfg = loadConfig();
+        console.log(`Config: ${configPath()}\n`);
+        console.log(`[ui]`);
+        console.log(`  leader = "${cfg.ui.leader}"`);
+        console.log(`  prompt = "${cfg.ui.prompt}"`);
+        console.log(`  color = "${cfg.ui.color}"`);
+        console.log(`\n[keys]`);
+        for (const [k, v] of Object.entries(cfg.keys)) {
+          console.log(`  "${k}" = "${v}"`);
+        }
+        if (Object.keys(cfg.aliases).length > 0) {
+          console.log(`\n[aliases]`);
+          for (const [k, v] of Object.entries(cfg.aliases)) {
+            console.log(`  ${k} = "${v}"`);
+          }
+        }
+        if (cfg.sessions.pinned.length > 0) {
+          console.log(`\n[sessions]`);
+          console.log(`  pinned = [${cfg.sessions.pinned.map((s) => `"${s}"`).join(", ")}]`);
+        }
+      }
+      break;
+    }
     case "stop": {
       await stopDaemon(resolveRoot(argv.slice(1)));
       break;
