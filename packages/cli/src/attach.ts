@@ -104,35 +104,10 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   const config = loadConfig();
   const prompt = config.ui.prompt.replace("{name}", name);
 
-  // Leader key state machine
-  const leaderKey = config.ui.leader; // e.g., "C-a"
-  let leaderPending = false;
-  const leaderChar = leaderKey === "C-a" ? "\x01" : leaderKey === "C-b" ? "\x02" : null;
+  // Leader key support deferred to v0.3 — requires raw mode management
+  // that conflicts with readline. For now, use :commands directly.
 
-  if (leaderChar && process.stdin.isTTY) {
-    process.stdin.setRawMode(false); // readline manages raw mode
-    // Intercept keypresses after readline gives us control
-    process.stdin.on("keypress", (_ch: string, key: { ctrl?: boolean; name?: string }) => {
-      if (key.ctrl && key.name === leaderKey.slice(2)) {
-        leaderPending = true;
-        process.stdout.write(`\r\x1b[K[${leaderKey}] `);
-        return;
-      }
-      if (leaderPending) {
-        leaderPending = false;
-        const binding = config.keys[`${leaderKey} ${key.name ?? ""}`];
-        if (binding) {
-          process.stdout.write(`\r\x1b[K`);
-          rl.write(binding + "\n");
-        } else {
-          process.stdout.write(`\r\x1b[K`);
-          rl.prompt();
-        }
-      }
-    });
-  }
-
-  console.log(`Type :help for commands. Leader: ${leaderKey}. Ctrl-C to detach.\n`);
+  console.log("Type :help for commands. Ctrl-C to detach.\n");
 
   // Cache agent/group lists for tab completion
   const agentIds = statusResult?.agents.map((a) => a.agentId) ?? [];
