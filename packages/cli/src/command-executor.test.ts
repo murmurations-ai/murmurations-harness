@@ -162,7 +162,7 @@ describe("DaemonCommandExecutor", () => {
       pid: number;
     };
 
-    expect(status.version).toBe("0.2.1");
+    expect(status.version).toBe("0.2.2");
     expect(status.schemaVersion).toBe(1);
     expect(status.pid).toBe(process.pid);
   });
