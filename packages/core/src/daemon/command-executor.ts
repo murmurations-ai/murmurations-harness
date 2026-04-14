@@ -121,7 +121,19 @@ export class DaemonCommandExecutor {
   // Command dispatch
   // -----------------------------------------------------------------------
 
-  public async execute(method: string, params: Record<string, unknown>): Promise<unknown> {
+  public async execute(
+    method: string,
+    params: Record<string, unknown>,
+    options?: { readonly readOnly?: boolean },
+  ): Promise<unknown> {
+    // Enforce mutating flag (#84) — read-only clients can't invoke mutating methods
+    if (options?.readOnly) {
+      const { getMethod } = await import("./protocol.js");
+      const methodDef = getMethod(method);
+      if (methodDef?.mutating) {
+        throw new Error(`method "${method}" is mutating — not allowed in read-only mode`);
+      }
+    }
     switch (method) {
       case "directive":
         return this.#handleDirective(params);

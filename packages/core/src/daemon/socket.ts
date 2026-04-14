@@ -141,13 +141,32 @@ export class DaemonSocket {
   }
 
   async #handleLine(client: Socket, line: string): Promise<void> {
-    let req: SocketRequest;
+    let raw: unknown;
     try {
-      req = JSON.parse(line) as SocketRequest;
+      raw = JSON.parse(line);
     } catch {
       client.write(JSON.stringify({ id: "?", error: "invalid JSON" }) + "\n");
       return;
     }
+
+    // Runtime type validation (#86) — don't trust wire data
+    if (typeof raw !== "object" || raw === null) {
+      client.write(JSON.stringify({ id: "?", error: "request must be an object" }) + "\n");
+      return;
+    }
+    const obj = raw as Record<string, unknown>;
+    const id = typeof obj.id === "string" ? obj.id : "?";
+    if (typeof obj.method !== "string") {
+      client.write(JSON.stringify({ id, error: "method must be a string" }) + "\n");
+      return;
+    }
+    const req: SocketRequest = {
+      id,
+      method: obj.method,
+      ...(typeof obj.params === "object" && obj.params !== null
+        ? { params: obj.params as Record<string, unknown> }
+        : {}),
+    };
 
     try {
       const result = await this.#handler(req.method, req.params ?? {});

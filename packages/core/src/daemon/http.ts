@@ -132,6 +132,12 @@ export class DaemonHttp {
 
     if (url.startsWith("/api/agent/") && req.method === "GET" && this.#agentDetailHandler) {
       const agentId = url.slice("/api/agent/".length);
+      // Validate ID at boundary (#85) — prevent path traversal
+      if (!/^[a-z0-9][a-z0-9._-]*$/i.test(agentId)) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid agent ID" }));
+        return;
+      }
       try {
         const detail = await this.#agentDetailHandler(agentId);
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -145,6 +151,12 @@ export class DaemonHttp {
 
     if (url.startsWith("/api/group/") && req.method === "GET" && this.#groupDetailHandler) {
       const groupId = decodeURIComponent(url.slice("/api/group/".length));
+      // Validate ID at boundary (#85)
+      if (!/^[a-z0-9][a-z0-9._-]*$/i.test(groupId)) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid group ID" }));
+        return;
+      }
       try {
         const detail = await this.#groupDetailHandler(groupId);
         res.writeHead(200, { "Content-Type": "application/json" });
@@ -186,9 +198,27 @@ export class DaemonHttp {
       req.on("end", () => {
         if (oversized) return;
         try {
-          const parsed = JSON.parse(body) as { method: string; params?: Record<string, unknown> };
+          const raw: unknown = JSON.parse(body);
+          // Runtime type validation (#86)
+          if (typeof raw !== "object" || raw === null) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "request must be an object" }));
+            return;
+          }
+          const obj = raw as Record<string, unknown>;
+          if (typeof obj.method !== "string") {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: "method must be a string" }));
+            return;
+          }
+          const parsed = {
+            method: obj.method,
+            params: (typeof obj.params === "object" && obj.params !== null
+              ? obj.params
+              : {}) as Record<string, unknown>,
+          };
           if (this.#commandHandler) {
-            void this.#commandHandler(parsed.method, parsed.params ?? {}).then(
+            void this.#commandHandler(parsed.method, parsed.params).then(
               (result) => {
                 res.writeHead(200, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({ ok: true, method: parsed.method, result }));
