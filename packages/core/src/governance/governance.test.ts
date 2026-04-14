@@ -235,7 +235,12 @@ describe("GovernanceSyncCallbacks", () => {
   it("fires onCreate callback when an item is created", () => {
     const created: GovernanceItem[] = [];
     const store = new GovernanceStateStore({
-      onSync: { onCreate: (item) => created.push(item) },
+      onSync: {
+        onCreate: (item) => {
+          created.push(item);
+          return undefined;
+        },
+      },
     });
     store.registerGraph(S3_TENSION);
     store.create("tension", AGENT, { topic: "test" });

@@ -58,8 +58,12 @@ const makeRegisteredAgent = (id: string, groups: string[] = []): RegisteredAgent
     groupContexts: [],
   },
   githubWriteScopes: { issueComments: [], branchCommits: [], labels: [], issues: [] },
-  signalScopes: { githubScopes: [{ owner: "test", repo: "repo" }] },
-  budgetCeiling: { maxCostMicros: 100000, maxGithubApiCalls: 10, onBreach: "warn" as const },
+  signalScopes: {
+    sources: ["github-issue"],
+    githubScopes: [{ owner: "test", repo: "repo", filter: { state: "open" as const } }],
+  },
+  budget: { maxCostMicros: 100000, maxGithubApiCalls: 10, onBreach: "warn" as const },
+  secrets: { required: [], optional: [] },
 });
 
 // ---------------------------------------------------------------------------
