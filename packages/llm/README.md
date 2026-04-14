@@ -1,4 +1,4 @@
-# @murmuration/llm
+# @murmurations-ai/llm
 
 Typed LLM client for the Murmuration Harness. Four concurrent provider
 adapters behind a single `LLMClient` interface:
@@ -29,15 +29,15 @@ the test.
   per-wake `WakeCostBuilder`.
 - **Errors-as-values** for expected failures; `AbortError` re-throws.
 - **Pricing stays out** — the cost hook emits token counts only; the
-  daemon resolves price via `@murmuration/llm/pricing` (ADR-0015).
+  daemon resolves price via `@murmurations-ai/llm/pricing` (ADR-0015).
 - **Streaming / tools / vision / JSON mode** — all deferred to Phase 3+.
 
 ## Usage
 
 ```ts
-import { makeSecretKey } from "@murmuration/core";
-import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
-import { createLLMClient } from "@murmuration/llm";
+import { makeSecretKey } from "@murmurations-ai/core";
+import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
+import { createLLMClient } from "@murmurations-ai/llm";
 
 const GEMINI_KEY = makeSecretKey("GEMINI_API_KEY");
 const provider = new DotenvSecretsProvider({ envPath: ".env" });

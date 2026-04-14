@@ -3,7 +3,7 @@
  * secrets store (dotenv file, OS keychain, Vault, etc.).
  *
  * Closes the interface portion of Phase 1B step B1. The default provider
- * ({@link https://github.com/murmurations-ai/murmurations-harness/tree/main/packages/secrets-dotenv | `@murmuration/secrets-dotenv`})
+ * ({@link https://github.com/murmurations-ai/murmurations-harness/tree/main/packages/secrets-dotenv | `@murmurations-ai/secrets-dotenv`})
  * reads from a `.env` file; alternate providers slot in by implementing
  * the {@link SecretsProvider} interface here.
  *
@@ -193,7 +193,7 @@ export interface SecretsProvider {
 /**
  * Programmer error: called `get()` with a key that wasn't declared.
  *
- * This class lives in `@murmuration/core` so it can be raised by both
+ * This class lives in `@murmurations-ai/core` so it can be raised by both
  * the core interface contract and concrete providers without each
  * provider defining its own.
  */
@@ -222,7 +222,7 @@ export class UnknownSecretKeyError extends SecretsProviderError {
  * });
  * ```
  */
-export const REDACT: unique symbol = Symbol.for("@murmuration/core/secrets/redact");
+export const REDACT: unique symbol = Symbol.for("@murmurations-ai/core/secrets/redact");
 
 /**
  * Field names whose values look sensitive-by-name. Used by the default

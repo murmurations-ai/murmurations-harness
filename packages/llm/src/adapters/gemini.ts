@@ -6,7 +6,7 @@
  * reveal() called exactly once, in `#buildHeaders`.
  */
 
-import type { SecretValue } from "@murmuration/core";
+import type { SecretValue } from "@murmurations-ai/core";
 import { z } from "zod";
 
 import type { LLMCostHook } from "../cost-hook.js";

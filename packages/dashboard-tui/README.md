@@ -1,4 +1,4 @@
-# @murmuration/dashboard-tui
+# @murmurations-ai/dashboard-tui
 
 Terminal dashboard for the Murmuration Harness. Connects to a running daemon via Unix socket and displays agent state, governance rounds, and cost tracking in a terminal UI.
 

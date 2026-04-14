@@ -1,5 +1,5 @@
 /**
- * @murmuration/secrets-dotenv
+ * @murmurations-ai/secrets-dotenv
  *
  * Default {@link SecretsProvider} implementation. Reads secrets from a
  * `.env` file at the murmuration root, enforces POSIX file permission
@@ -24,7 +24,7 @@ import {
   type SecretsProvider,
   type SecretsProviderCapabilities,
   type SecretValue,
-} from "@murmuration/core";
+} from "@murmurations-ai/core";
 
 // ---------------------------------------------------------------------------
 // Error subclasses

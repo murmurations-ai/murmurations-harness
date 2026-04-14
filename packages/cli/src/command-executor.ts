@@ -23,8 +23,8 @@ import {
   type GovernanceSyncCallbacks,
   type GovernanceTally,
   type RegisteredAgent,
-} from "@murmuration/core";
-import type { DaemonEventBus } from "@murmuration/core";
+} from "@murmurations-ai/core";
+import type { DaemonEventBus } from "@murmurations-ai/core";
 
 // ---------------------------------------------------------------------------
 // Meeting + wake-now in-flight tracking

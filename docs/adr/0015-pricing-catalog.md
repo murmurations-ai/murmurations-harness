@@ -15,9 +15,9 @@ The conversion is a lookup, not arithmetic the adapter should hard-code: provide
 
 ## Decision
 
-### S1 — Package location: `@murmuration/llm/pricing` subpath
+### S1 — Package location: `@murmurations-ai/llm/pricing` subpath
 
-The catalog ships as a subpath of the existing `@murmuration/llm` package — `packages/llm/src/pricing/{catalog,resolve,errors}.ts` — surfaced via `package.json` `"exports"` as `"./pricing"`. **No new workspace package.**
+The catalog ships as a subpath of the existing `@murmurations-ai/llm` package — `packages/llm/src/pricing/{catalog,resolve,errors}.ts` — surfaced via `package.json` `"exports"` as `"./pricing"`. **No new workspace package.**
 
 Rationale: only the LLM adapter layer consumes it. A new workspace package adds `package.json` + tsconfig + build + release overhead for one file of data and one of logic. Co-locating with the adapters keeps the invariant "add a model, add its rate" local. If a second consumer ever appears, subpath → package promotion is a mechanical refactor.
 
@@ -201,7 +201,7 @@ Medium. Schema / error codes / lookup signature are public API of the LLM packag
 
 ## Alternatives considered
 
-- **Standalone `@murmuration/pricing` package** — rejected per S1, overhead with no second consumer.
+- **Standalone `@murmurations-ai/pricing` package** — rejected per S1, overhead with no second consumer.
 - **Resolver throws on unknown model** — rejected, crashes wakes on recoverable conditions.
 - **Hard-code rates in each adapter** — rejected, forces a code change per price update, obscures the catalog as a reviewable asset.
 - **Lookup in the daemon, not the adapter** — rejected per S7.

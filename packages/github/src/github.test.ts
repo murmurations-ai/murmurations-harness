@@ -1,4 +1,4 @@
-import { makeSecretValue } from "@murmuration/core";
+import { makeSecretValue } from "@murmurations-ai/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeIssueNumber, makeRepoCoordinate } from "./branded.js";

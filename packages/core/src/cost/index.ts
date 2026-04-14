@@ -1,5 +1,5 @@
 /**
- * @murmuration/core/cost
+ * @murmurations-ai/core/cost
  *
  * Per-wake cost accounting — the schema, builder, and budget-ceiling
  * machinery owned by Performance / Observability Agent (#27).

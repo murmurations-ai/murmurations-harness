@@ -1218,7 +1218,7 @@ const defaultLogger = (): DaemonLogger => new DaemonLoggerImpl();
 
 // Re-export the redaction symbol so tests and plugins in downstream
 // packages can opt into the symbol-bucket form without reaching into
-// `@murmuration/core/secrets`.
+// `@murmurations-ai/core/secrets`.
 export { REDACT };
 
 // Re-export the trigger types + WakeId helper so downstream packages

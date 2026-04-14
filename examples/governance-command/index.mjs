@@ -59,7 +59,7 @@ const REPORT_GRAPH = {
   ],
 };
 
-/** @type {import('@murmuration/core').GovernancePlugin} */
+/** @type {import('@murmurations-ai/core').GovernancePlugin} */
 const ChainOfCommandPlugin = {
   name: "chain-of-command",
   version: "0.1.0",
@@ -112,7 +112,8 @@ const ChainOfCommandPlugin = {
       // In C&C, anything requiring consent needs an approved directive
       const approved = store.query({ kind: "directive", state: "approved" });
       const covering = approved.find((item) => {
-        const payload = typeof item.payload === "object" && item.payload !== null ? item.payload : {};
+        const payload =
+          typeof item.payload === "object" && item.payload !== null ? item.payload : {};
         return /** @type {any} */ (payload).action === action;
       });
       if (covering) return { allow: true };

@@ -18,7 +18,7 @@ import type {
 
 /**
  * Minimal GitHub client interface — just what governance sync needs.
- * Avoids importing the full @murmuration/github package into core.
+ * Avoids importing the full @murmurations-ai/github package into core.
  * The CLI wires the real GithubClient at boot.
  */
 export interface GovernanceSyncGitHub {

@@ -52,7 +52,7 @@ import {
   type SubprocessCommand,
   type WakeCostBuilder,
   type WakeTrigger,
-} from "@murmuration/core";
+} from "@murmurations-ai/core";
 import {
   createGithubClient,
   makeIssueNumber,
@@ -60,11 +60,11 @@ import {
   type GithubClient,
   type GithubWriteScopes,
   type RepoCoordinate,
-} from "@murmuration/github";
-import { createLLMClient, type LLMClient, type LLMCostHook } from "@murmuration/llm";
-import { resolveLLMCost } from "@murmuration/llm/pricing";
-import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
-import { DefaultSignalAggregator } from "@murmuration/signals";
+} from "@murmurations-ai/github";
+import { createLLMClient, type LLMClient, type LLMCostHook } from "@murmurations-ai/llm";
+import { resolveLLMCost } from "@murmurations-ai/llm/pricing";
+import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
+import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
@@ -135,7 +135,7 @@ const parseRepoKey = (key: string): RepoCoordinate | undefined => {
 
 /**
  * Map `RegisteredAgent.githubWriteScopes` (ADR-0016 camelCase) to the
- * `@murmuration/github` `GithubWriteScopes` shape (ADR-0017 §4).
+ * `@murmurations-ai/github` `GithubWriteScopes` shape (ADR-0017 §4).
  * CF-github-I closed: `issues` now flows through from role.md.
  */
 const toClientWriteScopes = (agent: RegisteredAgent): GithubWriteScopes => ({
@@ -242,7 +242,7 @@ interface AgentComposition {
  *
  * `targetRepo` and `targetBranch` are convenience fields derived from
  * the agent's `branchCommits` write scopes at boot time. They save
- * the runner from needing to import `@murmuration/github` (which
+ * the runner from needing to import `@murmurations-ai/github` (which
  * doesn't resolve outside the monorepo). Operators whose runners
  * don't commit to GitHub can ignore them.
  */
@@ -384,7 +384,7 @@ const EVENT_FALLBACK_DELAY_MS = 2000;
  */
 const discoverGroupConfigs = async (
   rootDir: string,
-): Promise<import("@murmuration/core").GroupConfig[]> => {
+): Promise<import("@murmurations-ai/core").GroupConfig[]> => {
   const { readdir, readFile: rf } = await import("node:fs/promises");
   const groupsDir = resolve(rootDir, "governance", "groups");
   let entries: string[];
@@ -393,7 +393,7 @@ const discoverGroupConfigs = async (
   } catch {
     return [];
   }
-  const configs: import("@murmuration/core").GroupConfig[] = [];
+  const configs: import("@murmurations-ai/core").GroupConfig[] = [];
   for (const entry of entries.filter((e) => e.endsWith(".md")).sort()) {
     try {
       const content = await rf(resolve(groupsDir, entry), "utf8");
@@ -525,7 +525,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const once = options.once === true;
 
   // Construct event bus + structured logger (Engineering Standards #4 + #9)
-  const { DaemonEventBus, DaemonLoggerImpl } = await import("@murmuration/core");
+  const { DaemonEventBus, DaemonLoggerImpl } = await import("@murmurations-ai/core");
   const eventBus = new DaemonEventBus();
   const logger = new DaemonLoggerImpl({ level: options.logLevel ?? "info", eventBus });
 
@@ -544,7 +544,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       // No harness.yaml — that's fine, use no-op governance
     }
   }
-  let governancePlugin: import("@murmuration/core").GovernancePlugin | undefined;
+  let governancePlugin: import("@murmurations-ai/core").GovernancePlugin | undefined;
   if (governancePath) {
     const pluginUrl = pathToFileURL(resolve(governancePath)).href;
     const mod = (await import(pluginUrl)) as { default?: unknown };
@@ -560,7 +560,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       );
       process.exit(78);
     }
-    governancePlugin = candidate as import("@murmuration/core").GovernancePlugin;
+    governancePlugin = candidate as import("@murmurations-ai/core").GovernancePlugin;
     process.stdout.write(
       `${JSON.stringify({
         ts: new Date().toISOString(),
@@ -978,7 +978,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     if (!firstScope) return [];
     const repo = makeRepoCoordinate(firstScope.owner, firstScope.repo);
     const gh = comp.github;
-    const receipts: import("@murmuration/core").WakeActionReceipt[] = [];
+    const receipts: import("@murmurations-ai/core").WakeActionReceipt[] = [];
     for (const action of actions) {
       try {
         switch (action.kind) {

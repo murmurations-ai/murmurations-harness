@@ -1,5 +1,5 @@
 {
-  "name": "@murmuration/dashboard-tui",
+  "name": "@murmurations-ai/dashboard-tui",
   "version": "0.1.0",
   "description": "Terminal dashboard for the Murmuration Harness — pipeline state, agent activity, governance rounds, cost tracking.",
   "license": "MIT",
@@ -26,7 +26,7 @@
   },
   "dependencies": {
     "@mariozechner/pi-tui": "^0.66.1",
-    "@murmuration/core": "workspace:*",
+    "@murmurations-ai/core": "workspace:*",
     "cron-parser": "^4.9.0"
   },
   "files": [

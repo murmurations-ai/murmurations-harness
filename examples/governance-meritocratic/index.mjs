@@ -58,7 +58,7 @@ const STANDARD_GRAPH = {
   ],
 };
 
-/** @type {import('@murmuration/core').GovernancePlugin} */
+/** @type {import('@murmurations-ai/core').GovernancePlugin} */
 const MeritocraticPlugin = {
   name: "meritocratic",
   version: "0.1.0",
@@ -117,14 +117,18 @@ const MeritocraticPlugin = {
     if (!tier || tier === "autonomous") return { allow: true };
 
     if (tier === "source") {
-      return { allow: false, reason: `Action "${action}" requires guild expert consensus (tier: source).` };
+      return {
+        allow: false,
+        reason: `Action "${action}" requires guild expert consensus (tier: source).`,
+      };
     }
 
     if (tier === "consent" || tier === "expert") {
       // Check for an adopted standard covering this action
       const adopted = store.query({ kind: "standard", state: "adopted" });
       const covering = adopted.find((item) => {
-        const payload = typeof item.payload === "object" && item.payload !== null ? item.payload : {};
+        const payload =
+          typeof item.payload === "object" && item.payload !== null ? item.payload : {};
         return /** @type {any} */ (payload).action === action;
       });
       if (covering) return { allow: true };

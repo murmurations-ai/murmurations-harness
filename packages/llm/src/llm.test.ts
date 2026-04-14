@@ -1,4 +1,4 @@
-import { makeSecretValue } from "@murmuration/core";
+import { makeSecretValue } from "@murmurations-ai/core";
 import { describe, expect, it } from "vitest";
 
 import {

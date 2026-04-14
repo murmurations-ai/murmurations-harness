@@ -1,5 +1,5 @@
 {
-  "name": "@murmuration/llm",
+  "name": "@murmurations-ai/llm",
   "version": "0.1.0",
   "description": "Typed LLM client for the Murmuration Harness — four-provider, SecretValue auth, per-call cost hook.",
   "license": "MIT",
@@ -40,7 +40,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@murmuration/core": "workspace:*",
+    "@murmurations-ai/core": "workspace:*",
     "zod": "^4.3.6"
   }
 }

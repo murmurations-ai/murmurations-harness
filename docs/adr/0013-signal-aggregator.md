@@ -1,4 +1,4 @@
-# ADR-0013 — SignalAggregator v0.1, interim trust taxonomy, `@murmuration/signals` package
+# ADR-0013 — SignalAggregator v0.1, interim trust taxonomy, `@murmurations-ai/signals` package
 
 - **Status:** Accepted (interim trust taxonomy)
 - **Date:** 2026-04-09 (landed in commit `1B-d`)
@@ -22,9 +22,9 @@ Two architectural decisions constrained the design:
    implementations) but without exposing the source-plugin contract
    before it's been validated.
 2. **Dependency direction.** The default aggregator needs
-   `@murmuration/github` (for the github-issue source), and
-   `@murmuration/github` depends on `@murmuration/core` (for
-   `SecretValue`). If the default aggregator lived in `@murmuration/core`
+   `@murmurations-ai/github` (for the github-issue source), and
+   `@murmurations-ai/github` depends on `@murmurations-ai/core` (for
+   `SecretValue`). If the default aggregator lived in `@murmurations-ai/core`
    we'd have a package cycle (`core → github → core`).
 
 ## Decision
@@ -34,13 +34,13 @@ Two architectural decisions constrained the design:
 - **`SignalAggregator` interface** + `SignalAggregationContext`,
   `SignalAggregationResult`, `SignalAggregatorError`,
   `SignalAggregatorCapabilities`, `SignalSourceId` live in
-  `@murmuration/core/src/signals/index.ts`. The daemon references
+  `@murmurations-ai/core/src/signals/index.ts`. The daemon references
   only the interface.
 - **`DefaultSignalAggregator`** and `GithubSignalScope`,
   `AggregatorCaps`, and the text-hygiene helpers live in a NEW
-  workspace package `@murmuration/signals` that depends on both
-  `@murmuration/core` (for the interface and `Signal` types) and
-  `@murmuration/github` (for `GithubClient`). **This breaks the
+  workspace package `@murmurations-ai/signals` that depends on both
+  `@murmurations-ai/core` (for the interface and `Signal` types) and
+  `@murmurations-ai/github` (for `GithubClient`). **This breaks the
   cycle** without weakening the architectural separation.
 - CLI / daemon wiring happens at the composition root
   (`packages/cli/src/boot.ts`). The `Daemon` class only knows about
@@ -50,7 +50,7 @@ Two architectural decisions constrained the design:
 
 | Source             | Status      | Rationale                                                                                                  |
 | ------------------ | ----------- | ---------------------------------------------------------------------------------------------------------- |
-| `github-issue`     | Implemented | Uses `@murmuration/github`; the only external source live in Phase 1B.                                     |
+| `github-issue`     | Implemented | Uses `@murmurations-ai/github`; the only external source live in Phase 1B.                                 |
 | `private-note`     | Implemented | On-disk filesystem walk of `agents/<id>/notes/*.md`; trivially trusted; continuity surface from spec §7.1. |
 | `inbox-message`    | Implemented | Filesystem walk of `agents/<id>/inbox/*.md`; required by spec §7.1.                                        |
 | `pipeline-item`    | Not in 1B-d | Depends on `.pipeline/<issue>/*.yaml` reader — Phase 2 infrastructure.                                     |
@@ -175,7 +175,7 @@ existing daemon tests pass unchanged.
 
 ## Alternatives considered
 
-- **Put `DefaultSignalAggregator` in `@murmuration/core/signals`
+- **Put `DefaultSignalAggregator` in `@murmurations-ai/core/signals`
   directly.** Rejected: creates a `core → github → core` package
   cycle.
 - **Structural typing on `GithubClient` in core to avoid the cycle.**

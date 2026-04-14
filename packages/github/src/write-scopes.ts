@@ -1,5 +1,5 @@
 /**
- * Write-scope enforcement for `@murmuration/github` mutations.
+ * Write-scope enforcement for `@murmurations-ai/github` mutations.
  *
  * Per ADR-0017 §4 and §9: enforcement is client-level, default-deny.
  * Absent `writeScopes` on the client config means every mutation

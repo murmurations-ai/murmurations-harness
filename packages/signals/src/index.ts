@@ -1,5 +1,5 @@
 /**
- * @murmuration/signals
+ * @murmurations-ai/signals
  *
  * Default {@link SignalAggregator} implementation for the Murmuration
  * Harness. Composes github + filesystem sources. See
@@ -9,20 +9,25 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
-import { makeAgentId, type AgentId, type Signal, type SignalTrustLevel } from "@murmuration/core";
+import {
+  makeAgentId,
+  type AgentId,
+  type Signal,
+  type SignalTrustLevel,
+} from "@murmurations-ai/core";
 import type {
   SignalAggregationContext,
   SignalAggregationResult,
   SignalAggregator,
   SignalAggregatorCapabilities,
   SignalSourceId,
-} from "@murmuration/core";
+} from "@murmurations-ai/core";
 import type {
   GithubClient,
   GithubIssue,
   ListIssuesFilter,
   RepoCoordinate,
-} from "@murmuration/github";
+} from "@murmurations-ai/github";
 
 // ---------------------------------------------------------------------------
 // Public config + caps

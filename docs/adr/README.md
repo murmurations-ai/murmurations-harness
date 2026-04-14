@@ -50,24 +50,24 @@ per the Engineering Lead #22 gate review ([issue #6](https://github.com/murmurat
 
 ## Index
 
-| #                                                | Title                                                                                                | Status   |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | -------- |
-| [ADR-0001](./0001-pnpm-workspaces.md)            | Use pnpm workspaces for monorepo management                                                          | Accepted |
-| [ADR-0002](./0002-typescript-strict-baseline.md) | TypeScript strict mode baseline with noUncheckedIndexedAccess and exactOptionalPropertyTypes         | Accepted |
-| [ADR-0003](./0003-esm-module-system.md)          | ESM module system (`"type": "module"`) across all packages                                           | Accepted |
-| [ADR-0004](./0004-monorepo-layout.md)            | Monorepo layout: `packages/*` workspace glob, package-per-responsibility                             | Accepted |
-| [ADR-0005](./0005-errors-as-values-executor.md)  | Errors-as-values at the AgentExecutor boundary                                                       | Accepted |
-| [ADR-0006](./0006-branded-primitives.md)         | Branded primitive types for identifiers (AgentId, CircleId, WakeId, handles)                         | Accepted |
-| [ADR-0007](./0007-phase-1a-stdio-protocol.md)    | Phase 1A subprocess stdio output protocol (`::wake-summary::`, `::governance::<kind>::`)             | Accepted |
-| [ADR-0008](./0008-test-framework.md)             | Test framework: Vitest                                                                               | Accepted |
-| [ADR-0009](./0009-lint-format.md)                | Lint + format: ESLint flat config + Prettier                                                         | Accepted |
-| [ADR-0010](./0010-secrets-provider-interface.md) | SecretsProvider interface and dotenv default provider                                                | Accepted |
-| [ADR-0011](./0011-cost-record-schema.md)         | WakeCostRecord schema and cost instrumentation plumbing                                              | Accepted |
-| [ADR-0012](./0012-github-client.md)              | @murmuration/github — native fetch, SecretValue auth, per-call cost hook                             | Accepted |
-| [ADR-0013](./0013-signal-aggregator.md)          | SignalAggregator v0.1 with interim trust taxonomy (pending harness#4)                                | Accepted |
-| [ADR-0014](./0014-llm-client.md)                 | @murmuration/llm four-provider client (Gemini P0, Anthropic, OpenAI, Ollama)                         | Accepted |
-| [ADR-0015](./0015-pricing-catalog.md)            | Per-provider LLM pricing catalog populating WakeCostRecord.llm.costMicros                            | Accepted |
-| [ADR-0016](./0016-role-template.md)              | Extended role.md frontmatter for real agents (provider pin, scopes, budget, prompt ref)              | Accepted |
-| [ADR-0017](./0017-github-mutations.md)           | @murmuration/github mutation surface (comment, commit-on-branch, issue) with write-scope enforcement | Accepted |
-| [ADR-0018](./0018-cli-tmux-interface.md)         | CLI tmux-style interface and parity contract (leader keys, protocol.ts, batch verbs)                 | Proposed |
-| [ADR-0019](./0019-persistent-context-agents.md)  | Persistent context agents (long-running conversation windows across wakes)                           | Proposed |
+| #                                                | Title                                                                                                    | Status   |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- | -------- |
+| [ADR-0001](./0001-pnpm-workspaces.md)            | Use pnpm workspaces for monorepo management                                                              | Accepted |
+| [ADR-0002](./0002-typescript-strict-baseline.md) | TypeScript strict mode baseline with noUncheckedIndexedAccess and exactOptionalPropertyTypes             | Accepted |
+| [ADR-0003](./0003-esm-module-system.md)          | ESM module system (`"type": "module"`) across all packages                                               | Accepted |
+| [ADR-0004](./0004-monorepo-layout.md)            | Monorepo layout: `packages/*` workspace glob, package-per-responsibility                                 | Accepted |
+| [ADR-0005](./0005-errors-as-values-executor.md)  | Errors-as-values at the AgentExecutor boundary                                                           | Accepted |
+| [ADR-0006](./0006-branded-primitives.md)         | Branded primitive types for identifiers (AgentId, CircleId, WakeId, handles)                             | Accepted |
+| [ADR-0007](./0007-phase-1a-stdio-protocol.md)    | Phase 1A subprocess stdio output protocol (`::wake-summary::`, `::governance::<kind>::`)                 | Accepted |
+| [ADR-0008](./0008-test-framework.md)             | Test framework: Vitest                                                                                   | Accepted |
+| [ADR-0009](./0009-lint-format.md)                | Lint + format: ESLint flat config + Prettier                                                             | Accepted |
+| [ADR-0010](./0010-secrets-provider-interface.md) | SecretsProvider interface and dotenv default provider                                                    | Accepted |
+| [ADR-0011](./0011-cost-record-schema.md)         | WakeCostRecord schema and cost instrumentation plumbing                                                  | Accepted |
+| [ADR-0012](./0012-github-client.md)              | @murmurations-ai/github — native fetch, SecretValue auth, per-call cost hook                             | Accepted |
+| [ADR-0013](./0013-signal-aggregator.md)          | SignalAggregator v0.1 with interim trust taxonomy (pending harness#4)                                    | Accepted |
+| [ADR-0014](./0014-llm-client.md)                 | @murmurations-ai/llm four-provider client (Gemini P0, Anthropic, OpenAI, Ollama)                         | Accepted |
+| [ADR-0015](./0015-pricing-catalog.md)            | Per-provider LLM pricing catalog populating WakeCostRecord.llm.costMicros                                | Accepted |
+| [ADR-0016](./0016-role-template.md)              | Extended role.md frontmatter for real agents (provider pin, scopes, budget, prompt ref)                  | Accepted |
+| [ADR-0017](./0017-github-mutations.md)           | @murmurations-ai/github mutation surface (comment, commit-on-branch, issue) with write-scope enforcement | Accepted |
+| [ADR-0018](./0018-cli-tmux-interface.md)         | CLI tmux-style interface and parity contract (leader keys, protocol.ts, batch verbs)                     | Proposed |
+| [ADR-0019](./0019-persistent-context-agents.md)  | Persistent context agents (long-running conversation windows across wakes)                               | Proposed |

@@ -85,7 +85,7 @@ const AMENDMENT_GRAPH = {
 // Plugin implementation
 // ---------------------------------------------------------------------------
 
-/** @type {import('@murmuration/core').GovernancePlugin} */
+/** @type {import('@murmurations-ai/core').GovernancePlugin} */
 const ParliamentaryGovernancePlugin = {
   name: "parliamentary",
   version: "0.1.0",
@@ -112,7 +112,7 @@ const ParliamentaryGovernancePlugin = {
           const item = store.create("motion", batch.agentId, event.payload);
 
           // Motions go to the chair (Source) for scheduling
-          /** @type {import('@murmuration/core').GovernanceRouteTarget[]} */
+          /** @type {import('@murmurations-ai/core').GovernanceRouteTarget[]} */
           const routes = [{ target: "source" }];
           if (event.targetAgentId) {
             routes.push({ target: "agent", agentId: event.targetAgentId });
@@ -181,7 +181,8 @@ const ParliamentaryGovernancePlugin = {
       // Check for a passed motion covering this action
       const passed = store.query({ kind: "motion", state: "passed" });
       const covering = passed.find((item) => {
-        const payload = typeof item.payload === "object" && item.payload !== null ? item.payload : {};
+        const payload =
+          typeof item.payload === "object" && item.payload !== null ? item.payload : {};
         return /** @type {any} */ (payload).action === action;
       });
 

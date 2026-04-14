@@ -24,16 +24,16 @@ import {
   type ActionReceipt,
   type GovernanceTally,
   GovernanceStateStore,
-} from "@murmuration/core";
+} from "@murmurations-ai/core";
 import {
   createGithubClient,
   makeRepoCoordinate,
   makeIssueNumber,
   type GithubClient,
   type RepoCoordinate,
-} from "@murmuration/github";
-import { createLLMClient, type LLMClient } from "@murmuration/llm";
-import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
+} from "@murmurations-ai/github";
+import { createLLMClient, type LLMClient } from "@murmurations-ai/llm";
+import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
@@ -112,10 +112,10 @@ const fetchGroupBacklog = async (
   try {
     const envPath = join(rootDir, ".env");
     if (!existsSync(envPath)) return "(no .env — cannot fetch backlog)";
-    const { DotenvSecretsProvider } = await import("@murmuration/secrets-dotenv");
+    const { DotenvSecretsProvider } = await import("@murmurations-ai/secrets-dotenv");
     const provider = new DotenvSecretsProvider({ envPath });
     await provider.load({ required: [makeSecretKey("GITHUB_TOKEN")], optional: [] });
-    const { createGithubClient, makeRepoCoordinate } = await import("@murmuration/github");
+    const { createGithubClient, makeRepoCoordinate } = await import("@murmurations-ai/github");
     const gh = createGithubClient({ token: provider.get(makeSecretKey("GITHUB_TOKEN")) });
     const repo = makeRepoCoordinate(repoInfo.owner, repoInfo.repo);
     const result = await gh.listIssues(repo, { state: "open", perPage: 30 });
@@ -448,9 +448,9 @@ export const runGroupWakeCommand = async (
     [directiveBody ?? "", backlogSection].filter(Boolean).join("") || undefined;
 
   // Load retrospective metrics if this is a retrospective
-  let retrospectiveMetrics: import("@murmuration/core").RetrospectiveMetrics | undefined;
+  let retrospectiveMetrics: import("@murmurations-ai/core").RetrospectiveMetrics | undefined;
   if (isRetrospective) {
-    const { AgentStateStore } = await import("@murmuration/core");
+    const { AgentStateStore } = await import("@murmurations-ai/core");
     const stateStore = new AgentStateStore({
       persistDir: join(root, ".murmuration", "agents"),
     });
@@ -627,7 +627,7 @@ export const runGroupWakeCommand = async (
   try {
     if (!secretsProvider?.has(GITHUB_TOKEN)) throw new Error("no GITHUB_TOKEN");
     const { makeRepoCoordinate, createGithubClient: createGH } =
-      await import("@murmuration/github");
+      await import("@murmurations-ai/github");
     const meetingGh = createGH({
       token: secretsProvider.get(GITHUB_TOKEN),
       writeScopes: {

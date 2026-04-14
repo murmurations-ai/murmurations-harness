@@ -15,9 +15,9 @@
 import { existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 
-import { makeSecretKey, IdentityLoader } from "@murmuration/core";
-import { createGithubClient, makeRepoCoordinate } from "@murmuration/github";
-import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
+import { makeSecretKey, IdentityLoader } from "@murmurations-ai/core";
+import { createGithubClient, makeRepoCoordinate } from "@murmurations-ai/github";
+import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 

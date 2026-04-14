@@ -12,10 +12,10 @@
 > **Phase 1 — Harness core scaffold** (starts after spec ratified)
 >
 > - Monorepo set up, pnpm workspaces, TS strict ✅ (commit `644ef63`)
-> - `@murmuration/core`: scheduler, signal aggregator, executor interface (stub) 🟡 (skeleton only)
-> - `@murmuration/github`: typed GitHub client with rate limiting and caching ⏳
-> - `@murmuration/secrets-dotenv` ⏳
-> - `@murmuration/cli`: `start`, `status`, `stop` ⏳
+> - `@murmurations-ai/core`: scheduler, signal aggregator, executor interface (stub) 🟡 (skeleton only)
+> - `@murmurations-ai/github`: typed GitHub client with rate limiting and caching ⏳
+> - `@murmurations-ai/secrets-dotenv` ⏳
+> - `@murmurations-ai/cli`: `start`, `status`, `stop` ⏳
 > - **Gate:** Daemon boots; scheduler fires a hello-world agent wake ⏳
 
 ---
@@ -28,15 +28,15 @@ The Phase 1 deliverable list is large. Splitting into two stages lets us hit the
 
 The minimum code needed to prove the wake loop structurally works end-to-end, even without real agents or GitHub integration.
 
-| Step | Deliverable                                                                                                                                                        | Owner                                               | Blocks         |
-| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- | -------------- |
-| A1   | **Close carry-forward #3** — `AgentExecutor` interface explicit in `@murmuration/core/execution`                                                                   | TypeScript #24 (review + author)                    | All downstream |
-| A2   | Minimal `Scheduler` implementation in `@murmuration/core/scheduler` — in-memory timer-based trigger                                                                | Architecture #23 (topology), TypeScript #24 (types) | A4             |
-| A3   | `SubprocessExecutor` implementation of `AgentExecutor` — spawns a child process, captures stdout/stderr, returns result                                            | Architecture #23 + Security #25 review              | A4             |
-| A4   | `@murmuration/cli` package — `murmuration start` command that boots the daemon and holds                                                                           | DevOps #26                                          | A5             |
-| A5   | Minimal daemon loop — instantiates scheduler + executor, registers a hello-world agent, enters run loop                                                            | Engineering Lead #22 integration                    | A6             |
-| A6   | `examples/hello-world-agent/` — shell script or tiny Node script that prints "hello from agent" and exits 0                                                        | DevOps #26                                          | A7             |
-| A7   | **Gate test:** `pnpm --filter @murmuration/cli run start` → hello-world wake fires within 10 seconds → logs capture the wake → daemon shuts down cleanly on SIGINT | Engineering Lead #22 gates                          | Phase 1B       |
+| Step | Deliverable                                                                                                                                                            | Owner                                               | Blocks         |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | -------------- |
+| A1   | **Close carry-forward #3** — `AgentExecutor` interface explicit in `@murmurations-ai/core/execution`                                                                   | TypeScript #24 (review + author)                    | All downstream |
+| A2   | Minimal `Scheduler` implementation in `@murmurations-ai/core/scheduler` — in-memory timer-based trigger                                                                | Architecture #23 (topology), TypeScript #24 (types) | A4             |
+| A3   | `SubprocessExecutor` implementation of `AgentExecutor` — spawns a child process, captures stdout/stderr, returns result                                                | Architecture #23 + Security #25 review              | A4             |
+| A4   | `@murmurations-ai/cli` package — `murmuration start` command that boots the daemon and holds                                                                           | DevOps #26                                          | A5             |
+| A5   | Minimal daemon loop — instantiates scheduler + executor, registers a hello-world agent, enters run loop                                                                | Engineering Lead #22 integration                    | A6             |
+| A6   | `examples/hello-world-agent/` — shell script or tiny Node script that prints "hello from agent" and exits 0                                                            | DevOps #26                                          | A7             |
+| A7   | **Gate test:** `pnpm --filter @murmurations-ai/cli run start` → hello-world wake fires within 10 seconds → logs capture the wake → daemon shuts down cleanly on SIGINT | Engineering Lead #22 gates                          | Phase 1B       |
 
 **A1 is load-bearing.** Everything downstream depends on the AgentExecutor interface being real and stable. TypeScript Agent #24 is accountable for closing carry-forward #3 before A2 starts.
 
@@ -46,8 +46,8 @@ Everything needed to declare Phase 1 "done" per the spec's Phase 1 deliverable l
 
 | Step | Deliverable                                                                                                                                        | Owner                                                                |
 | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| B1   | `@murmuration/secrets-dotenv` — default secrets provider, pluggable interface                                                                      | Security #25 (policy) + DevOps #26 (implementation)                  |
-| B2   | `@murmuration/github` — typed GitHub client with rate limiting, caching, retry/backoff                                                             | TypeScript #24 (types) + DevOps #26 (implementation)                 |
+| B1   | `@murmurations-ai/secrets-dotenv` — default secrets provider, pluggable interface                                                                  | Security #25 (policy) + DevOps #26 (implementation)                  |
+| B2   | `@murmurations-ai/github` — typed GitHub client with rate limiting, caching, retry/backoff                                                         | TypeScript #24 (types) + DevOps #26 (implementation)                 |
 | B3   | `Scheduler` extension — real cron triggers + event triggers (not just timer)                                                                       | Architecture #23 + TypeScript #24                                    |
 | B4   | `SignalAggregator` implementation — reads GitHub + private notes + inbox                                                                           | Architecture #23 + Security #25 (trust tagging per carry-forward #4) |
 | B5   | **Cost instrumentation plumbing** (Performance #27 carry-forward #5) — per-wake cost record schema, structured log format, GitHub API call counter | Performance #27 (defines), DevOps #26 (plumbs)                       |
@@ -153,8 +153,8 @@ Starting immediately after committing this plan:
 1. **Commit this plan** to `docs/PHASE-1-PLAN.md` ← current step
 2. **Spawn TypeScript Agent #24** to author the `AgentExecutor` interface (closes carry-forward harness repo #3)
 3. Commit A1 deliverable
-4. Implement A2 (scheduler) + A3 (subprocess executor) + A5 (daemon loop) together as `@murmuration/core` additions
-5. Create `@murmuration/cli` package with `start` command (A4)
+4. Implement A2 (scheduler) + A3 (subprocess executor) + A5 (daemon loop) together as `@murmurations-ai/core` additions
+5. Create `@murmurations-ai/cli` package with `start` command (A4)
 6. Create `examples/hello-world-agent/` (A6)
 7. Run the gate test (A7)
 8. Spawn Engineering Lead #22 for the Phase 1A gate review
@@ -193,7 +193,7 @@ Performance #27 must define the cost accounting schema (carry-forward #5) before
 
 Phase 1A is done when:
 
-- `pnpm --filter @murmuration/cli run start` boots the daemon
+- `pnpm --filter @murmurations-ai/cli run start` boots the daemon
 - Within 10 seconds, the daemon fires a hello-world agent wake
 - The wake result is logged in structured JSON lines to stdout
 - Pressing Ctrl+C shuts down the daemon cleanly (no orphan subprocesses)

@@ -11,13 +11,13 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.2.0)
-      '@murmuration/core':
+      '@murmurations-ai/core':
         specifier: workspace:*
         version: link:packages/core
-      '@murmuration/llm':
+      '@murmurations-ai/llm':
         specifier: workspace:*
         version: link:packages/llm
-      '@murmuration/secrets-dotenv':
+      '@murmurations-ai/secrets-dotenv':
         specifier: workspace:*
         version: link:packages/secrets-dotenv
       '@types/node':
@@ -47,19 +47,19 @@ importers:
 
   packages/cli:
     dependencies:
-      '@murmuration/core':
+      '@murmurations-ai/core':
         specifier: workspace:*
         version: link:../core
-      '@murmuration/github':
+      '@murmurations-ai/github':
         specifier: workspace:*
         version: link:../github
-      '@murmuration/llm':
+      '@murmurations-ai/llm':
         specifier: workspace:*
         version: link:../llm
-      '@murmuration/secrets-dotenv':
+      '@murmurations-ai/secrets-dotenv':
         specifier: workspace:*
         version: link:../secrets-dotenv
-      '@murmuration/signals':
+      '@murmurations-ai/signals':
         specifier: workspace:*
         version: link:../signals
 
@@ -80,7 +80,7 @@ importers:
       '@mariozechner/pi-tui':
         specifier: ^0.66.1
         version: 0.66.1
-      '@murmuration/core':
+      '@murmurations-ai/core':
         specifier: workspace:*
         version: link:../core
       cron-parser:
@@ -89,7 +89,7 @@ importers:
 
   packages/github:
     dependencies:
-      '@murmuration/core':
+      '@murmurations-ai/core':
         specifier: workspace:*
         version: link:../core
       zod:
@@ -102,7 +102,7 @@ importers:
 
   packages/llm:
     dependencies:
-      '@murmuration/core':
+      '@murmurations-ai/core':
         specifier: workspace:*
         version: link:../core
       zod:
@@ -111,7 +111,7 @@ importers:
 
   packages/secrets-dotenv:
     dependencies:
-      '@murmuration/core':
+      '@murmurations-ai/core':
         specifier: workspace:*
         version: link:../core
       dotenv:
@@ -120,10 +120,10 @@ importers:
 
   packages/signals:
     dependencies:
-      '@murmuration/core':
+      '@murmurations-ai/core':
         specifier: workspace:*
         version: link:../core
-      '@murmuration/github':
+      '@murmurations-ai/github':
         specifier: workspace:*
         version: link:../github
 

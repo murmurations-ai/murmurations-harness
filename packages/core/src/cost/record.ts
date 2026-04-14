@@ -14,7 +14,7 @@
  * integration has landed yet:
  *
  *   - `llm.*` populates in Phase 2 (one-agent proof)
- *   - `github.*` populates in Phase 1B-d (B2, the `@murmuration/github`
+ *   - `github.*` populates in Phase 1B-d (B2, the `@murmurations-ai/github`
  *     package)
  *
  * Shape is frozen at `schemaVersion: 1` now so downstream readers

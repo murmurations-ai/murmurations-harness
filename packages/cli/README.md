@@ -1,4 +1,4 @@
-# @murmuration/cli
+# @murmurations-ai/cli
 
 Command-line interface for the Murmuration Harness daemon.
 
@@ -17,7 +17,7 @@ Command-line interface for the Murmuration Harness daemon.
 
 ```bash
 # From the monorepo root
-pnpm --filter @murmuration/cli start
+pnpm --filter @murmurations-ai/cli start
 
 # Expected output: JSON-lines log of boot, wake firing, completion
 # Press Ctrl+C to shut down cleanly

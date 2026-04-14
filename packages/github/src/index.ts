@@ -1,5 +1,5 @@
 /**
- * @murmuration/github
+ * @murmurations-ai/github
  *
  * Typed GitHub REST client for the Murmuration Harness. Ships in
  * Phase 1B step B2. See `docs/adr/0012-github-client.md`.

@@ -49,7 +49,12 @@ const PROPOSAL_GRAPH = {
     { from: "consensus-round", to: "withdrawn", trigger: "agent-action" },
     { from: "deliberation", to: "withdrawn", trigger: "agent-action" },
     // Timeout: deliberation stuck for 21 days triggers temperature re-check
-    { from: "deliberation", to: "temperature-check", trigger: "timeout", timeoutMs: 21 * 86_400_000 },
+    {
+      from: "deliberation",
+      to: "temperature-check",
+      trigger: "timeout",
+      timeoutMs: 21 * 86_400_000,
+    },
   ],
 };
 
@@ -68,7 +73,7 @@ const CONCERN_GRAPH = {
   ],
 };
 
-/** @type {import('@murmuration/core').GovernancePlugin} */
+/** @type {import('@murmurations-ai/core').GovernancePlugin} */
 const ConsensusPlugin = {
   name: "consensus",
   version: "0.1.0",
@@ -128,14 +133,18 @@ const ConsensusPlugin = {
     if (!tier || tier === "autonomous") return { allow: true };
 
     if (tier === "source") {
-      return { allow: false, reason: `Action "${action}" requires the full assembly's consensus (tier: source).` };
+      return {
+        allow: false,
+        reason: `Action "${action}" requires the full assembly's consensus (tier: source).`,
+      };
     }
 
     if (tier === "consent" || tier === "consensus") {
       // Consensus requires an agreed proposal
       const agreed = store.query({ kind: "proposal", state: "agreed" });
       const covering = agreed.find((item) => {
-        const payload = typeof item.payload === "object" && item.payload !== null ? item.payload : {};
+        const payload =
+          typeof item.payload === "object" && item.payload !== null ? item.payload : {};
         return /** @type {any} */ (payload).action === action;
       });
       if (covering) return { allow: true };
@@ -155,7 +164,9 @@ const ConsensusPlugin = {
     }
     const blocked = existing.filter((i) => i.currentState === "deliberation");
     if (blocked.length > 0) {
-      console.log(`[consensus] ${String(blocked.length)} proposals in deliberation — may need attention`);
+      console.log(
+        `[consensus] ${String(blocked.length)} proposals in deliberation — may need attention`,
+      );
     }
   },
 };

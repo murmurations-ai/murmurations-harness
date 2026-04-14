@@ -170,11 +170,11 @@ _What does this murmuration optimize for?_
 
   // murmuration/harness.yaml
   const governancePluginMap: Record<string, string> = {
-    "self-organizing": "@murmuration/governance-s3",
-    "chain-of-command": "@murmuration/governance-command",
-    meritocratic: "@murmuration/governance-meritocratic",
-    consensus: "@murmuration/governance-consensus",
-    parliamentary: "@murmuration/governance-parliamentary",
+    "self-organizing": "@murmurations-ai/governance-s3",
+    "chain-of-command": "@murmurations-ai/governance-command",
+    meritocratic: "@murmurations-ai/governance-meritocratic",
+    consensus: "@murmurations-ai/governance-consensus",
+    parliamentary: "@murmurations-ai/governance-parliamentary",
   };
   const governancePlugin = governancePluginMap[governance];
   await writeFile(

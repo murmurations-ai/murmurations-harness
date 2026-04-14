@@ -3,7 +3,7 @@
  * where model strings live; updated via PR when providers release new
  * models.
  *
- * `ModelTier` is imported from `@murmuration/core/execution`.
+ * `ModelTier` is imported from `@murmurations-ai/core/execution`.
  */
 
 import type { ModelTier, ProviderId } from "./types.js";

@@ -1,5 +1,5 @@
 {
-  "name": "@murmuration/secrets-dotenv",
+  "name": "@murmurations-ai/secrets-dotenv",
   "version": "0.1.0",
   "description": "Default SecretsProvider for the Murmuration Harness — reads from a .env file at the murmuration root.",
   "license": "MIT",
@@ -36,7 +36,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@murmuration/core": "workspace:*",
+    "@murmurations-ai/core": "workspace:*",
     "dotenv": "^16.4.5"
   }
 }

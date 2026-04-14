@@ -1,5 +1,5 @@
 {
-  "name": "@murmuration/core",
+  "name": "@murmurations-ai/core",
   "version": "0.1.0",
   "description": "Core runtime for the Murmuration Harness — scheduler, signal aggregator, plugin registry, and executor interface.",
   "license": "MIT",

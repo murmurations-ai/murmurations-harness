@@ -1,7 +1,7 @@
-# @murmuration/signals
+# @murmurations-ai/signals
 
 Default `SignalAggregator` for the Murmuration Harness. Composes three
-real sources — `github-issue` (via `@murmuration/github`), `private-note`
+real sources — `github-issue` (via `@murmurations-ai/github`), `private-note`
 (filesystem), `inbox-message` (filesystem) — into a single ordered
 `SignalBundle` per wake.
 
@@ -12,10 +12,10 @@ See `docs/adr/0013-signal-aggregator.md` for the full design.
 
 ## Why a separate package?
 
-The `SignalAggregator` interface lives in `@murmuration/core` so the
+The `SignalAggregator` interface lives in `@murmurations-ai/core` so the
 daemon can reference it without depending on any concrete source
-package. The default implementation depends on `@murmuration/github`,
-and `@murmuration/github` depends on `@murmuration/core`. Putting the
+package. The default implementation depends on `@murmurations-ai/github`,
+and `@murmurations-ai/github` depends on `@murmurations-ai/core`. Putting the
 default implementation in its own package breaks the cycle without
 weakening the architectural separation.
 

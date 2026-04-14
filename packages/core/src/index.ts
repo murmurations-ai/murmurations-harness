@@ -1,5 +1,5 @@
 /**
- * @murmuration/core
+ * @murmurations-ai/core
  *
  * Core runtime for the Murmuration Harness.
  *

@@ -15,7 +15,7 @@
  *  - in-flight abort → GithubMutationAbortedError Result, phase "in-flight"
  */
 
-import { makeSecretValue } from "@murmuration/core";
+import { makeSecretValue } from "@murmurations-ai/core";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { makeIssueNumber, makeRepoCoordinate } from "./branded.js";

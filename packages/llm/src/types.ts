@@ -4,7 +4,7 @@
  * provider-agnostic.
  */
 
-import type { ModelTier } from "@murmuration/core";
+import type { ModelTier } from "@murmurations-ai/core";
 
 /** Discriminant for the four providers. */
 export type ProviderId = "gemini" | "anthropic" | "openai" | "ollama";
@@ -61,7 +61,7 @@ export interface LLMClientCapabilities {
   readonly maxContextTokens: number;
 }
 
-/** Re-exported from @murmuration/core for backwards compatibility. */
-export type { Result } from "@murmuration/core";
+/** Re-exported from @murmurations-ai/core for backwards compatibility. */
+export type { Result } from "@murmurations-ai/core";
 
 export type { ModelTier };

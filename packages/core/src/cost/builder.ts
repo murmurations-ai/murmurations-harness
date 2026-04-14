@@ -106,7 +106,7 @@ export class WakeCostBuilder {
     this.#subprocessRecorded = true;
   }
 
-  /** Record a GitHub API call. Phase 1B-d will wire this from `@murmuration/github`. */
+  /** Record a GitHub API call. Phase 1B-d will wire this from `@murmurations-ai/github`. */
   public addGithubCall(call: {
     readonly transport: "rest" | "graphql";
     readonly cacheHit?: boolean;

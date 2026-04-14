@@ -29,8 +29,8 @@ Three plausible approaches:
 
 ## Decision
 
-**Adopt approach 3.** The interface lives in `@murmuration/core/secrets`
-and the default provider lives in `@murmuration/secrets-dotenv` as a
+**Adopt approach 3.** The interface lives in `@murmurations-ai/core/secrets`
+and the default provider lives in `@murmurations-ai/secrets-dotenv` as a
 separate workspace package.
 
 ### Key sub-decisions

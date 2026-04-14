@@ -73,7 +73,7 @@ export const listSessions = async (): Promise<void> => {
     return;
   }
 
-  const { HARNESS_VERSION, AgentStateStore } = await import("@murmuration/core");
+  const { HARNESS_VERSION, AgentStateStore } = await import("@murmurations-ai/core");
 
   console.log("murmuration-harness v" + HARNESS_VERSION + "\n");
   console.log("NAME".padEnd(15) + " " + "STATUS".padEnd(22) + " " + "AGENTS".padEnd(8) + " ROOT");

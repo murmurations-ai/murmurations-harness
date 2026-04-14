@@ -238,7 +238,7 @@ blocked
 
 | Step | What                                             | Status      |
 | ---- | ------------------------------------------------ | ----------- |
-| 7.1  | Streaming + tool use in `@murmuration/llm`       | Not started |
+| 7.1  | Streaming + tool use in `@murmurations-ai/llm`   | Not started |
 | 7.2  | Server deployment story (systemd / Docker / PM2) | Not started |
 | 7.3  | Package publishing (npm)                         | Not started |
 | 7.4  | Template repo for `murmuration init`             | Not started |

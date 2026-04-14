@@ -6,7 +6,7 @@
  * cost hook resolution happens here, not in adapters.
  */
 
-import type { SecretValue } from "@murmuration/core";
+import type { SecretValue } from "@murmurations-ai/core";
 
 import type { LLMCostHook } from "./cost-hook.js";
 import type { LLMClientError } from "./errors.js";

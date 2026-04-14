@@ -58,18 +58,18 @@ The tsconfig enables `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, a
 pnpm workspace with 7 packages. Build order matters (project references).
 
 ```
-@murmuration/core       — daemon, executor, scheduler, identity, governance, groups, agents, cost, secrets
-@murmuration/llm        — 4-provider LLM client (Gemini, Anthropic, OpenAI, Ollama) + pricing
-@murmuration/github     — GitHub REST/GraphQL client with write-scope enforcement (ADR-0017)
-@murmuration/signals    — signal aggregator (GitHub issues, private notes, inbox messages)
-@murmuration/secrets-dotenv — .env secrets provider
-@murmuration/cli        — CLI commands (start, init, directive, group-wake, backlog, dashboard)
-@murmuration/dashboard-tui — TUI dashboard (pi-tui)
+@murmurations-ai/core       — daemon, executor, scheduler, identity, governance, groups, agents, cost, secrets
+@murmurations-ai/llm        — 4-provider LLM client (Gemini, Anthropic, OpenAI, Ollama) + pricing
+@murmurations-ai/github     — GitHub REST/GraphQL client with write-scope enforcement (ADR-0017)
+@murmurations-ai/signals    — signal aggregator (GitHub issues, private notes, inbox messages)
+@murmurations-ai/secrets-dotenv — .env secrets provider
+@murmurations-ai/cli        — CLI commands (start, init, directive, group-wake, backlog, dashboard)
+@murmurations-ai/dashboard-tui — TUI dashboard (pi-tui)
 ```
 
 ### Core Package Modules
 
-The `@murmuration/core` package has these submodules (each re-exported from `packages/core/src/index.ts`):
+The `@murmurations-ai/core` package has these submodules (each re-exported from `packages/core/src/index.ts`):
 
 - **execution/** — `AgentExecutor` interface, `InProcessExecutor`, `SubprocessExecutor`, `DispatchExecutor`, branded types (`AgentId`, `GroupId`, `WakeId`), `WakeAction`/`WakeActionReceipt`, `validateWake()`, `parseWakeActions()`
 - **daemon/** — `Daemon` class wiring scheduler + executor + governance + signals. Post-wake action execution hook, "Did Work" tracking, circuit breaker (3 failures), governance cron scheduling

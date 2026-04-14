@@ -1,10 +1,10 @@
 /**
  * Signal Aggregator — interface only.
  *
- * The {@link SignalAggregator} interface lives in `@murmuration/core` so
+ * The {@link SignalAggregator} interface lives in `@murmurations-ai/core` so
  * the daemon can reference it without depending on any concrete source
- * package. The default implementation lives in `@murmuration/signals`
- * (which depends on `@murmuration/github`) to avoid a package cycle.
+ * package. The default implementation lives in `@murmurations-ai/signals`
+ * (which depends on `@murmurations-ai/github`) to avoid a package cycle.
  *
  * Phase 1B step B4. Designed by Architecture Agent #23 with an interim
  * trust taxonomy pending Security #25's harness#4 ratification.

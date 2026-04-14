@@ -61,7 +61,7 @@ Implementation: `parseChildOutput` in `packages/core/src/execution/subprocess.ts
 
 Phase 2 (the one-agent proof) must land:
 
-1. A `StructuredOutputWriter` helper in `@murmuration/core` that agents can import to write well-formed events
+1. A `StructuredOutputWriter` helper in `@murmurations-ai/core` that agents can import to write well-formed events
 2. A dedicated file descriptor (fd=3) for structured events; stdout remains free-form logging
 3. A JSON schema for each governance event type (landing via carry-forward [#2](https://github.com/murmurations-ai/murmurations-harness/issues/2))
 4. Real cost reporting fields (landing via carry-forward [#5](https://github.com/murmurations-ai/murmurations-harness/issues/5))

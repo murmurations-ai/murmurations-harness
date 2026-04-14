@@ -79,7 +79,7 @@ export class FrontmatterInvalidError extends IdentityLoaderError {
 const modelTierSchema = z.enum(["fast", "balanced", "deep"]);
 
 /**
- * LLM provider enum — kept in sync with `@murmuration/llm`'s
+ * LLM provider enum — kept in sync with `@murmurations-ai/llm`'s
  * `ProviderId`. Extended in ADR-0016 (Phase 2C role template).
  */
 const llmProviderSchema = z.enum(["gemini", "anthropic", "openai", "ollama"]);

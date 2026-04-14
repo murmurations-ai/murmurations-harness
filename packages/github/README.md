@@ -1,4 +1,4 @@
-# @murmuration/github
+# @murmurations-ai/github
 
 Typed GitHub REST client for the Murmuration Harness. Rate-limit aware,
 ETag-caching, secret-safe (SecretValue auth), errors-as-values.
@@ -23,7 +23,7 @@ for v0.1 — additive when they land.
   Octokit — its code-generated endpoint-methods plugin leaks thousands
   of types into any package that exposes its shape.
 - **SecretValue auth** — the `token` config is a `SecretValue` from
-  `@murmuration/core/secrets`. `reveal()` is called in exactly one
+  `@murmurations-ai/core/secrets`. `reveal()` is called in exactly one
   place (the request builder). Never logged, never stored in error
   messages.
 - **Errors-as-values** per ADR-0005 for all expected failure modes
@@ -42,9 +42,9 @@ See `docs/adr/0012-github-client.md` for the full rationale.
 ## Usage sketch
 
 ```ts
-import { makeSecretKey } from "@murmuration/core";
-import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
-import { createGithubClient, makeRepoCoordinate, makeIssueNumber } from "@murmuration/github";
+import { makeSecretKey } from "@murmurations-ai/core";
+import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
+import { createGithubClient, makeRepoCoordinate, makeIssueNumber } from "@murmurations-ai/github";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 const provider = new DotenvSecretsProvider({ envPath: ".env" });

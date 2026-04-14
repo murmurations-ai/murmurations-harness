@@ -334,7 +334,7 @@ const context: CircleWakeContext = {
 
 ## 10. When you add a new workspace package reference
 
-If you import from `@murmuration/<pkg>` in a package that didn't use it before, you **must** add a TypeScript project reference to its `tsconfig.json`:
+If you import from `@murmurations-ai/<pkg>` in a package that didn't use it before, you **must** add a TypeScript project reference to its `tsconfig.json`:
 
 ```json
 {

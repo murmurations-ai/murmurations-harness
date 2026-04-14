@@ -1,5 +1,5 @@
 /**
- * @murmuration/llm/pricing
+ * @murmurations-ai/llm/pricing
  *
  * Per-provider pricing catalog subpath. See
  * `docs/adr/0015-pricing-catalog.md`.

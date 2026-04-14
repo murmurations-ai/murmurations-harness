@@ -27,10 +27,10 @@
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { makeSecretKey } from "@murmuration/core";
-import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
-import { createLLMClient } from "@murmuration/llm";
-import { resolveLLMCost } from "@murmuration/llm/pricing";
+import { makeSecretKey } from "@murmurations-ai/core";
+import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
+import { createLLMClient } from "@murmurations-ai/llm";
+import { resolveLLMCost } from "@murmurations-ai/llm/pricing";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -39,9 +39,7 @@ const envPath = resolve(repoRoot, "examples/hello-world-agent/.env");
 const GEMINI_API_KEY = makeSecretKey("GEMINI_API_KEY");
 
 const log = (event, data = {}) => {
-  process.stdout.write(
-    `${JSON.stringify({ ts: new Date().toISOString(), event, ...data })}\n`,
-  );
+  process.stdout.write(`${JSON.stringify({ ts: new Date().toISOString(), event, ...data })}\n`);
 };
 
 // --- Load secrets -------------------------------------------------
@@ -131,9 +129,7 @@ const catalogResult = resolveLLMCost({
   model: costCall.model,
   inputTokens: costCall.inputTokens,
   outputTokens: costCall.outputTokens,
-  ...(costCall.cacheReadTokens !== undefined
-    ? { cacheReadTokens: costCall.cacheReadTokens }
-    : {}),
+  ...(costCall.cacheReadTokens !== undefined ? { cacheReadTokens: costCall.cacheReadTokens } : {}),
 });
 
 if (!catalogResult.ok) {

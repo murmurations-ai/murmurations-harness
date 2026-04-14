@@ -7,7 +7,7 @@
 
 ## Context
 
-The Murmuration Harness is a TypeScript monorepo that will ship multiple related packages: `@murmuration/core`, `@murmuration/cli`, `@murmuration/github`, `@murmuration/s3-plugin`, `@murmuration/no-gov-plugin`, `@murmuration/dashboard-tui`, `@murmuration/dashboard-web`, `@murmuration/init-skill`, `@murmuration/secrets-dotenv`, and likely more.
+The Murmuration Harness is a TypeScript monorepo that will ship multiple related packages: `@murmurations-ai/core`, `@murmurations-ai/cli`, `@murmurations-ai/github`, `@murmurations-ai/s3-plugin`, `@murmurations-ai/no-gov-plugin`, `@murmurations-ai/dashboard-tui`, `@murmurations-ai/dashboard-web`, `@murmurations-ai/init-skill`, `@murmurations-ai/secrets-dotenv`, and likely more.
 
 The choices for JavaScript monorepo management in 2026 are:
 

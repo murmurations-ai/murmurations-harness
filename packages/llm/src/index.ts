@@ -1,5 +1,5 @@
 /**
- * @murmuration/llm
+ * @murmurations-ai/llm
  *
  * Four-provider LLM client for the Murmuration Harness. See
  * `docs/adr/0014-llm-client.md` for the full rationale.

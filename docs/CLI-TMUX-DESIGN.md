@@ -16,7 +16,7 @@ Today the harness already has the _ingredients_ for this kind of experience:
 - a Unix-socket control protocol per daemon (`.murmuration/daemon.sock`),
 - a heartbeat-aware `list` command,
 - an `attach` REPL with `directive`, `wake`, `convene`, `switch`, `stop`, `quit`,
-- a pi-tui dashboard (`@murmuration/dashboard-tui`),
+- a pi-tui dashboard (`@murmurations-ai/dashboard-tui`),
 - an HTTP/SSE dashboard surface (`DaemonHttp`) with a static HTML client.
 
 What's missing is **a coherent mental model** that ties these pieces together, and a **CLI that is the most powerful surface, not the least**. Power users should be able to live in the terminal and never lose any capability that the TUI or web dashboard offers.

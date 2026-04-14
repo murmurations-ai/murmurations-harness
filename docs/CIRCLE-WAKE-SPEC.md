@@ -452,7 +452,7 @@ Strategy: OKR Q2 2026
 
 ### Phase C — Circle Wake Runner
 
-- `CircleWakeRunner` in `@murmuration/core`
+- `CircleWakeRunner` in `@murmurations-ai/core`
 - Circle config schema (members, facilitator, backlog label)
 - Daemon schedules circle wakes from circle configs
 - Member round + facilitator synthesis
@@ -481,7 +481,7 @@ Strategy: OKR Q2 2026
 
 ### Phase G — Strategy Plugin Interface
 
-- `StrategyPlugin` interface in `@murmuration/core`
+- `StrategyPlugin` interface in `@murmurations-ai/core`
 - OKR plugin as the first implementation (in `examples/strategy-okr/`)
 - `NoOpStrategyPlugin` as default (no measurement framework)
 - Integration with circle operational wakes (evaluateProgress)

@@ -191,7 +191,7 @@ When agents emit governance events during wakes (e.g. tensions, proposals), the 
 | **Consensus**        | Collective agreement              |
 | **Parliamentary**    | Motions + voting (Robert's Rules) |
 
-Write your own plugin by implementing the `GovernancePlugin` interface from `@murmuration/core`.
+Write your own plugin by implementing the `GovernancePlugin` interface from `@murmurations-ai/core`.
 
 ## 7. Useful flags
 
@@ -231,13 +231,13 @@ The daemon's cron scheduler fires wakes on time. If the machine sleeps, the wake
 
 ## Reference
 
-| Package                       | What it does                                                                       |
-| ----------------------------- | ---------------------------------------------------------------------------------- |
-| `@murmuration/core`           | Daemon, scheduler, executors, identity loader, cost tracking, governance interface |
-| `@murmuration/llm`            | Four-provider LLM client (Gemini, Anthropic, OpenAI, Ollama)                       |
-| `@murmuration/github`         | Typed GitHub REST + GraphQL client with write-scope enforcement                    |
-| `@murmuration/signals`        | Signal aggregator (GitHub issues, private notes, inbox messages, custom)           |
-| `@murmuration/secrets-dotenv` | .env file loader with permission enforcement                                       |
+| Package                           | What it does                                                                       |
+| --------------------------------- | ---------------------------------------------------------------------------------- |
+| `@murmurations-ai/core`           | Daemon, scheduler, executors, identity loader, cost tracking, governance interface |
+| `@murmurations-ai/llm`            | Four-provider LLM client (Gemini, Anthropic, OpenAI, Ollama)                       |
+| `@murmurations-ai/github`         | Typed GitHub REST + GraphQL client with write-scope enforcement                    |
+| `@murmurations-ai/signals`        | Signal aggregator (GitHub issues, private notes, inbox messages, custom)           |
+| `@murmurations-ai/secrets-dotenv` | .env file loader with permission enforcement                                       |
 
 | Example                       | What it demonstrates                                   |
 | ----------------------------- | ------------------------------------------------------ |

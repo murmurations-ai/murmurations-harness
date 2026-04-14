@@ -8,7 +8,7 @@ import {
   DaemonEventBus,
   type DaemonEvent,
   type RegisteredAgent,
-} from "@murmuration/core";
+} from "@murmurations-ai/core";
 import { DaemonCommandExecutor } from "./command-executor.js";
 
 // ---------------------------------------------------------------------------

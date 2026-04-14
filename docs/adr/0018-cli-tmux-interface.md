@@ -10,7 +10,7 @@
 
 ## Context
 
-The harness already runs many of its operator-facing capabilities through three surfaces: a CLI (`@murmuration/cli`), a pi-tui dashboard (`@murmuration/dashboard-tui`), and a static HTML web dashboard served by `DaemonHttp`. Each surface has grown organically. The result is a set of capability gaps that operators run into within the first week of real use:
+The harness already runs many of its operator-facing capabilities through three surfaces: a CLI (`@murmurations-ai/cli`), a pi-tui dashboard (`@murmurations-ai/dashboard-tui`), and a static HTML web dashboard served by `DaemonHttp`. Each surface has grown organically. The result is a set of capability gaps that operators run into within the first week of real use:
 
 1. **The CLI is not the most powerful surface.** The web dashboard exposes "Send Directive" and "Convene Group" buttons that the CLI batch verbs do not yet wrap. Power users who live in the terminal are forced into the browser to do common operations.
 2. **There is no coherent multi-murmuration model.** A user running three murmurations has three separate `attach` sessions, three separate dashboards, and no aggregated view. The session registry exists (`~/.murmuration/sessions.json`) but is under-used.
@@ -75,7 +75,7 @@ export interface ProtocolMethod<Req, Res> {
 **CI gates:**
 
 1. Every method declared in `protocol.ts` must have at least `cliBatch === "shipped"`. Failing this fails the build. _The CLI never has an `out-of-scope` cell._
-2. A `parity.test.ts` walks each method and asserts that `surfaces.cliBatch === "shipped"` implies a corresponding registered batch verb in `@murmuration/cli`, and `surfaces.cliRepl === "shipped"` implies a registered REPL command in `attach.ts`.
+2. A `parity.test.ts` walks each method and asserts that `surfaces.cliBatch === "shipped"` implies a corresponding registered batch verb in `@murmurations-ai/cli`, and `surfaces.cliRepl === "shipped"` implies a registered REPL command in `attach.ts`.
 3. The TUI and web dashboards may declare `out-of-scope` for any cell — but the CLI may not.
 
 This converts parity from aspirational documentation into a buildable invariant.

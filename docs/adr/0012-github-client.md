@@ -1,4 +1,4 @@
-# ADR-0012 — `@murmuration/github` typed REST client
+# ADR-0012 — `@murmurations-ai/github` typed REST client
 
 - **Status:** Accepted
 - **Date:** 2026-04-09 (landed in commit `1B-d`)
@@ -83,7 +83,7 @@ error }`. Only `AbortError` re-throws. The error taxonomy mirrors
 ### New runtime dependency
 
 - **`zod@^4.3.6`** — matching the version already in
-  `@murmuration/core`. Zero new package-level exposure because it
+  `@murmurations-ai/core`. Zero new package-level exposure because it
   was already in the monorepo dependency graph; Security #25 review
   not re-triggered.
 
@@ -92,7 +92,7 @@ error }`. Only `AbortError` re-throws. The error taxonomy mirrors
 ### Positive
 
 - Net new runtime deps for this package: `zod` (already in graph) and
-  `@murmuration/core`. No new supply-chain surface.
+  `@murmurations-ai/core`. No new supply-chain surface.
 - The public API is ten exports: `createGithubClient`, `GithubClient`,
   four branded constructors, one cache class, and the error taxonomy.
 - `SecretValue.reveal()` is grep-checkable (one call in `client.ts`
@@ -117,7 +117,7 @@ error }`. Only `AbortError` re-throws. The error taxonomy mirrors
 - **CF-github-A** — Per-attempt cost-hook granularity.
 - **CF-github-B** — Disk-backed ETag cache for restart resilience.
 - **CF-github-D** — Retry budget linked to wake wall-clock.
-- **CF-github-E** — `Result<T, E>` deduplication to `@murmuration/core`.
+- **CF-github-E** — `Result<T, E>` deduplication to `@murmurations-ai/core`.
 - **CF-github-F** — GitHub App (JWT) auth when plugin trust boundary
   lands (Phase 3).
 - **CF-github-G** — Mutation surface (comments, labels, issues) for

@@ -39,7 +39,7 @@ The harness runs any number of AI agents as a coordinated "murmuration" — sche
 
 ```bash
 # Coming soon (Phase 7 — npm publish):
-npm install -g @murmuration/cli
+npm install -g @murmurations-ai/cli
 murmuration init my-murmuration
 murmuration start --name my-murmuration
 ```
@@ -69,13 +69,13 @@ See [docs/GETTING-STARTED.md](./docs/GETTING-STARTED.md) for the full walkthroug
 ```
 murmurations-harness/
 ├── packages/
-│   ├── core/              # @murmuration/core — daemon, scheduler, executors, governance, signals
-│   ├── cli/               # @murmuration/cli — `murmuration` CLI (start, stop, attach, init, etc.)
-│   ├── github/            # @murmuration/github — typed GitHub client with write-scope enforcement
-│   ├── llm/               # @murmuration/llm — multi-provider LLM client (Gemini, Anthropic, OpenAI, Ollama)
-│   ├── signals/           # @murmuration/signals — signal aggregator (GitHub issues, filesystem)
-│   ├── secrets-dotenv/    # @murmuration/secrets-dotenv — .env secrets provider
-│   └── dashboard-tui/     # @murmuration/dashboard-tui — terminal UI dashboard
+│   ├── core/              # @murmurations-ai/core — daemon, scheduler, executors, governance, signals
+│   ├── cli/               # @murmurations-ai/cli — `murmuration` CLI (start, stop, attach, init, etc.)
+│   ├── github/            # @murmurations-ai/github — typed GitHub client with write-scope enforcement
+│   ├── llm/               # @murmurations-ai/llm — multi-provider LLM client (Gemini, Anthropic, OpenAI, Ollama)
+│   ├── signals/           # @murmurations-ai/signals — signal aggregator (GitHub issues, filesystem)
+│   ├── secrets-dotenv/    # @murmurations-ai/secrets-dotenv — .env secrets provider
+│   └── dashboard-tui/     # @murmurations-ai/dashboard-tui — terminal UI dashboard
 ├── examples/
 │   ├── governance-s3/           # Self-Organizing (Sociocracy 3.0) governance plugin
 │   ├── governance-command/      # Chain of Command governance plugin
@@ -139,7 +139,7 @@ Or configure in `murmuration/harness.yaml`:
 ```yaml
 governance:
   model: "self-organizing"
-  plugin: "@murmuration/governance-s3"
+  plugin: "@murmurations-ai/governance-s3"
 ```
 
 ## Development

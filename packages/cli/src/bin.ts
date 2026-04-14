@@ -126,7 +126,7 @@ const stopDaemon = async (rootDir: string): Promise<void> => {
 /** Show daemon status from pidfile + agent state store. */
 const showStatus = async (rootDir: string): Promise<void> => {
   const pidfile = resolve(rootDir, ".murmuration", "daemon.pid");
-  const { HARNESS_VERSION } = await import("@murmuration/core");
+  const { HARNESS_VERSION } = await import("@murmurations-ai/core");
   console.log(`murmuration-harness v${HARNESS_VERSION}`);
 
   if (!existsSync(pidfile)) {
@@ -146,7 +146,7 @@ const showStatus = async (rootDir: string): Promise<void> => {
   );
 
   // Show agent summary from state store
-  const { AgentStateStore } = await import("@murmuration/core");
+  const { AgentStateStore } = await import("@murmurations-ai/core");
   const store = new AgentStateStore({ persistDir: resolve(rootDir, ".murmuration", "agents") });
   const loaded = await store.load();
   if (loaded > 0) {
@@ -289,7 +289,7 @@ const main = async (): Promise<void> => {
     case "--version":
     case "-v":
     case "version": {
-      const { HARNESS_VERSION } = await import("@murmuration/core");
+      const { HARNESS_VERSION } = await import("@murmurations-ai/core");
       process.stdout.write(`murmuration-harness v${HARNESS_VERSION}\n`);
       break;
     }

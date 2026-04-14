@@ -1,4 +1,4 @@
-# @murmuration/secrets-dotenv
+# @murmurations-ai/secrets-dotenv
 
 Default [`SecretsProvider`](../core/src/secrets/index.ts) implementation for
 the Murmuration Harness. Reads secrets from a `.env` file at the murmuration
@@ -22,8 +22,8 @@ for the full design.
 ## Usage
 
 ```ts
-import { Daemon, makeSecretKey } from "@murmuration/core";
-import { DotenvSecretsProvider } from "@murmuration/secrets-dotenv";
+import { Daemon, makeSecretKey } from "@murmurations-ai/core";
+import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
@@ -53,10 +53,10 @@ const token = provider.get(GITHUB_TOKEN).reveal();
 
 ## Error taxonomy
 
-| Class                        | `code`                  | Meaning                                                       |
-| ---------------------------- | ----------------------- | ------------------------------------------------------------- |
-| `EnvFileMissingError`        | `file-missing`          | `.env` not found at `envPath`                                 |
-| `EnvFilePermissionsError`    | `permissions-too-loose` | Mode includes group/world bits                                |
-| `EnvFileParseError`          | `parse-failed`          | `dotenv.parse` threw                                          |
-| `RequiredSecretMissingError` | `required-missing`      | Declared required key absent                                  |
-| `UnknownSecretKeyError`      | `unknown-key`           | Called `get()` with undeclared key (from `@murmuration/core`) |
+| Class                        | `code`                  | Meaning                                                           |
+| ---------------------------- | ----------------------- | ----------------------------------------------------------------- |
+| `EnvFileMissingError`        | `file-missing`          | `.env` not found at `envPath`                                     |
+| `EnvFilePermissionsError`    | `permissions-too-loose` | Mode includes group/world bits                                    |
+| `EnvFileParseError`          | `parse-failed`          | `dotenv.parse` threw                                              |
+| `RequiredSecretMissingError` | `required-missing`      | Declared required key absent                                      |
+| `UnknownSecretKeyError`      | `unknown-key`           | Called `get()` with undeclared key (from `@murmurations-ai/core`) |

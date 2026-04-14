@@ -45,15 +45,15 @@ Read these before writing code:
 
 7 packages in `packages/`:
 
-| Package                       | What it does                                                      |
-| ----------------------------- | ----------------------------------------------------------------- |
-| `@murmuration/core`           | Daemon, scheduler, executors, governance, signals, identity, cost |
-| `@murmuration/cli`            | `murmuration` CLI (start, stop, attach, init, etc.)               |
-| `@murmuration/github`         | Typed GitHub client with write-scope enforcement                  |
-| `@murmuration/llm`            | Multi-provider LLM client (Gemini, Anthropic, OpenAI, Ollama)     |
-| `@murmuration/signals`        | Signal aggregator (GitHub issues, filesystem)                     |
-| `@murmuration/secrets-dotenv` | .env secrets provider                                             |
-| `@murmuration/dashboard-tui`  | Terminal UI dashboard                                             |
+| Package                           | What it does                                                      |
+| --------------------------------- | ----------------------------------------------------------------- |
+| `@murmurations-ai/core`           | Daemon, scheduler, executors, governance, signals, identity, cost |
+| `@murmurations-ai/cli`            | `murmuration` CLI (start, stop, attach, init, etc.)               |
+| `@murmurations-ai/github`         | Typed GitHub client with write-scope enforcement                  |
+| `@murmurations-ai/llm`            | Multi-provider LLM client (Gemini, Anthropic, OpenAI, Ollama)     |
+| `@murmurations-ai/signals`        | Signal aggregator (GitHub issues, filesystem)                     |
+| `@murmurations-ai/secrets-dotenv` | .env secrets provider                                             |
+| `@murmurations-ai/dashboard-tui`  | Terminal UI dashboard                                             |
 
 ## Pull requests
 

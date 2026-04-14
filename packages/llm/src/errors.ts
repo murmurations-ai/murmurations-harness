@@ -11,7 +11,7 @@
  * the raw token — the `scrubCause` helper is the safety net.
  */
 
-import type { SecretValue } from "@murmuration/core";
+import type { SecretValue } from "@murmurations-ai/core";
 
 import type { ProviderId } from "./types.js";
 

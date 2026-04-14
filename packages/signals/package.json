@@ -1,5 +1,5 @@
 {
-  "name": "@murmuration/signals",
+  "name": "@murmurations-ai/signals",
   "version": "0.1.0",
   "description": "Default SignalAggregator for the Murmuration Harness — github + filesystem sources with interim trust taxonomy.",
   "license": "MIT",
@@ -36,7 +36,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@murmuration/core": "workspace:*",
-    "@murmuration/github": "workspace:*"
+    "@murmurations-ai/core": "workspace:*",
+    "@murmurations-ai/github": "workspace:*"
   }
 }

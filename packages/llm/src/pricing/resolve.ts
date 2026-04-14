@@ -5,7 +5,7 @@
  * See `docs/adr/0015-pricing-catalog.md` for rationale.
  */
 
-import { makeUSDMicros, type USDMicros } from "@murmuration/core";
+import { makeUSDMicros, type USDMicros } from "@murmurations-ai/core";
 
 import type { ProviderId, Result } from "../types.js";
 import { SEED_CATALOG, type ProviderRate } from "./catalog.js";

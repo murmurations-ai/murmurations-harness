@@ -1,4 +1,4 @@
-# @murmuration/core
+# @murmurations-ai/core
 
 Core runtime for the Murmuration Harness.
 
@@ -30,11 +30,11 @@ Do not stabilize the types in `src/execution/` or `src/governance/` until #2 and
 
 The package exports four sub-entry-points via the `exports` map:
 
-- `@murmuration/core` — top-level barrel
-- `@murmuration/core/execution` — `AgentExecutor` and related types (STUB — will change per #3)
-- `@murmuration/core/governance` — `GovernancePlugin` and event types (STUB — will change per #2)
-- `@murmuration/core/scheduler` — `Scheduler` (STUB)
-- `@murmuration/core/signals` — `SignalAggregator` (STUB)
+- `@murmurations-ai/core` — top-level barrel
+- `@murmurations-ai/core/execution` — `AgentExecutor` and related types (STUB — will change per #3)
+- `@murmurations-ai/core/governance` — `GovernancePlugin` and event types (STUB — will change per #2)
+- `@murmurations-ai/core/scheduler` — `Scheduler` (STUB)
+- `@murmurations-ai/core/signals` — `SignalAggregator` (STUB)
 
 All exports marked STUB will change before v0.1. Do not depend on their stability.
 
@@ -42,6 +42,6 @@ All exports marked STUB will change before v0.1. Do not depend on their stabilit
 
 ```bash
 # From the monorepo root
-pnpm --filter @murmuration/core build
-pnpm --filter @murmuration/core typecheck
+pnpm --filter @murmurations-ai/core build
+pnpm --filter @murmurations-ai/core typecheck
 ```

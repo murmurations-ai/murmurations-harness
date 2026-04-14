@@ -59,7 +59,12 @@ const TENSION_GRAPH = {
     { from: "open", to: "withdrawn", trigger: "agent-action" },
     { from: "proposal-needed", to: "withdrawn", trigger: "agent-action" },
     // Timeout: tensions without a proposal for 7 days escalate to Source
-    { from: "proposal-needed", to: "proposal-needed", trigger: "timeout", timeoutMs: 7 * 86_400_000 },
+    {
+      from: "proposal-needed",
+      to: "proposal-needed",
+      trigger: "timeout",
+      timeoutMs: 7 * 86_400_000,
+    },
   ],
 };
 
@@ -95,7 +100,7 @@ const PROPOSAL_GRAPH = {
 // S3 Plugin implementation
 // ---------------------------------------------------------------------------
 
-/** @type {import('@murmuration/core').GovernancePlugin} */
+/** @type {import('@murmurations-ai/core').GovernancePlugin} */
 const S3GovernancePlugin = {
   name: "self-organizing",
   version: "0.1.0",
@@ -122,7 +127,7 @@ const S3GovernancePlugin = {
           const item = store.create("tension", batch.agentId, event.payload);
 
           // Route to Source for visibility + to any targeted agent.
-          /** @type {import('@murmuration/core').GovernanceRouteTarget[]} */
+          /** @type {import('@murmurations-ai/core').GovernanceRouteTarget[]} */
           const routes = [{ target: "source" }];
           if (event.targetAgentId) {
             routes.push({ target: "agent", agentId: event.targetAgentId });
@@ -225,7 +230,8 @@ const S3GovernancePlugin = {
       // We match on `payload.action` in the governance item.
       const ratified = store.query({ kind: "proposal", state: "ratified" });
       const covering = ratified.find((item) => {
-        const payload = typeof item.payload === "object" && item.payload !== null ? item.payload : {};
+        const payload =
+          typeof item.payload === "object" && item.payload !== null ? item.payload : {};
         return /** @type {any} */ (payload).action === action;
       });
 

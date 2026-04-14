@@ -497,7 +497,7 @@ Agents read from GitHub and write to GitHub. The harness routes and tracks.
 
 ## Cost & Budget
 
-Every LLM call and GitHub API call is tracked per-wake via `WakeCostBuilder`. The pricing catalog (`@murmuration/llm/pricing`) resolves tokens to USD micros.
+Every LLM call and GitHub API call is tracked per-wake via `WakeCostBuilder`. The pricing catalog (`@murmurations-ai/llm/pricing`) resolves tokens to USD micros.
 
 Each agent declares a budget ceiling in `role.md`:
 

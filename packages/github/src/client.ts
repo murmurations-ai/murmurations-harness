@@ -9,7 +9,7 @@
  * does not flow through the client's bookkeeping or error paths.
  */
 
-import type { SecretValue } from "@murmuration/core";
+import type { SecretValue } from "@murmurations-ai/core";
 
 import { makeIssueNumber, type IssueNumber, type RepoCoordinate } from "./branded.js";
 import { LruGithubCache, type GithubCache, type GithubCacheEntry } from "./cache.js";

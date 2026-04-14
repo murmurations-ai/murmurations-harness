@@ -6,8 +6,8 @@
 
 import type { IssueNumber, RepoCoordinate } from "./branded.js";
 
-/** Re-exported from @murmuration/core for backwards compatibility. */
-export type { Result } from "@murmuration/core";
+/** Re-exported from @murmurations-ai/core for backwards compatibility. */
+export type { Result } from "@murmurations-ai/core";
 
 /** The subset of GitHub's issue resource the harness reads. */
 export interface GithubIssue {

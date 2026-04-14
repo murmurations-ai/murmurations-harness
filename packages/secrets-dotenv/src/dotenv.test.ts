@@ -2,7 +2,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { makeSecretKey, UnknownSecretKeyError } from "@murmuration/core";
+import { makeSecretKey, UnknownSecretKeyError } from "@murmurations-ai/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {

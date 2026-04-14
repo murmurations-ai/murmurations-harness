@@ -1,11 +1,11 @@
-# ADR-0014 — `@murmuration/llm` four-provider LLM client
+# ADR-0014 — `@murmurations-ai/llm` four-provider LLM client
 
 - **Status:** Accepted
 - **Date:** 2026-04-09
 - **Decision-maker(s):** TypeScript / Runtime Agent #24 (author), Engineering Circle (ratifier)
 - **Consulted:** Architecture #23 (package topology), DevOps #26 (adapter implementations), Security #25 (`SecretValue` auth, redaction), Performance #27 (cost hook seam, ADR-0015 boundary)
 - **Closes:** Phase 2 prerequisite **P1** in `docs/PHASE-2-PLAN.md`
-- **Load-bearing:** ADR-0005 (errors-as-values), ADR-0006 (branded primitives), ADR-0010 (`SecretValue`), ADR-0011 (`WakeCostBuilder.addLlmTokens`), ADR-0012 (mirror reference: `@murmuration/github`)
+- **Load-bearing:** ADR-0005 (errors-as-values), ADR-0006 (branded primitives), ADR-0010 (`SecretValue`), ADR-0011 (`WakeCostBuilder.addLlmTokens`), ADR-0012 (mirror reference: `@murmurations-ai/github`)
 
 ## Context
 
@@ -21,7 +21,7 @@ The github client (ADR-0012) is the architectural twin: same factory shape, same
 
 ## Decision
 
-**Adopt a single `LLMClient` interface in `@murmuration/llm` with four internal adapters behind a discriminated-union config.** Hand-rolled against native `fetch`. No provider SDKs. The client is daemon-long-lived; cost is reported via a per-call hook bound to a per-wake `WakeCostBuilder`. The pricing catalog (ADR-0015) lives outside this package; adapters emit token counts only.
+**Adopt a single `LLMClient` interface in `@murmurations-ai/llm` with four internal adapters behind a discriminated-union config.** Hand-rolled against native `fetch`. No provider SDKs. The client is daemon-long-lived; cost is reported via a per-call hook bound to a per-wake `WakeCostBuilder`. The pricing catalog (ADR-0015) lives outside this package; adapters emit token counts only.
 
 ### Sub-decisions
 
@@ -50,7 +50,7 @@ This is the matching decision to ADR-0012's per-call cost hook: the package emit
 
 #### S4 — `reveal()` once per adapter, plus the scrub helper
 
-Same invariant as ADR-0012: each adapter has exactly one `reveal()` call inside its `#buildHeaders` (Gemini, Anthropic, OpenAI). Ollama has zero. A shared `scrubCause(cause, token)` helper in `errors.ts` may call `reveal()` defensively on the error path, identical to the pattern in `@murmuration/github`. Grep target: `rg "reveal\(\)" packages/llm/src` should show ≤ 4 hits in adapter source + 1 in `errors.ts`.
+Same invariant as ADR-0012: each adapter has exactly one `reveal()` call inside its `#buildHeaders` (Gemini, Anthropic, OpenAI). Ollama has zero. A shared `scrubCause(cause, token)` helper in `errors.ts` may call `reveal()` defensively on the error path, identical to the pattern in `@murmurations-ai/github`. Grep target: `rg "reveal\(\)" packages/llm/src` should show ≤ 4 hits in adapter source + 1 in `errors.ts`.
 
 #### S5 — Streaming off, tools off, vision off, JSON-mode off in 2A
 
@@ -79,7 +79,7 @@ packages/llm/
 │   └── llm.test.ts
 ```
 
-`package.json` dependencies: `@murmuration/core` (workspace), `zod` (already in the graph). No new top-level deps. Native `fetch` for transport, identical to the github package.
+`package.json` dependencies: `@murmurations-ai/core` (workspace), `zod` (already in the graph). No new top-level deps. Native `fetch` for transport, identical to the github package.
 
 ## Public API
 
@@ -89,7 +89,7 @@ packages/llm/
 // types.ts
 export type ProviderId = "gemini" | "anthropic" | "openai" | "ollama";
 
-// re-exported from @murmuration/core/execution
+// re-exported from @murmurations-ai/core/execution
 export type ModelTier = "fast" | "balanced" | "deep";
 
 export type StopReason =

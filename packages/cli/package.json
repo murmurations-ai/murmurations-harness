@@ -1,5 +1,5 @@
 {
-  "name": "@murmuration/cli",
+  "name": "@murmurations-ai/cli",
   "version": "0.1.0",
   "description": "Command-line interface for the Murmuration Harness daemon — start, stop, status.",
   "license": "MIT",
@@ -37,11 +37,11 @@
     "start": "node dist/bin.js start"
   },
   "dependencies": {
-    "@murmuration/core": "workspace:*",
-    "@murmuration/github": "workspace:*",
-    "@murmuration/llm": "workspace:*",
-    "@murmuration/secrets-dotenv": "workspace:*",
-    "@murmuration/signals": "workspace:*"
+    "@murmurations-ai/core": "workspace:*",
+    "@murmurations-ai/github": "workspace:*",
+    "@murmurations-ai/llm": "workspace:*",
+    "@murmurations-ai/secrets-dotenv": "workspace:*",
+    "@murmurations-ai/signals": "workspace:*"
   },
   "engines": {
     "node": ">=20.0.0"

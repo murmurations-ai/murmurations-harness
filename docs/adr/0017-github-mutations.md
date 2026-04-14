@@ -1,4 +1,4 @@
-# ADR-0017 — `@murmuration/github` mutation surface
+# ADR-0017 — `@murmurations-ai/github` mutation surface
 
 - **Status:** Accepted
 - **Date:** 2026-04-09
@@ -9,7 +9,7 @@
 
 ## Context
 
-Phase 2 Research Agent #1 posts a weekly digest to `xeeban/emergent-praxis` by (a) committing a markdown file to `notes/weekly/**` on a branch and (b) posting an issue comment linking to it. The existing `@murmuration/github` surface is read-only (ADR-0012 landed in 1B-d). We need an additive mutation surface that:
+Phase 2 Research Agent #1 posts a weekly digest to `xeeban/emergent-praxis` by (a) committing a markdown file to `notes/weekly/**` on a branch and (b) posting an issue comment linking to it. The existing `@murmurations-ai/github` surface is read-only (ADR-0012 landed in 1B-d). We need an additive mutation surface that:
 
 - Respects the per-agent `github.write_scopes` declared in role frontmatter (ADR-0016).
 - Matches the read-side posture: native `fetch`, errors-as-values, branded primitives, cost-hook per call, `SecretValue` with a single `reveal()` site.

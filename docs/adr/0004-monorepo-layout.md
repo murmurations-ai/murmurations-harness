@@ -22,14 +22,14 @@ The spec §14.1 prescribes a monorepo with `packages/*` workspace layout and a s
 ```
 murmurations-harness/
 ├── packages/
-│   ├── core/              # @murmuration/core — runtime, interfaces, scheduler, executor, daemon
-│   ├── cli/               # @murmuration/cli — command-line interface
-│   ├── github/            # @murmuration/github — (Phase 1B) typed GitHub client
-│   ├── secrets-dotenv/    # @murmuration/secrets-dotenv — (Phase 1B) .env secrets
-│   ├── s3-plugin/         # @murmuration/s3-plugin — (Phase 3) S3 governance plugin
-│   ├── no-gov-plugin/     # @murmuration/no-gov-plugin — (Phase 3) stub plugin
-│   ├── dashboard-tui/     # @murmuration/dashboard-tui — (Phase 5) TUI dashboard
-│   └── dashboard-web/     # @murmuration/dashboard-web — (Phase 5) web dashboard
+│   ├── core/              # @murmurations-ai/core — runtime, interfaces, scheduler, executor, daemon
+│   ├── cli/               # @murmurations-ai/cli — command-line interface
+│   ├── github/            # @murmurations-ai/github — (Phase 1B) typed GitHub client
+│   ├── secrets-dotenv/    # @murmurations-ai/secrets-dotenv — (Phase 1B) .env secrets
+│   ├── s3-plugin/         # @murmurations-ai/s3-plugin — (Phase 3) S3 governance plugin
+│   ├── no-gov-plugin/     # @murmurations-ai/no-gov-plugin — (Phase 3) stub plugin
+│   ├── dashboard-tui/     # @murmurations-ai/dashboard-tui — (Phase 5) TUI dashboard
+│   └── dashboard-web/     # @murmurations-ai/dashboard-web — (Phase 5) web dashboard
 ├── examples/
 │   └── hello-world-agent/ # Example agents (not published to npm)
 ├── docs/
@@ -46,13 +46,13 @@ murmurations-harness/
 
 **One package per pluggable boundary plus one per structural concern.** Concretely:
 
-- `@murmuration/core` holds non-pluggable components (scheduler, signal aggregator, daemon, plugin loader) and the pluggable interfaces (`AgentExecutor`, `GovernancePlugin`, `SecretsProvider`, `ChannelAdapter`).
-- Pluggable implementations each live in their own package (`@murmuration/s3-plugin`, `@murmuration/no-gov-plugin`, `@murmuration/secrets-dotenv`, etc.) so adopters can install only what they need and the pluggability claim is real.
-- Cross-cutting code (`@murmuration/cli`) is its own package and depends on `@murmuration/core` via `workspace:*`.
+- `@murmurations-ai/core` holds non-pluggable components (scheduler, signal aggregator, daemon, plugin loader) and the pluggable interfaces (`AgentExecutor`, `GovernancePlugin`, `SecretsProvider`, `ChannelAdapter`).
+- Pluggable implementations each live in their own package (`@murmurations-ai/s3-plugin`, `@murmurations-ai/no-gov-plugin`, `@murmurations-ai/secrets-dotenv`, etc.) so adopters can install only what they need and the pluggability claim is real.
+- Cross-cutting code (`@murmurations-ai/cli`) is its own package and depends on `@murmurations-ai/core` via `workspace:*`.
 
 ### Types live with their owner
 
-Shared types (like `AgentExecutor`, `GovernancePlugin`, the governance event taxonomy) live in `@murmuration/core` and are exported via the `exports` map. Plugins import types from `@murmuration/core` — not from a separate `@murmuration/types` package.
+Shared types (like `AgentExecutor`, `GovernancePlugin`, the governance event taxonomy) live in `@murmurations-ai/core` and are exported via the `exports` map. Plugins import types from `@murmurations-ai/core` — not from a separate `@murmurations-ai/types` package.
 
 Rationale: a separate types package creates a circular-ish dependency (plugin → types, core → types, core depends on plugin interfaces) and adds a versioning surface we do not need. Types live with the package that owns the interface.
 
@@ -96,5 +96,5 @@ Every package has a `tsconfig.json` that extends `tsconfig.base.json` and declar
 ## Alternatives considered
 
 - **Single mega-package** — rejected; contradicts the pluggability claim in spec §14.1 and would muddy the adopter install experience.
-- **Separate `@murmuration/types` package** — rejected; creates unnecessary versioning surface and does not buy us anything in a private-by-default monorepo.
+- **Separate `@murmurations-ai/types` package** — rejected; creates unnecessary versioning surface and does not buy us anything in a private-by-default monorepo.
 - **Examples inside `packages/`** — rejected because examples should not appear in `pnpm -r` operations (test, build, publish) — they are reference material, not part of the product.

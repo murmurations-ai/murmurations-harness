@@ -7,7 +7,7 @@ import {
   makeGroupId,
   makeWakeId,
   type SignalAggregationContext,
-} from "@murmuration/core";
+} from "@murmurations-ai/core";
 import {
   makeIssueNumber,
   makeRepoCoordinate,
@@ -15,7 +15,7 @@ import {
   type GithubClientError,
   type GithubIssue,
   type Result,
-} from "@murmuration/github";
+} from "@murmurations-ai/github";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { DefaultSignalAggregator } from "./index.js";

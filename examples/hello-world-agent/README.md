@@ -33,7 +33,7 @@ MURMURATION_WAKE_ID=test MURMURATION_AGENT_ID=hello-world \
 pnpm build
 
 # Boot the daemon
-pnpm --filter @murmuration/cli start
+pnpm --filter @murmurations-ai/cli start
 ```
 
 The daemon will fire a wake at this agent after a 2-second delay, capture the output, and log the completion.
