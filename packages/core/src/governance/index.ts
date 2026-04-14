@@ -99,6 +99,8 @@ export interface GovernanceItem {
   readonly payload: unknown;
   readonly createdBy: AgentId;
   readonly createdAt: Date;
+  /** GitHub issue URL, set when the item is synced to GitHub. */
+  readonly githubIssueUrl?: string | undefined;
   /**
    * When this governance decision should be reviewed. Set
    * automatically from the graph's `defaultReviewDays` when the item
@@ -154,8 +156,13 @@ export interface GovernanceDecisionRecord {
  * (never throw, never block governance operations).
  */
 export interface GovernanceSyncCallbacks {
-  onCreate?(item: GovernanceItem): void;
-  onTransition?(item: GovernanceItem, transition: GovernanceStateTransition): void;
+  /** Called when a governance item is created. May return a GitHub issue URL. */
+  onCreate?(item: GovernanceItem): undefined | string | Promise<undefined | string>;
+  onTransition?(
+    item: GovernanceItem,
+    transition: GovernanceStateTransition,
+    isTerminal: boolean,
+  ): void;
 }
 
 export interface GovernanceItemFilter {
@@ -187,6 +194,7 @@ export interface IGovernanceStateStore {
     options?: { reviewAt?: Date },
   ): GovernanceItem;
   transition(itemId: string, to: string, triggeredBy: string, reason?: string): GovernanceItem;
+  setGithubIssueUrl(itemId: string, url: string): void;
   get(itemId: string): GovernanceItem | undefined;
   query(filter?: GovernanceItemFilter): readonly GovernanceItem[];
   buildDecisionRecord(itemId: string, summary: string): GovernanceDecisionRecord;
@@ -307,7 +315,19 @@ export class GovernanceStateStore implements IGovernanceStateStore {
     this.#items.set(item.id, item);
     this.#persistPending = this.#persist(item);
     try {
-      this.#onSync?.onCreate?.(item);
+      const syncResult = this.#onSync?.onCreate?.(item);
+      // If the sync returns a GitHub URL (sync or async), set it on the item
+      if (typeof syncResult === "string") {
+        this.setGithubIssueUrl(item.id, syncResult);
+      } else if (syncResult instanceof Promise) {
+        void syncResult
+          .then((url) => {
+            if (typeof url === "string") this.setGithubIssueUrl(item.id, url);
+          })
+          .catch(() => {
+            /* fire-and-forget */
+          });
+      }
     } catch {
       /* fire-and-forget */
     }
@@ -363,11 +383,20 @@ export class GovernanceStateStore implements IGovernanceStateStore {
     this.#items.set(itemId, updated);
     this.#persistPending = this.#persist(updated);
     try {
-      this.#onSync?.onTransition?.(updated, transition);
+      this.#onSync?.onTransition?.(updated, transition, isTerminal);
     } catch {
       /* fire-and-forget */
     }
     return updated;
+  }
+
+  /** Set the GitHub issue URL for an item (called by sync after issue creation). */
+  public setGithubIssueUrl(itemId: string, url: string): void {
+    const item = this.#items.get(itemId);
+    if (!item) return;
+    const updated: GovernanceItem = { ...item, githubIssueUrl: url };
+    this.#items.set(itemId, updated);
+    this.#persistPending = this.#persist(updated);
   }
 
   /** Look up a single item by id. */

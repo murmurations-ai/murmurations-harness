@@ -134,3 +134,20 @@ murmuration init [dir]
 ## Secrets
 
 **NEVER print .env values** in tool output. Use `cut -d= -f1` for key names only.
+
+## Engineering Standards
+
+Read `docs/ARCHITECTURE.md § Engineering Standards` before writing code. Key rules:
+
+1. **Fix root causes, not symptoms** — no client-side workarounds for server-side gaps
+2. **Every async operation returns a typed result** — never `void` for meaningful work
+3. **Single owner for mutable state** — one writer per JSONL/JSON state file
+4. **Events over polling** — use `DaemonEventBus` + SSE, not `setInterval`
+5. **No inline HTML/JS in TypeScript** — dashboard is a static file, not a template literal
+6. **Typed errors, not process.exit()** — only `bin.ts` may exit the process
+7. **Track what you spawn** — attach exit handlers before detaching child processes
+8. **Composition root stays thin** — `boot.ts` wires; `DaemonCommandExecutor` handles
+9. **Silent error swallowing is a bug** — log with context or propagate
+10. **Status response is a typed contract** — define interfaces, not ad-hoc objects
+
+Read `docs/LINT-DESIGN-GUIDE.md` for TypeScript-specific patterns (noUncheckedIndexedAccess, exactOptionalPropertyTypes, etc.).

@@ -29,6 +29,18 @@ export interface GovernanceSyncGitHub {
   }): Promise<{ ok: boolean; issueNumber?: number; htmlUrl?: string; error?: string }>;
 
   createIssueComment(issueNumber: number, body: string): Promise<{ ok: boolean; error?: string }>;
+
+  addLabels?(
+    issueNumber: number,
+    labels: readonly string[],
+  ): Promise<{ ok: boolean; error?: string }>;
+
+  removeLabels?(
+    issueNumber: number,
+    labels: readonly string[],
+  ): Promise<{ ok: boolean; error?: string }>;
+
+  closeIssue?(issueNumber: number): Promise<{ ok: boolean; error?: string }>;
 }
 
 export interface GovernanceGitHubSyncConfig {
@@ -57,8 +69,8 @@ export class GovernanceGitHubSync {
     return this.#issueMap;
   }
 
-  /** Create a GitHub issue for a new governance item. */
-  public async onCreate(item: GovernanceItem): Promise<void> {
+  /** Create a GitHub issue for a new governance item. Returns the issue URL. */
+  public async onCreate(item: GovernanceItem): Promise<string | undefined> {
     try {
       const payload = typeof item.payload === "object" && item.payload !== null ? item.payload : {};
       const topic =
@@ -93,16 +105,19 @@ export class GovernanceGitHubSync {
 
       if (result.ok && result.issueNumber) {
         this.#issueMap.set(item.id, result.issueNumber);
+        return result.htmlUrl;
       }
     } catch {
       // Fire-and-forget — governance operations never block on GitHub
     }
+    return undefined;
   }
 
-  /** Post a comment + swap labels on state transition. */
+  /** Post a comment, swap state labels, and close if terminal. */
   public async onTransition(
     item: GovernanceItem,
     transition: GovernanceStateTransition,
+    isTerminal?: boolean,
   ): Promise<void> {
     try {
       const issueNumber = this.#issueMap.get(item.id);
@@ -118,8 +133,21 @@ export class GovernanceGitHubSync {
         .join("\n");
 
       await this.#github.createIssueComment(issueNumber, comment);
+
+      // Swap state labels: remove old, add new
+      if (this.#github.removeLabels) {
+        await this.#github.removeLabels(issueNumber, [`state:${transition.from}`]);
+      }
+      if (this.#github.addLabels) {
+        await this.#github.addLabels(issueNumber, [`state:${transition.to}`]);
+      }
+
+      // Close the issue when the item reaches a terminal state
+      if (isTerminal && this.#github.closeIssue) {
+        await this.#github.closeIssue(issueNumber);
+      }
     } catch {
-      // Fire-and-forget
+      // Fire-and-forget — governance operations never block on GitHub
     }
   }
 

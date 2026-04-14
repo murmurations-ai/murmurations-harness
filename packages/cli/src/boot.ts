@@ -20,9 +20,9 @@
  * gate test still runs without a real GITHUB_TOKEN on the machine.
  */
 
-import { existsSync, openSync, readFileSync as fsReadFileSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
@@ -911,7 +911,6 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
             };
           },
           createIssueComment: async (issueNumber, body) => {
-            const { makeIssueNumber } = await import("@murmuration/github");
             const result = await githubClient.createIssueComment(
               makeRepoCoordinate(
                 allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
@@ -919,6 +918,40 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               ),
               makeIssueNumber(issueNumber),
               { body },
+            );
+            if (!result.ok) return { ok: false, error: result.error.message };
+            return { ok: true };
+          },
+          addLabels: async (issueNumber, labels) => {
+            const repo = makeRepoCoordinate(
+              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
+              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
+            );
+            const result = await githubClient.addLabels(repo, makeIssueNumber(issueNumber), [
+              ...labels,
+            ]);
+            if (!result.ok) return { ok: false, error: result.error.message };
+            return { ok: true };
+          },
+          removeLabels: async (issueNumber, labels) => {
+            const repo = makeRepoCoordinate(
+              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
+              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
+            );
+            for (const label of labels) {
+              await githubClient.removeLabel(repo, makeIssueNumber(issueNumber), label);
+            }
+            return { ok: true };
+          },
+          closeIssue: async (issueNumber) => {
+            const repo = makeRepoCoordinate(
+              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
+              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
+            );
+            const result = await githubClient.updateIssueState(
+              repo,
+              makeIssueNumber(issueNumber),
+              "closed",
             );
             if (!result.ok) return { ok: false, error: result.error.message };
             return { ok: true };
@@ -1097,141 +1130,73 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   // Start daemon control socket
   const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
-  // Governance store reader for the status API (reads from same persist dir as daemon)
   const govPersistDir = resolve(exampleRoot, ".murmuration", "governance");
-  const govTerminology = governancePlugin?.terminology ?? {
-    group: "group",
-    groupPlural: "groups",
-    governanceItem: "item",
-    governanceEvent: "governance event",
-  };
 
-  const readGovernanceStatus = (): unknown => {
-    try {
-      const content = fsReadFileSync(join(govPersistDir, "items.jsonl"), "utf8");
-      const items: Record<string, unknown>[] = [];
-      for (const line of content.trim().split("\n")) {
-        if (!line) continue;
-        try {
-          items.push(JSON.parse(line) as Record<string, unknown>);
-        } catch {
-          /* skip */
+  // Command executor — owns command dispatch, status building, and detail handlers
+  // (extracted from boot.ts per Engineering Standard #8)
+  const { DaemonEventBus } = await import("@murmuration/core");
+  const { DaemonCommandExecutor } = await import("./command-executor.js");
+  const eventBus = new DaemonEventBus();
+  const firstScope = allRegistered[0]?.signalScopes?.githubScopes?.[0];
+  const repoCoord = firstScope ? { owner: firstScope.owner, repo: firstScope.repo } : undefined;
+  const executor = new DaemonCommandExecutor({
+    rootDir: exampleRoot,
+    agentStateStore,
+    allRegistered,
+    governancePlugin,
+    governancePersistDir: govPersistDir,
+    ...(governancePath ? { governancePath } : {}),
+    ...(governanceSync
+      ? {
+          governanceSync: {
+            onCreate: (item) => governanceSync.onCreate(item),
+            onTransition: (item, trans, isTerminal) => {
+              void governanceSync.onTransition(item, trans, isTerminal);
+            },
+          },
         }
-      }
+      : {}),
+    eventBus,
+    ...(githubClient && repoCoord
+      ? {
+          repoCoordinate: repoCoord,
+          githubClient: {
+            listIssues: async (repo, filter) => {
+              const result = await githubClient.listIssues(
+                makeRepoCoordinate(repo.owner, repo.repo),
+                {
+                  ...(filter?.state ? { state: filter.state } : {}),
+                  ...(filter?.labels ? { labels: [...filter.labels] } : {}),
+                  ...(filter?.perPage ? { perPage: filter.perPage } : {}),
+                },
+              );
+              if (!result.ok) return { ok: false as const };
+              return {
+                ok: true as const,
+                value: result.value.map((i) => ({
+                  number: i.number.value,
+                  title: i.title,
+                  htmlUrl: i.htmlUrl,
+                  state: i.state,
+                  labels: i.labels,
+                  createdAt: i.createdAt,
+                })),
+              };
+            },
+          },
+        }
+      : {}),
+  });
 
-      const graphs = governancePlugin?.stateGraphs() ?? [];
-      const terminalStates = new Set(graphs.flatMap((g) => g.terminalStates));
-
-      const pending = items.filter((i) => !terminalStates.has(i.currentState as string));
-      const resolved = items.filter((i) => terminalStates.has(i.currentState as string));
-
-      return {
-        model: governancePlugin?.name ?? "none",
-        terminology: govTerminology,
-        totalItems: items.length,
-        pending: pending.map((i) => {
-          const cb = i.createdBy as Record<string, unknown> | undefined;
-          const pl = i.payload as Record<string, unknown> | undefined;
-          return {
-            id: (i.id as string).slice(0, 8),
-            kind: i.kind,
-            state: i.currentState,
-            createdBy: (cb?.value as string | undefined) ?? "unknown",
-            topic: (pl?.topic as string | undefined) ?? "",
-          };
-        }),
-        recentDecisions: resolved
-          .slice(-5)
-          .reverse()
-          .map((i) => {
-            const pl = i.payload as Record<string, unknown> | undefined;
-            return {
-              id: (i.id as string).slice(0, 8),
-              kind: i.kind,
-              state: i.currentState,
-              topic: (pl?.topic as string | undefined) ?? "",
-            };
-          }),
-      };
-    } catch {
-      return {
-        model: governancePlugin?.name ?? "none",
-        terminology: govTerminology,
-        totalItems: 0,
-        pending: [],
-        recentDecisions: [],
-      };
-    }
-  };
+  // readGovernanceStatus, buildStatus, agentDetailHandler, groupDetailHandler,
+  // and commandHandler are now in DaemonCommandExecutor.
 
   // Shared status builder for socket + HTTP
-  const buildStatus = async (): Promise<unknown> => {
-    // Reload from disk so wake-now child process writes are visible
-    await agentStateStore.load().catch(() => {
-      /* best effort */
-    });
-    const agents = agentStateStore.getAllAgents().map((a) => ({
-      agentId: a.agentId,
-      state: a.currentState,
-      totalWakes: a.totalWakes,
-      totalArtifacts: a.totalArtifacts,
-      idleWakes: a.idleWakes,
-      consecutiveFailures: a.consecutiveFailures,
-      groups: allRegistered.find((r) => r.agentId === a.agentId)?.groupMemberships ?? [],
-    }));
-    const totalWakes = agents.reduce((s, a) => s + a.totalWakes, 0);
-    const totalArtifacts = agents.reduce((s, a) => s + a.totalArtifacts, 0);
-    const totalIdle = agents.reduce((s, a) => s + a.idleWakes, 0);
-    const groupMap = new Map<string, typeof agents>();
-    for (const a of agents) {
-      for (const g of a.groups) {
-        const list = groupMap.get(g) ?? [];
-        list.push(a);
-        groupMap.set(g, list);
-      }
-    }
-    const groups = [...groupMap.entries()].map(([groupId, members]) => ({
-      groupId,
-      memberCount: members.length,
-      totalWakes: members.reduce((s, m) => s + m.totalWakes, 0),
-      totalArtifacts: members.reduce((s, m) => s + m.totalArtifacts, 0),
-      idleWakes: members.reduce((s, m) => s + m.idleWakes, 0),
-      members: members.map((m) => m.agentId),
-    }));
-    // Derive murmuration name and GitHub URL
-    const firstScope = allRegistered[0]?.signalScopes?.githubScopes?.[0];
-    const githubUrl = firstScope
-      ? `https://github.com/${firstScope.owner}/${firstScope.repo}`
-      : null;
-    return {
-      version: HARNESS_VERSION,
-      pid: process.pid,
-      name: process.env.MURMURATION_NAME ?? exampleRoot.split("/").pop() ?? "murmuration",
-      rootDir: exampleRoot,
-      ...(githubUrl ? { githubUrl } : {}),
-      governance: readGovernanceStatus(),
-      agentCount: agents.length,
-      murmuration: { totalWakes, totalArtifacts, idleWakes: totalIdle, groupCount: groups.length },
-      groups,
-      agents,
-    };
-  };
+  // buildStatus is now in DaemonCommandExecutor
 
   const daemonSocket = new DaemonSocket(socketPath, (method, params) => {
-    switch (method) {
-      case "status":
-        return buildStatus();
-      case "stop":
-        process.kill(process.pid, "SIGTERM");
-        return Promise.resolve({ stopping: true });
-      case "wake-now": {
-        const agentId = params.agentId as string | undefined;
-        if (!agentId) return Promise.reject(new Error("wake-now requires params.agentId"));
-        return Promise.resolve({ queued: true, agentId });
-      }
-      default:
-        return Promise.reject(new Error(`unknown method: ${method}`));
-    }
+    if (method === "status") return executor.buildStatus();
+    return executor.execute(method, params);
   });
   if (!once) {
     daemonSocket.start();
@@ -1243,110 +1208,14 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     httpPort > 0 && !once
       ? new DaemonHttp({
           port: httpPort,
-          statusHandler: () => buildStatus(),
-          agentDetailHandler: async (agentId) => {
-            const { readdir: rd, readFile: rf } = await import("node:fs/promises");
-            const runsDir = join(exampleRoot, ".murmuration", "runs", agentId);
-            const agent = agentStateStore.getAgent(agentId);
-            const recentDigests: { date: string; summary: string }[] = [];
-            try {
-              const dates = (await rd(runsDir))
-                .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-                .sort()
-                .reverse()
-                .slice(0, 5);
-              for (const date of dates) {
-                const files = await rd(join(runsDir, date));
-                const digestFile = files.find((f) => f.startsWith("digest-"));
-                if (digestFile) {
-                  const content = await rf(join(runsDir, date, digestFile), "utf8");
-                  const body = content.replace(/^---[\s\S]*?---\n*/, "").trim();
-                  recentDigests.push({ date, summary: body.slice(0, 500) });
-                }
-              }
-            } catch {
-              /* no runs yet */
-            }
-            return {
-              agentId,
-              state: agent?.currentState ?? "unknown",
-              totalWakes: agent?.totalWakes ?? 0,
-              totalArtifacts: agent?.totalArtifacts ?? 0,
-              idleWakes: agent?.idleWakes ?? 0,
-              consecutiveFailures: agent?.consecutiveFailures ?? 0,
-              recentDigests,
-            };
-          },
-          commandHandler: async (method, params) => {
-            switch (method) {
-              case "directive": {
-                const { runDirective } = await import("./directive.js");
-                const scope = (params.scope as string | undefined) ?? "--all";
-                const target = (params.target as string | undefined) ?? "";
-                const message = (params.message as string | undefined) ?? "";
-                if (!message) throw new Error("directive requires a message");
-                const args: string[] = [];
-                if (scope === "--all") {
-                  args.push("--all");
-                } else if (scope === "--group" && target) {
-                  args.push("--group", target);
-                } else if (scope === "--agent" && target) {
-                  args.push("--agent", target);
-                } else {
-                  args.push("--all");
-                }
-                args.push("--root", exampleRoot, message);
-                await runDirective(args, exampleRoot);
-                return { sent: true };
-              }
-              case "group-wake": {
-                const { runGroupWakeCommand } = await import("./group-wake.js");
-                const groupId = (params.groupId as string | undefined) ?? "";
-                const kind = (params.kind as string | undefined) ?? "operational";
-                const args = ["--group", groupId, "--root", exampleRoot];
-                if (kind === "governance") args.push("--governance");
-                if (kind === "retrospective") args.push("--retrospective");
-                if (params.directive) args.push("--directive", params.directive as string);
-                await runGroupWakeCommand(args, exampleRoot);
-                return { convened: true, groupId, kind };
-              }
-              case "wake-now": {
-                const agentId = params.agentId as string | undefined;
-                if (!agentId) throw new Error("wake-now requires agentId");
-                // Spawn a separate --now process for this agent
-                const { spawn: cpSpawn } = await import("node:child_process");
-                const child = cpSpawn(
-                  process.execPath,
-                  [
-                    resolve(dirname(import.meta.url.replace("file://", "")), "bin.js"),
-                    "start",
-                    "--root",
-                    exampleRoot,
-                    "--agent",
-                    agentId,
-                    "--now",
-                  ],
-                  {
-                    detached: true,
-                    stdio: [
-                      "ignore",
-                      openSync(join(exampleRoot, ".murmuration", `wake-${agentId}.log`), "a"),
-                      openSync(join(exampleRoot, ".murmuration", `wake-${agentId}.log`), "a"),
-                    ],
-                  },
-                );
-                child.unref();
-                return { waking: true, agentId, pid: child.pid };
-              }
-              case "stop":
-                process.kill(process.pid, "SIGTERM");
-                return { stopping: true };
-              default:
-                throw new Error(`unknown command: ${method}`);
-            }
-          },
+          statusHandler: () => executor.buildStatus(),
+          agentDetailHandler: (agentId) => executor.agentDetail(agentId),
+          groupDetailHandler: (groupId) => executor.groupDetail(groupId),
+          commandHandler: (method, params) => executor.execute(method, params),
+          eventBus,
         })
       : null;
+  // All handlers are now in DaemonCommandExecutor (command-executor.ts).
   if (daemonHttp) {
     daemonHttp.start();
     process.stdout.write(
@@ -1372,6 +1241,16 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   process.on("exit", cleanupPid);
 
   effectiveDaemon.start();
+
+  // Session heartbeat — update registry so `list` can detect alive daemons
+  if (!once) {
+    const { heartbeatSession } = await import("./sessions.js");
+    heartbeatSession(exampleRoot); // initial heartbeat
+    const heartbeatInterval = setInterval(() => {
+      heartbeatSession(exampleRoot);
+    }, 60_000);
+    heartbeatInterval.unref(); // don't prevent process exit
+  }
 
   if (once) {
     // --once mode: wait for ANY agent's first wake to produce a run

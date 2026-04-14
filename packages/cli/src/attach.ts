@@ -2,12 +2,15 @@
  * `murmuration attach` — interactive REPL connected to a running daemon
  * via the Unix domain socket.
  *
- * Leader key: Ctrl-M (Enter) then a command character:
- *   s — status
- *   d — send directive
- *   w — trigger group-wake
- *   q — detach
- *   ? — help
+ * Commands:
+ *   status (s)     Show agent status
+ *   directive (d)  Send a Source directive
+ *   wake <agent>   Wake an agent now
+ *   convene <group> [kind]  Convene a group meeting
+ *   switch <name>  Detach and attach to another murmuration
+ *   stop           Stop the daemon
+ *   quit (q)       Detach
+ *   help (?)       Show help
  */
 
 import { createConnection, type Socket } from "node:net";
@@ -38,7 +41,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   let requestId = 0;
   const pending = new Map<string, (resp: SocketResponse) => void>();
 
-  // Parse incoming lines
+  // Parse incoming lines (responses + broadcast events)
   let buffer = "";
   conn.on("data", (chunk: Buffer) => {
     buffer += chunk.toString("utf8");
@@ -73,28 +76,63 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
   const send = (method: string, params?: Record<string, unknown>): Promise<SocketResponse> => {
     const id = String(++requestId);
-    return new Promise((resolve) => {
-      pending.set(id, resolve);
+    return new Promise((r) => {
+      pending.set(id, r);
       conn.write(JSON.stringify({ id, method, ...(params ? { params } : {}) }) + "\n");
     });
   };
 
   // Initial status
   const status = await send("status");
-  const result = status.result as
+  const statusResult = status.result as
     | {
         version: string;
         pid: number;
         agentCount: number;
+        agents: { agentId: string; groups: string[] }[];
+        groups: { groupId: string }[];
       }
     | undefined;
   console.log(
-    `[${name}] murmuration v${result?.version ?? "?"} — ${String(result?.agentCount ?? "?")} agents, PID ${String(result?.pid ?? "?")}`,
+    `[${name}] murmuration v${statusResult?.version ?? "?"} — ${String(statusResult?.agentCount ?? "?")} agents, PID ${String(statusResult?.pid ?? "?")}`,
   );
   console.log("Type a command or ? for help. Ctrl-C to detach.\n");
 
+  // Cache agent/group lists for tab completion
+  const agentIds = statusResult?.agents.map((a) => a.agentId) ?? [];
+  const groupIds = statusResult?.groups.map((g) => g.groupId) ?? [];
+
   // REPL
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    completer: (line: string) => {
+      const parts = line.split(/\s+/);
+      const cmd = parts[0] ?? "";
+      if (parts.length <= 1) {
+        const commands = [
+          "status",
+          "directive",
+          "wake",
+          "convene",
+          "switch",
+          "stop",
+          "quit",
+          "help",
+        ];
+        return [commands.filter((c) => c.startsWith(cmd)), line];
+      }
+      if (cmd === "wake") {
+        const partial = parts[1] ?? "";
+        return [agentIds.filter((a) => a.startsWith(partial)), partial];
+      }
+      if (cmd === "convene") {
+        const partial = parts[1] ?? "";
+        return [groupIds.filter((g) => g.startsWith(partial)), partial];
+      }
+      return [[], line];
+    },
+  });
   rl.setPrompt(`[${name}]> `);
   rl.prompt();
 
@@ -114,9 +152,12 @@ const handleCommand = async (
   send: (method: string, params?: Record<string, unknown>) => Promise<SocketResponse>,
   _name: string,
   rl: Interface,
-  _conn: Socket,
+  conn: Socket,
 ): Promise<void> => {
-  if (cmd === "" || cmd === "s" || cmd === "status") {
+  const parts = cmd.split(/\s+/);
+  const verb = parts[0] ?? "";
+
+  if (verb === "" || verb === "s" || verb === "status") {
     const resp = await send("status");
     if (resp.error) {
       console.log(`Error: ${resp.error}`);
@@ -131,8 +172,12 @@ const handleCommand = async (
           totalArtifacts: number;
           idleWakes: number;
         }[];
+        governance: { model: string; pending: unknown[]; recentDecisions: unknown[] };
+        inFlightMeetings: { groupId: string; kind: string }[];
       };
-      console.log(`v${r.version} PID ${String(r.pid)}`);
+      console.log(
+        `v${r.version} PID ${String(r.pid)} | governance: ${r.governance.model} | pending: ${String(r.governance.pending.length)} | meetings: ${String(r.inFlightMeetings.length)} in-flight`,
+      );
       for (const a of r.agents) {
         const idle =
           a.totalWakes > 0
@@ -143,28 +188,130 @@ const handleCommand = async (
         );
       }
     }
-  } else if (cmd === "q" || cmd === "quit" || cmd === "detach") {
+  } else if (verb === "d" || verb === "directive") {
+    // directive <message> OR prompt for it
+    let message = parts.slice(1).join(" ").trim();
+    if (!message) {
+      message = await question(rl, "  Directive message: ");
+    }
+    if (!message) {
+      console.log("  (cancelled)");
+    } else {
+      const scope = await question(rl, "  Scope (all/agent <id>/group <id>) [all]: ");
+      const scopeParts = scope.trim().split(/\s+/);
+      let params: Record<string, unknown>;
+      if (scopeParts[0] === "agent" && scopeParts[1]) {
+        params = { scope: "--agent", target: scopeParts[1], message };
+      } else if (scopeParts[0] === "group" && scopeParts[1]) {
+        params = { scope: "--group", target: scopeParts[1], message };
+      } else {
+        params = { scope: "--all", message };
+      }
+      console.log("  Sending directive...");
+      const resp = await send("directive", params);
+      if (resp.error) {
+        console.log(`  Error: ${resp.error}`);
+      } else {
+        console.log("  Directive sent.");
+      }
+    }
+  } else if (verb === "wake") {
+    const agentId = parts[1];
+    if (!agentId) {
+      console.log("  Usage: wake <agent-id>");
+    } else {
+      console.log(`  Waking ${agentId}...`);
+      const resp = await send("wake-now", { agentId });
+      if (resp.error) {
+        console.log(`  Error: ${resp.error}`);
+      } else {
+        console.log(`  Wake triggered for ${agentId}.`);
+      }
+    }
+  } else if (verb === "convene") {
+    const groupId = parts[1];
+    if (!groupId) {
+      console.log("  Usage: convene <group-id> [operational|governance|retrospective]");
+    } else {
+      const kind = parts[2] ?? "operational";
+      console.log(`  Convening ${groupId} (${kind})...`);
+      const resp = await send("group-wake", { groupId, kind });
+      if (resp.error) {
+        console.log(`  Error: ${resp.error}`);
+      } else {
+        console.log(`  ${groupId} ${kind} meeting convened.`);
+      }
+    }
+  } else if (verb === "switch") {
+    const targetName = parts[1];
+    if (!targetName) {
+      console.log("  Usage: switch <session-name>");
+    } else {
+      console.log(`  Switching to ${targetName}...`);
+      conn.destroy();
+      // Re-resolve and re-attach
+      const { resolveSessionRoot } = await import("./sessions.js");
+      const targetRoot = resolveSessionRoot(targetName);
+      await runAttach(targetRoot, targetName);
+      return; // don't prompt — runAttach takes over
+    }
+  } else if (verb === "q" || verb === "quit" || verb === "detach") {
     console.log("Detaching.");
     rl.close();
     return;
-  } else if (cmd === "stop") {
+  } else if (verb === "stop") {
     console.log("Sending stop...");
     await send("stop");
     rl.close();
     return;
-  } else if (cmd === "?" || cmd === "help") {
+  } else if (verb === "?" || verb === "help") {
     console.log(`Commands:
-  status (s)    Show agent status
-  stop          Stop the daemon
-  quit (q)      Detach from daemon
-  help (?)      Show this help`);
+  status (s)                        Show agent status + governance summary
+  directive (d) [message]           Send a Source directive (prompts for details)
+  wake <agent-id>                   Wake an agent now
+  convene <group-id> [kind]         Convene a group meeting (operational/governance/retrospective)
+  switch <session-name>             Detach and attach to another murmuration
+  stop                              Stop the daemon
+  quit (q)                          Detach from daemon
+  help (?)                          Show this help
+
+Tab completion works for agent IDs and group IDs.`);
   } else {
-    console.log(`Unknown command: ${cmd}. Type ? for help.`);
+    console.log(`Unknown command: ${verb}. Type ? for help.`);
   }
   rl.prompt();
 };
 
+/** Prompt for input within the REPL. */
+const question = (rl: Interface, prompt: string): Promise<string> =>
+  new Promise((resolve) => {
+    rl.question(prompt, (answer) => {
+      resolve(answer);
+    });
+  });
+
 const printEvent = (evt: SocketEvent): void => {
   const ts = new Date().toISOString().slice(11, 19);
-  console.log(`  [${ts}] ${evt.event}: ${JSON.stringify(evt.data).slice(0, 80)}`);
+  const data = evt.data;
+  let summary: string;
+  switch (evt.event) {
+    case "wake.started":
+      summary = `agent ${String(data.agentId)} waking`;
+      break;
+    case "wake.completed":
+      summary = `agent ${String(data.agentId)} ${String(data.outcome)} (${String(data.artifactCount)} artifacts)`;
+      break;
+    case "meeting.started":
+      summary = `${String(data.groupId)} ${String(data.meetingKind)} meeting started`;
+      break;
+    case "meeting.completed":
+      summary = `${String(data.groupId)} ${String(data.meetingKind)} meeting completed`;
+      break;
+    case "governance.transitioned":
+      summary = `governance ${String(data.itemId).slice(0, 8)} ${String(data.from)} → ${String(data.to)}`;
+      break;
+    default:
+      summary = JSON.stringify(evt.data).slice(0, 80);
+  }
+  console.log(`  [${ts}] ${evt.event}: ${summary}`);
 };

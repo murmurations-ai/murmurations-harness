@@ -13,6 +13,8 @@ import { resolve, join } from "node:path";
 interface SessionEntry {
   readonly root: string;
   readonly registered: string; // ISO date
+  lastHeartbeatAt?: string; // ISO datetime — updated by running daemon
+  pid?: number;
 }
 
 type SessionRegistry = Record<string, SessionEntry>;
@@ -82,16 +84,31 @@ export const listSessions = async (): Promise<void> => {
     if (!entry) continue;
     const root = entry.root;
 
-    // Check daemon status
-    const pidfile = join(root, ".murmuration", "daemon.pid");
+    // Check daemon status — heartbeat is authoritative, pidfile is fallback
     let status = "stopped";
-    if (existsSync(pidfile)) {
-      const pid = parseInt(readFileSync(pidfile, "utf8").trim(), 10);
+    const heartbeatAge = entry.lastHeartbeatAt
+      ? Date.now() - new Date(entry.lastHeartbeatAt).getTime()
+      : Infinity;
+    const heartbeatFresh = heartbeatAge < 120_000; // 2 minutes (heartbeat is 60s)
+
+    if (entry.pid && heartbeatFresh) {
       try {
-        process.kill(pid, 0);
-        status = `running (PID ${String(pid)})`;
+        process.kill(entry.pid, 0);
+        status = `running (PID ${String(entry.pid)})`;
       } catch {
-        status = "stopped (stale pid)";
+        status = "stopped (stale heartbeat)";
+      }
+    } else {
+      // Fallback to pidfile
+      const pidfile = join(root, ".murmuration", "daemon.pid");
+      if (existsSync(pidfile)) {
+        const pid = parseInt(readFileSync(pidfile, "utf8").trim(), 10);
+        try {
+          process.kill(pid, 0);
+          status = `running (PID ${String(pid)})`;
+        } catch {
+          status = "stopped (stale pid)";
+        }
       }
     }
 
@@ -108,6 +125,20 @@ export const listSessions = async (): Promise<void> => {
     }
 
     console.log(`${name.padEnd(15)} ${status.padEnd(22)} ${agentCount.padEnd(8)} ${root}`);
+  }
+};
+
+/** Update heartbeat for a running daemon. Called periodically by the daemon. */
+export const heartbeatSession = (rootDir: string): void => {
+  const registry = loadRegistry();
+  const absRoot = resolve(rootDir);
+  // Find entry by root path
+  for (const [name, entry] of Object.entries(registry)) {
+    if (entry.root === absRoot) {
+      registry[name] = { ...entry, lastHeartbeatAt: new Date().toISOString(), pid: process.pid };
+      saveRegistry(registry);
+      return;
+    }
   }
 };
 

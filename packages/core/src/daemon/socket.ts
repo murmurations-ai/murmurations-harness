@@ -47,6 +47,10 @@ export class DaemonSocket {
   readonly #clients = new Set<Socket>();
   #server: Server | null = null;
 
+  /** Ring buffer of recent events — replayed to new clients on connect. */
+  readonly #eventBuffer: string[] = [];
+  static readonly #EVENT_BUFFER_SIZE = 50;
+
   public constructor(socketPath: string, handler: SocketRequestHandler) {
     this.#socketPath = socketPath;
     this.#handler = handler;
@@ -63,6 +67,16 @@ export class DaemonSocket {
 
     this.#server = createServer((client) => {
       this.#clients.add(client);
+
+      // Replay recent events so attach clients see what happened
+      for (const line of this.#eventBuffer) {
+        try {
+          client.write(line);
+        } catch {
+          /* client gone */
+        }
+      }
+
       let buffer = "";
 
       client.on("data", (chunk: Buffer) => {
@@ -102,10 +116,16 @@ export class DaemonSocket {
     }
   }
 
-  /** Push an event to all connected clients. */
+  /** Push an event to all connected clients and store in ring buffer. */
   public broadcast(event: string, data: Record<string, unknown>): void {
     const msg: SocketEvent = { event, data };
     const line = JSON.stringify(msg) + "\n";
+
+    // Store in ring buffer for replay on attach
+    this.#eventBuffer.push(line);
+    if (this.#eventBuffer.length > DaemonSocket.#EVENT_BUFFER_SIZE) {
+      this.#eventBuffer.shift();
+    }
     for (const client of this.#clients) {
       try {
         client.write(line);

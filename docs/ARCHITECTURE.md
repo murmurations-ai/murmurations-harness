@@ -512,9 +512,82 @@ The dashboard shows cost per agent, per day, per wake. The strategy plugin (when
 
 ---
 
+## Engineering Standards
+
+These standards were learned from real architectural gaps that accumulated during rapid prototyping. Each one traces to a specific class of bugs. Follow them to avoid repeating the same mistakes.
+
+### 1. Fix root causes, not symptoms
+
+When a bug or missing feature surfaces, trace back to the architectural gap. If a fix requires touching 3+ places or adding client-side workarounds for server-side gaps, that's a signal the architecture needs adjustment. Take time to get the design right. There is no rush.
+
+**Anti-pattern:** Client-side `convenedItems` JS object to track meeting state because the server doesn't.
+**Fix:** Server-side meeting state in DaemonCommandExecutor, pushed via SSE events.
+
+### 2. Every async operation returns a typed result
+
+Functions that do meaningful work must return structured results — never `void`. The caller decides what to do with the result (log it, emit events, update state). Console.log is for CLI display, not for communicating outcomes between modules.
+
+**Anti-pattern:** `runGroupWakeCommand` returns `Promise<void>` and prints results to stdout.
+**Fix:** Return `GroupWakeResult` with tallies, receipts, meeting URL. CLI prints it; daemon processes it.
+
+### 3. Single owner for mutable state
+
+Each piece of mutable state (governance JSONL, agent state JSON, meeting status) has exactly one writer. No two modules independently load, mutate, and persist the same file. If multiple modules need to read state, one owns writes and the others read through it.
+
+**Anti-pattern:** Both daemon and `group-wake.ts` independently instantiate `GovernanceStateStore` and write to the same JSONL.
+**Fix:** Daemon owns governance transitions. `group-wake` returns results; daemon applies transitions.
+
+### 4. Events over polling
+
+When state changes, emit an event. Don't make consumers poll to discover it. The `DaemonEventBus` is the mechanism. SSE streams forward events to browser clients. The socket broadcasts to CLI/TUI clients.
+
+**Anti-pattern:** Dashboard polls `/api/status` every 10 seconds to detect meeting completion.
+**Fix:** Daemon emits `meeting.completed` event → SSE pushes to dashboard → immediate UI update.
+
+### 5. No inline HTML/JS in TypeScript
+
+Presentation code (HTML, CSS, JavaScript) lives in its own files with proper syntax highlighting and linting. TypeScript modules serve static files; they don't contain them as template literals. String concatenation to build HTML with user data is an XSS risk and impossible to test.
+
+**Anti-pattern:** 430-line `DASHBOARD_HTML` template literal inside `http.ts`.
+**Fix:** `dashboard.html` as a static file, loaded once at server start, served by the HTTP module.
+
+### 6. Typed errors, not process.exit()
+
+Library functions throw typed errors. Only the CLI entry point (bin.ts) calls `process.exit()`. A library function that calls `process.exit()` will kill the daemon if invoked from the HTTP handler.
+
+**Anti-pattern:** `runGroupWakeCommand` calls `process.exit(1)` on missing config.
+**Fix:** Throw `GroupWakeError` with a code. CLI catches and exits; daemon catches and logs.
+
+### 7. Track what you spawn
+
+Every child process or background task must be tracked by the daemon. Attach exit handlers before detaching. Record the outcome (exit code, duration) in the state store. If the dashboard triggers an action, the dashboard must be able to query whether it succeeded.
+
+**Anti-pattern:** `child.unref()` on wake-now with no exit handler. Dashboard shows "waking" forever.
+**Fix:** `child.on("exit", ...)` before `unref()`. Store outcome in `#wakeProcesses` map. Dashboard reads from status response.
+
+### 8. Composition root stays thin
+
+`boot.ts` is the composition root — it wires dependencies together and starts the daemon. It should not contain business logic, status computation, command handling, or governance state reading. Extract those into classes with clear interfaces that can be tested in isolation.
+
+**Anti-pattern:** 1500-line `boot.ts` with inline closures capturing 10+ variables from outer scope.
+**Fix:** `DaemonCommandExecutor` class with injected dependencies. boot.ts instantiates and wires.
+
+### 9. Silent error swallowing is a bug
+
+Empty catch blocks (`catch { /* best effort */ }`) hide real failures. If an error can happen, either handle it with a specific recovery, propagate it, or log it with context. "Best effort" is acceptable for non-critical cleanup, but state-loading failures must be visible.
+
+**Anti-pattern:** `await agentStateStore.load().catch(() => { /* best effort */ })` — dashboard shows stale data with no indication.
+**Fix:** Log the error. If the load fails, include a `stale: true` flag in the status response so the dashboard can warn.
+
+### 10. Status response is a typed contract
+
+The `/api/status` response shape is a public API consumed by the web dashboard, TUI, and future external tools. Define it as a TypeScript interface. Don't compute it with ad-hoc object literals scattered across closures.
+
+---
+
 ## What We Don't Build
 
-- **No custom UI framework** — TUI uses pi-tui, web uses pi-web-ui
+- **No custom UI framework** — TUI uses blessed, web uses vanilla HTML/JS
 - **No custom database** — GitHub issues + JSONL files + JSON state files
 - **No custom auth** — GitHub fine-grained PATs
 - **No custom communication** — GitHub issues and comments

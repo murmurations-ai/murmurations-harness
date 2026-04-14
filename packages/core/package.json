@@ -56,7 +56,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc --build tsconfig.build.json",
+    "build": "tsc --build tsconfig.build.json && cp src/daemon/dashboard.html dist/daemon/dashboard.html",
     "clean": "rm -rf dist .tsbuildinfo .tsbuildinfo.build",
     "typecheck": "tsc --noEmit"
   },

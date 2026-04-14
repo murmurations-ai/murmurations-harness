@@ -22,6 +22,7 @@ import {
   type GovernanceItem,
   type MeetingAction,
   type ActionReceipt,
+  type GovernanceTally,
   GovernanceStateStore,
 } from "@murmuration/core";
 import {
@@ -267,18 +268,45 @@ const executeActions = async (
   return receipts;
 };
 
+/** Result returned from runGroupWakeCommand for programmatic callers. */
+export interface GroupWakeCommandResult {
+  readonly groupId: string;
+  readonly kind: string;
+  readonly meetingMinutesUrl?: string;
+  readonly receipts: readonly ActionReceipt[];
+  readonly tallies: readonly GovernanceTally[];
+  readonly totalInputTokens: number;
+  readonly totalOutputTokens: number;
+}
+
+export class GroupWakeError extends Error {
+  public constructor(
+    readonly code:
+      | "GROUP_NOT_FOUND"
+      | "LLM_CONFIG_FAILED"
+      | "MISSING_GROUP_ID"
+      | "MISSING_LLM_TOKEN",
+    message: string,
+  ) {
+    super(message);
+    this.name = "GroupWakeError";
+  }
+}
+
 export const runGroupWakeCommand = async (
   args: readonly string[],
   rootDir: string,
-): Promise<void> => {
+): Promise<GroupWakeCommandResult> => {
   const root = resolve(rootDir);
 
   // Parse args
   const groupIdx = args.indexOf("--group");
   const groupId = groupIdx >= 0 ? args[groupIdx + 1] : undefined;
   if (!groupId) {
-    console.error("murmuration group-wake: --group <id> is required");
-    process.exit(2);
+    throw new GroupWakeError(
+      "MISSING_GROUP_ID",
+      "murmuration group-wake: --group <id> is required",
+    );
   }
 
   const isGovernance = args.includes("--governance");
@@ -295,8 +323,10 @@ export const runGroupWakeCommand = async (
   // Load group config
   const groupDocPath = join(root, "governance", "groups", `${groupId}.md`);
   if (!existsSync(groupDocPath)) {
-    console.error(`murmuration group-wake: group doc not found at ${groupDocPath}`);
-    process.exit(1);
+    throw new GroupWakeError(
+      "GROUP_NOT_FOUND",
+      `murmuration group-wake: group doc not found at ${groupDocPath}`,
+    );
   }
   const groupContent = await readFile(groupDocPath, "utf8");
   const config = parseGroupConfig(groupId, groupContent);
@@ -313,7 +343,10 @@ export const runGroupWakeCommand = async (
     console.error(
       `murmuration group-wake: could not read LLM config from facilitator "${config.facilitator}" role.md`,
     );
-    process.exit(1);
+    throw new GroupWakeError(
+      "LLM_CONFIG_FAILED",
+      `could not read LLM config from facilitator "${config.facilitator}" role.md`,
+    );
   }
   console.log(`  LLM: ${llmConfig.provider}/${llmConfig.model}`);
 
@@ -345,22 +378,51 @@ export const runGroupWakeCommand = async (
   }
 
   if (!llmClient) {
-    console.error(`murmuration group-wake: ${secretKeyName ?? "LLM token"} not found in .env`);
-    process.exit(1);
+    throw new GroupWakeError(
+      "MISSING_LLM_TOKEN",
+      `murmuration group-wake: ${secretKeyName ?? "LLM token"} not found in .env`,
+    );
   }
 
-  // Load governance queue if governance meeting
+  // Load governance queue if governance meeting (read-only — transitions
+  // are applied by the daemon after this function returns)
   const governanceQueue: GovernanceItem[] = [];
   if (isGovernance) {
-    const store = new GovernanceStateStore({
+    const govStore = new GovernanceStateStore({
       persistDir: join(root, ".murmuration", "governance"),
     });
-    await store.load();
-    const pending = store.query();
+
+    // Register governance plugin graphs so transitions validate correctly
+    const govPluginIdx = args.indexOf("--governance-plugin");
+    const govPluginPath = govPluginIdx >= 0 ? args[govPluginIdx + 1] : undefined;
+    if (govPluginPath) {
+      try {
+        const { pathToFileURL } = await import("node:url");
+        const pluginMod = (await import(pathToFileURL(resolve(govPluginPath)).href)) as {
+          default?: {
+            stateGraphs?: () => {
+              kind: string;
+              initialState: string;
+              terminalStates: readonly string[];
+              transitions: readonly { from: string; to: string; trigger: string }[];
+            }[];
+          };
+        };
+        const graphs = pluginMod.default?.stateGraphs?.() ?? [];
+        for (const g of graphs) {
+          govStore.registerGraph(g);
+        }
+      } catch {
+        /* best effort — transitions will be skipped if graphs aren't available */
+      }
+    }
+
+    await govStore.load();
+    const pending = govStore.query();
     // Filter to non-terminal items. Terminal state names are governance-model-defined;
     // the store's registered graphs declare them. If no graphs are registered (CLI
     // standalone), fall back to checking if the state store's graphs can tell us.
-    const terminalStates = new Set(store.graphs().flatMap((g) => g.terminalStates));
+    const terminalStates = new Set(govStore.graphs().flatMap((g) => g.terminalStates));
     if (terminalStates.size > 0) {
       governanceQueue.push(...pending.filter((i) => !terminalStates.has(i.currentState)));
     } else {
@@ -501,6 +563,10 @@ export const runGroupWakeCommand = async (
     }
   }
 
+  // Governance transitions are now applied by the daemon (DaemonCommandExecutor)
+  // after this function returns, per Engineering Standard #3 (single owner for
+  // mutable state). group-wake returns tallies; the daemon owns transitions.
+
   console.log(`\n${"─".repeat(60)}`);
   console.log(
     `Tokens: ${String(result.totalInputTokens)} in / ${String(result.totalOutputTokens)} out`,
@@ -510,6 +576,7 @@ export const runGroupWakeCommand = async (
   );
 
   // Post meeting minutes as a GitHub issue
+  let meetingMinutesUrl: string | undefined;
   const dayUtc = new Date().toISOString().slice(0, 10);
   const minutes = [
     `**Members:** ${config.members.join(", ")}`,
@@ -576,6 +643,7 @@ export const runGroupWakeCommand = async (
       body: minutes,
     });
     if (issueResult.ok) {
+      meetingMinutesUrl = issueResult.value.htmlUrl;
       console.log(`\nMeeting minutes: ${issueResult.value.htmlUrl}`);
     } else {
       console.log(`\nFailed to create meeting issue: ${issueResult.error.code}`);
@@ -602,4 +670,14 @@ export const runGroupWakeCommand = async (
     );
     console.log(`\nMeeting minutes saved locally (GitHub unavailable).`);
   }
+
+  return {
+    groupId,
+    kind,
+    ...(meetingMinutesUrl ? { meetingMinutesUrl } : {}),
+    receipts,
+    tallies: result.tallies,
+    totalInputTokens: result.totalInputTokens,
+    totalOutputTokens: result.totalOutputTokens,
+  };
 };
