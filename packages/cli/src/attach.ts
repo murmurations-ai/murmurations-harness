@@ -104,7 +104,35 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   const config = loadConfig();
   const prompt = config.ui.prompt.replace("{name}", name);
 
-  console.log(`Type a command or ? for help. Leader: ${config.ui.leader}. Ctrl-C to detach.\n`);
+  // Leader key state machine
+  const leaderKey = config.ui.leader; // e.g., "C-a"
+  let leaderPending = false;
+  const leaderChar = leaderKey === "C-a" ? "\x01" : leaderKey === "C-b" ? "\x02" : null;
+
+  if (leaderChar && process.stdin.isTTY) {
+    process.stdin.setRawMode(false); // readline manages raw mode
+    // Intercept keypresses after readline gives us control
+    process.stdin.on("keypress", (_ch: string, key: { ctrl?: boolean; name?: string }) => {
+      if (key.ctrl && key.name === leaderKey.slice(2)) {
+        leaderPending = true;
+        process.stdout.write(`\r\x1b[K[${leaderKey}] `);
+        return;
+      }
+      if (leaderPending) {
+        leaderPending = false;
+        const binding = config.keys[`${leaderKey} ${key.name ?? ""}`];
+        if (binding) {
+          process.stdout.write(`\r\x1b[K`);
+          rl.write(binding + "\n");
+        } else {
+          process.stdout.write(`\r\x1b[K`);
+          rl.prompt();
+        }
+      }
+    });
+  }
+
+  console.log(`Type :help for commands. Leader: ${leaderKey}. Ctrl-C to detach.\n`);
 
   // Cache agent/group lists for tab completion
   const agentIds = statusResult?.agents.map((a) => a.agentId) ?? [];
@@ -119,6 +147,21 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
       const cmd = parts[0] ?? "";
       if (parts.length <= 1) {
         const commands = [
+          ":status",
+          ":agents",
+          ":groups",
+          ":events",
+          ":cost",
+          ":directive",
+          ":wake",
+          ":convene",
+          ":edit",
+          ":open",
+          ":switch",
+          ":stop",
+          ":quit",
+          ":help",
+          // Bare fallbacks
           "status",
           "directive",
           "wake",
@@ -130,13 +173,18 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
         ];
         return [commands.filter((c) => c.startsWith(cmd)), line];
       }
-      if (cmd === "wake") {
+      if (cmd === "wake" || cmd === ":wake" || cmd === "edit" || cmd === ":edit") {
         const partial = parts[1] ?? "";
         return [agentIds.filter((a) => a.startsWith(partial)), partial];
       }
-      if (cmd === "convene") {
+      if (cmd === "convene" || cmd === ":convene") {
         const partial = parts[1] ?? "";
         return [groupIds.filter((g) => g.startsWith(partial)), partial];
+      }
+      if (cmd === "agents" || cmd === ":agents") {
+        const partial = parts[1] ?? "";
+        const filters = ["running", "idle", "failed"];
+        return [filters.filter((f) => f.startsWith(partial)), partial];
       }
       return [[], line];
     },
@@ -145,7 +193,9 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   rl.prompt();
 
   rl.on("line", (line) => {
-    const cmd = line.trim();
+    let cmd = line.trim();
+    // Support both `:command` (new) and bare `command` (backward compat)
+    if (cmd.startsWith(":")) cmd = cmd.slice(1);
     void handleCommand(cmd, send, name, rl, conn);
   });
 
@@ -263,6 +313,131 @@ const handleCommand = async (
       await runAttach(targetRoot, targetName);
       return; // don't prompt — runAttach takes over
     }
+  } else if (verb === "agents") {
+    const resp = await send("status");
+    if (resp.error) {
+      console.log(`Error: ${resp.error}`);
+    } else {
+      const r = resp.result as {
+        agents: {
+          agentId: string;
+          state: string;
+          totalWakes: number;
+          totalArtifacts: number;
+          idleWakes: number;
+          consecutiveFailures: number;
+          groups: string[];
+        }[];
+      };
+      const filterVal = parts[1];
+      let agents = r.agents;
+      if (filterVal === "running" || filterVal === "idle" || filterVal === "failed") {
+        agents = agents.filter((a) => a.state === filterVal);
+      }
+      for (const a of agents) {
+        const idle =
+          a.totalWakes > 0 ? `${String(Math.round((a.idleWakes / a.totalWakes) * 100))}%` : "—";
+        console.log(
+          `  ${a.agentId.padEnd(25)} ${a.state.padEnd(10)} ${String(a.totalWakes).padStart(3)}w ${String(a.totalArtifacts).padStart(3)}a ${idle.padStart(4)} idle  ${a.groups.join(", ")}`,
+        );
+      }
+    }
+  } else if (verb === "groups") {
+    const resp = await send("status");
+    if (resp.error) {
+      console.log(`Error: ${resp.error}`);
+    } else {
+      const r = resp.result as {
+        groups: {
+          groupId: string;
+          memberCount: number;
+          totalWakes: number;
+          totalArtifacts: number;
+          members: string[];
+        }[];
+      };
+      for (const g of r.groups) {
+        console.log(
+          `  ${g.groupId.padEnd(20)} ${String(g.memberCount)} members  ${String(g.totalWakes)}w ${String(g.totalArtifacts)}a  ${g.members.join(", ")}`,
+        );
+      }
+    }
+  } else if (verb === "events") {
+    const resp = await send("status");
+    if (resp.error) {
+      console.log(`Error: ${resp.error}`);
+    } else {
+      const r = resp.result as {
+        recentMeetings: { date: string; groupId: string; kind: string; minutesUrl?: string }[];
+        inFlightMeetings: { groupId: string; kind: string }[];
+      };
+      if (r.inFlightMeetings.length > 0) {
+        for (const m of r.inFlightMeetings) console.log(`  [running] ${m.groupId} ${m.kind}`);
+      }
+      for (const m of r.recentMeetings) {
+        console.log(
+          `  ${m.date}  ${m.groupId.padEnd(15)} ${m.kind.padEnd(14)} ${m.minutesUrl ?? ""}`,
+        );
+      }
+      if (r.recentMeetings.length === 0 && r.inFlightMeetings.length === 0) console.log("  (none)");
+    }
+  } else if (verb === "cost") {
+    const resp = await send("status");
+    if (resp.error) {
+      console.log(`Error: ${resp.error}`);
+    } else {
+      const r = resp.result as {
+        murmuration: { totalWakes: number; totalArtifacts: number };
+        agents: { agentId: string; totalWakes: number; totalArtifacts: number }[];
+      };
+      console.log(
+        `  Total: ${String(r.murmuration.totalWakes)} wakes, ${String(r.murmuration.totalArtifacts)} artifacts`,
+      );
+      for (const a of r.agents.filter((x) => x.totalWakes > 0)) {
+        const rate = (a.totalArtifacts / a.totalWakes).toFixed(1);
+        console.log(
+          `  ${a.agentId.padEnd(25)} ${String(a.totalWakes).padStart(3)}w ${String(a.totalArtifacts).padStart(3)}a  ${rate} art/wake`,
+        );
+      }
+    }
+  } else if (verb === "edit") {
+    const agentId = parts[1];
+    if (!agentId) {
+      console.log("  Usage: edit <agent-id>  (opens role.md in $EDITOR)");
+    } else {
+      // The daemon knows the root dir from status
+      const resp = await send("status");
+      const r = resp.result as { rootDir?: string };
+      const rootDir = r.rootDir;
+      if (rootDir) {
+        const path = await import("node:path");
+        const rolePath = path.resolve(path.join(rootDir, "agents", agentId, "role.md"));
+        const editor = process.env.EDITOR ?? "vi";
+        const cp = await import("node:child_process");
+        console.log(`  Opening ${rolePath}...`);
+        cp.spawnSync(editor, [rolePath], { stdio: "inherit" });
+      } else {
+        console.log("  Could not determine root directory from daemon.");
+      }
+    }
+  } else if (verb === "open") {
+    const target = parts[1];
+    if (!target) {
+      console.log("  Usage: open <issue-url|agent-id|group-id>");
+    } else if (target.startsWith("http")) {
+      const cp = await import("node:child_process");
+      cp.exec(`open "${target}"`);
+    } else {
+      // Try to open in GitHub
+      const resp = await send("status");
+      const r = resp.result as { githubUrl?: string };
+      if (r.githubUrl) {
+        const cp = await import("node:child_process");
+        cp.exec(`open "${r.githubUrl}"`);
+      } else {
+        console.log("  No GitHub URL available.");
+      }
+    }
   } else if (verb === "q" || verb === "quit" || verb === "detach") {
     console.log("Detaching.");
     rl.close();
@@ -273,24 +448,25 @@ const handleCommand = async (
     rl.close();
     return;
   } else if (verb === "?" || verb === "help") {
-    const { shippedReplMethods } = await import("@murmurations-ai/core");
-    const methods = shippedReplMethods();
-    console.log(`Commands:
-  status (s)                        Show agent status + governance summary
-  directive (d) [message]           Send a Source directive (prompts for details)
-  wake <agent-id>                   Wake an agent now
-  convene <group-id> [kind]         Convene a group meeting (operational/governance/retrospective)
-  switch <session-name>             Detach and attach to another murmuration
-  stop                              Stop the daemon
-  quit (q)                          Detach from daemon
-  help (?)                          Show this help
+    console.log(`Commands (use :prefix or bare):
+  :status (s)                       Agent status + governance summary
+  :agents [running|idle|failed]     Agent list with filter
+  :groups                           Group list with stats
+  :events                           Recent meetings + in-flight
+  :cost                             Cost summary per agent
+  :directive (d) [message]          Send a Source directive
+  :wake <agent-id>                  Wake an agent now
+  :convene <group-id> [kind]        Convene a group meeting
+  :edit <agent-id>                  Open agent's role.md in $EDITOR
+  :open <url|agent|group>           Open in browser
+  :switch <session-name>            Switch to another murmuration
+  :stop                             Stop the daemon
+  :quit (q)                         Detach from daemon
+  :help (?)                         Show this help
 
-Protocol methods (${String(methods.length)} shipped for REPL):
-${methods.map((m) => `  ${m.name.padEnd(22)} ${m.summary}`).join("\n")}
-
-Tab completion works for agent IDs and group IDs.`);
+Tab completion works for commands, agent IDs, and group IDs.`);
   } else {
-    console.log(`Unknown command: ${verb}. Type ? for help.`);
+    console.log(`Unknown command: ${verb}. Type :help for commands.`);
   }
   rl.prompt();
 };
