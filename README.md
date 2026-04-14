@@ -1,21 +1,39 @@
 # Murmuration Harness
 
-A generic, open-source TypeScript runtime for coordinating AI agent murmurations with pluggable governance.
+**A suit of power armor for human-led AI coordination.**
+
+The Murmuration Harness is an open-source TypeScript runtime that lets a single human — the **Source** — coordinate a murmuration of AI agents to do real work. It is not an autonomous agent framework. It is a tool that amplifies human agency.
 
 > **Status:** Active development. Core runtime, CLI, web dashboard, 5 governance models, and 353 tests. See [docs/EXECUTION-PLAN.md](./docs/EXECUTION-PLAN.md) for detailed status.
 
+## Philosophy: Source as a human role
+
+The harness is built on the concept of **Source** — the person who holds the creative vision and bears accountability for the initiative. This concept comes from [Peter Koenig's Source Principle](https://www.source-principle.com/) and [Tom Nixon's work on Source](https://www.tomnixon.co.uk/) in collaborative organizations.
+
+**Source is a uniquely human role.** It is the person who:
+
+- Initiated the creative impulse and holds the vision
+- Makes the calls that no agent, governance model, or process can make
+- Sets the bright lines that agents must never cross
+- Bears the risk and accountability that AI cannot hold
+
+The harness is designed around this insight: **AI agents are powerful tools, but the driver must be human.** A murmuration without a Source is a swarm without purpose. The governance models, the agent identity chain (soul → role), the decision tiers (autonomous / notify / consent / source-only) — all of these exist to keep Source in control while letting agents do the heavy lifting.
+
+Think of it as a suit of power armor: the human provides the direction, the judgment, and the values. The harness provides the strength, the reach, and the tirelessness. Neither is useful without the other.
+
 ## What this is
 
-The Murmuration Harness runs any number of AI agents as a coordinated "murmuration" — scheduling agent wakes, coordinating work via GitHub Issues, running governance rounds, and providing operator visibility through CLI, TUI, and web dashboards. GitHub is the system of record for all collaborative state.
+The harness runs any number of AI agents as a coordinated "murmuration" — scheduling agent wakes, coordinating work via GitHub Issues, running governance rounds, and providing operator visibility through CLI, TUI, and web dashboards. GitHub is the system of record for all collaborative state.
 
 ### Design principles
 
-1. **Pluggable governance** — choose your decision-making model (S3, Chain of Command, Meritocratic, Consensus, Parliamentary) or write your own
-2. **GitHub-first** — GitHub Issues are the async coordination layer; the harness reads and writes them
-3. **LLM-agnostic** — bring your own API keys (Gemini, Anthropic, OpenAI, Ollama)
-4. **Agents wake and figure out what to do** — they read signals and decide, not task-specific prompts
-5. **Real work, not theater** — every action produces artifacts; meetings execute structured actions against GitHub
-6. **Identity is inherited** — murmuration soul → agent soul → role; governance and operations are separate concerns
+1. **Source is human** — the harness amplifies human agency, it does not replace it
+2. **Pluggable governance** — choose your decision-making model (S3, Chain of Command, Meritocratic, Consensus, Parliamentary) or write your own
+3. **GitHub-first** — GitHub Issues are the async coordination layer; the harness reads and writes them
+4. **LLM-agnostic** — bring your own API keys (Gemini, Anthropic, OpenAI, Ollama)
+5. **Agents wake and figure out what to do** — they read signals and decide, not task-specific prompts
+6. **Real work, not theater** — every action produces artifacts; meetings execute structured actions against GitHub
+7. **Identity is inherited** — murmuration soul → agent soul → role; governance and operations are separate concerns
 
 ## Quick start
 
