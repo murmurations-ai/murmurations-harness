@@ -1,83 +1,140 @@
 # Murmuration Harness
 
-Coordination and agent runtime layer for human-agent murmurations with pluggable governance.
+A generic, open-source TypeScript runtime for coordinating AI agent murmurations with pluggable governance.
 
-> **Status:** Phase 1 scaffold. Not yet usable. Spec at [`xeeban/emergent-praxis:docs/MURMURATION-HARNESS-SPEC.md`](https://github.com/xeeban/emergent-praxis/blob/main/docs/MURMURATION-HARNESS-SPEC.md).
+> **Status:** Active development. Core runtime, CLI, web dashboard, 5 governance models, and 353 tests. See [docs/EXECUTION-PLAN.md](./docs/EXECUTION-PLAN.md) for detailed status.
 
 ## What this is
 
-The Murmuration Harness is a TypeScript monorepo that provides the substrate for running long-lived multi-agent murmurations: scheduling agent wakes, coordinating via GitHub Issues, running governance rounds, and observing the whole pipeline. Emergent Praxis is the reference implementation.
+The Murmuration Harness runs any number of AI agents as a coordinated "murmuration" — scheduling agent wakes, coordinating work via GitHub Issues, running governance rounds, and providing operator visibility through CLI, TUI, and web dashboards. GitHub is the system of record for all collaborative state.
 
-Design principles (ratified via [Issue #207](https://github.com/xeeban/emergent-praxis/issues/207)):
+### Design principles
 
-1. **Pluggable UI** — composable front-end, not a monolith
-2. **Pluggable governance** — Sociocracy 3.0 is the default; other models can be swapped in
-3. **GitHub-first** — GitHub Issues/Projects are the async coordination layer; the harness reads and writes them
-4. **LLM-agnostic** — bring your own API keys and models
-5. **Built on [Pi framework](https://github.com/badlogic/pi-mono)** — unified LLM API, agent runtime, TUI + web UI primitives
+1. **Pluggable governance** — choose your decision-making model (S3, Chain of Command, Meritocratic, Consensus, Parliamentary) or write your own
+2. **GitHub-first** — GitHub Issues are the async coordination layer; the harness reads and writes them
+3. **LLM-agnostic** — bring your own API keys (Gemini, Anthropic, OpenAI, Ollama)
+4. **Agents wake and figure out what to do** — they read signals and decide, not task-specific prompts
+5. **Real work, not theater** — every action produces artifacts; meetings execute structured actions against GitHub
 6. **Identity is inherited** — murmuration soul → agent soul → role; governance and operations are separate concerns
-7. **Agents wake and figure out what to do** — they are not woken with task-specific prompts; they read signals and decide
-8. **Shared = GitHub, private = repo files** — if it matters to the murmuration, it's in GitHub; if it's an agent's own continuity, it's a file in its workspace
 
-Full principles, scope, architecture, build plan, and carry-forwards: [`MURMURATION-HARNESS-SPEC.md`](https://github.com/xeeban/emergent-praxis/blob/main/docs/MURMURATION-HARNESS-SPEC.md).
+## Quick start
+
+```bash
+# Prerequisites: Node 20+, pnpm 9+
+
+# Clone and build
+git clone https://github.com/murmurations-ai/murmurations-harness.git
+cd murmurations-harness
+pnpm install && pnpm build
+
+# Create a new murmuration
+node packages/cli/dist/bin.js init ../my-murmuration
+
+# Edit .env with your API keys, then:
+node packages/cli/dist/bin.js start --root ../my-murmuration
+```
+
+See [docs/GETTING-STARTED.md](./docs/GETTING-STARTED.md) for the full walkthrough.
 
 ## Repository layout
 
 ```
 murmurations-harness/
 ├── packages/
-│   └── core/              # @murmuration/core — scheduler, signal aggregator, plugin registry
+│   ├── core/              # @murmuration/core — daemon, scheduler, executors, governance, signals
+│   ├── cli/               # @murmuration/cli — `murmuration` CLI (start, stop, attach, init, etc.)
+│   ├── github/            # @murmuration/github — typed GitHub client with write-scope enforcement
+│   ├── llm/               # @murmuration/llm — multi-provider LLM client (Gemini, Anthropic, OpenAI, Ollama)
+│   ├── signals/           # @murmuration/signals — signal aggregator (GitHub issues, filesystem)
+│   ├── secrets-dotenv/    # @murmuration/secrets-dotenv — .env secrets provider
+│   └── dashboard-tui/     # @murmuration/dashboard-tui — terminal UI dashboard
+├── examples/
+│   ├── governance-s3/           # Self-Organizing (Sociocracy 3.0) governance plugin
+│   ├── governance-command/      # Chain of Command governance plugin
+│   ├── governance-meritocratic/ # Meritocratic governance plugin
+│   ├── governance-consensus/    # Full Consensus governance plugin
+│   ├── governance-parliamentary/# Parliamentary governance plugin
+│   └── hello-world-agent/       # Minimal agent for testing
 ├── docs/
-│   └── adr/               # Architecture Decision Records (coming)
-├── tsconfig.base.json     # shared strict TypeScript config
-├── pnpm-workspace.yaml    # pnpm workspace definition
-└── package.json           # monorepo root
+│   ├── ARCHITECTURE.md          # Architecture + 10 Engineering Standards
+│   ├── GETTING-STARTED.md       # Setup guide
+│   ├── LINT-DESIGN-GUIDE.md     # TypeScript patterns for strict mode
+│   ├── CLI-TMUX-DESIGN.md       # tmux-style CLI design spec (ADR-0018)
+│   └── adr/                     # 19 Architecture Decision Records
+└── .github/workflows/ci.yml    # CI: build, typecheck, lint, format, test (Node 20 + 22)
 ```
 
-Additional packages (planned per spec §14.1):
+## CLI commands
 
-- `@murmuration/github` — typed GitHub client
-- `@murmuration/s3-plugin` — Sociocracy 3.0 governance plugin (default)
-- `@murmuration/no-gov-plugin` — stub plugin, proves the governance interface
-- `@murmuration/cli` — `murmuration` CLI
-- `@murmuration/dashboard-tui` — TUI dashboard (pi-tui)
-- `@murmuration/dashboard-web` — web dashboard (pi-web-ui)
-- `@murmuration/init-skill` — `/init-murmuration` bootstrap skill
-- `@murmuration/secrets-dotenv` — default secrets provider
+```bash
+murmuration init [dir]                      # Interactive scaffolding for a new murmuration
+murmuration start [--root|--name] [flags]   # Start the daemon
+murmuration stop [--root|--name]            # Stop the daemon
+murmuration restart [--root|--name]         # Stop + start
+murmuration status [--root|--name]          # Show agent status
+murmuration attach <name>                   # Interactive REPL (directive, wake, convene, switch)
+murmuration list                            # Show all registered murmurations with liveness
+murmuration register <name> --root <path>   # Register a murmuration by name
+murmuration directive [flags] "message"     # Send a Source directive
+murmuration group-wake [flags]              # Convene a group meeting
+```
+
+Flags: `--agent <id>`, `--dry-run`, `--once`, `--now`, `--governance <path>`, `--log-level debug|info|warn|error`
+
+## Web dashboard
+
+Set `MURMURATION_HTTP_PORT=3210` and visit `http://localhost:3210/dashboard`. The dashboard shows:
+
+- Murmuration overview (agents, groups, wakes, artifacts, idle rate)
+- Governance items (pending + resolved, with Convene button for Source)
+- Recent meetings (fetched from GitHub — source of truth)
+- Groups with member stats and meeting history
+- Agents with sort/filter, wake buttons, and detail modals
+- Daemon log viewer with level filtering
+
+## Governance models
+
+The harness ships with 5 governance plugins in `examples/`:
+
+| Model                    | Decision method                | Terminology                   |
+| ------------------------ | ------------------------------ | ----------------------------- |
+| **Self-Organizing (S3)** | Consent (no objections = pass) | circle, tension, proposal     |
+| **Chain of Command**     | Authority approval             | department, directive, report |
+| **Meritocratic**         | Expert-weighted review         | guild, flag, standard         |
+| **Consensus**            | Unanimous agreement            | assembly, concern, proposal   |
+| **Parliamentary**        | Majority vote                  | committee, motion, amendment  |
+
+Select at boot: `murmuration start --governance examples/governance-s3/index.mjs`
+
+Or configure in `murmuration/harness.yaml`:
+
+```yaml
+governance:
+  model: "self-organizing"
+  plugin: "@murmuration/governance-s3"
+```
 
 ## Development
 
-Requires Node 20+ and pnpm 9+.
-
 ```bash
-# Install dependencies
-pnpm install
-
-# Type-check all packages
-pnpm typecheck
-
-# Build all packages
-pnpm build
-
-# Clean all build artifacts
-pnpm clean
+pnpm install              # install dependencies
+pnpm build                # build all packages
+pnpm typecheck            # tsc --noEmit across all packages
+pnpm lint                 # eslint (strict-type-checked)
+pnpm format:check         # prettier check
+pnpm test                 # vitest (353 tests, 29 files)
+pnpm check                # all of the above (CI locally)
 ```
 
-## Governance
+## Architecture
 
-This project is built by the Engineering Circle of the Emergent Praxis murmuration, ratified via [Issue #240](https://github.com/xeeban/emergent-praxis/issues/240) and self-ratified via [Issue #241](https://github.com/xeeban/emergent-praxis/issues/241).
+See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full architecture, including:
 
-The circle operates under **Sociocracy 3.0 consent governance**. Architectural decisions are recorded as ADRs in [`docs/adr/`](./docs/adr/). Consent rounds happen on GitHub Issues at [`xeeban/emergent-praxis`](https://github.com/xeeban/emergent-praxis).
-
-### Active open design tensions
-
-| #                                                                      | Title                                | Owner              | Blocks            |
-| ---------------------------------------------------------------------- | ------------------------------------ | ------------------ | ----------------- |
-| [#1](https://github.com/murmurations-ai/murmurations-harness/issues/1) | Multi-circle routing validation      | Architecture (#23) | Phase 3/4         |
-| [#2](https://github.com/murmurations-ai/murmurations-harness/issues/2) | GovernancePlugin interface hardening | TypeScript (#24)   | Phase 3           |
-| [#3](https://github.com/murmurations-ai/murmurations-harness/issues/3) | AgentExecutor interface explicit     | TypeScript (#24)   | Phase 2 end       |
-| [#4](https://github.com/murmurations-ai/murmurations-harness/issues/4) | Plugin trust + prompt injection      | Security (#25)     | Phase 3 + Phase 7 |
-| [#5](https://github.com/murmurations-ai/murmurations-harness/issues/5) | Cost instrumentation gates           | Performance (#27)  | Phase 4           |
+- Architecture layers (Source → GitHub → Harness → Governance → Strategy → Dashboard)
+- GitHub as System of Record
+- Structured actions (MeetingAction, WakeAction)
+- Post-wake validation and "Did Work" enforcement
+- 10 Engineering Standards
 
 ## License
 
@@ -85,6 +142,4 @@ MIT — see [LICENSE](./LICENSE).
 
 ## Provenance
 
-Built in public by the [Emergent Praxis](https://github.com/xeeban/emergent-praxis) murmuration. The harness is the substrate EP runs on and the Level 5 product EP is building. EP is the reference implementation; this is the infrastructure.
-
-Source: Nori Nishigaya (@xeeban). Builder: Source + Claude Code as a two-member murmuration, with the Engineering Circle as reviewer and gate-keeper.
+Built in public by the [Emergent Praxis](https://github.com/xeeban/emergent-praxis) murmuration. Source: Nori Nishigaya (@xeeban).

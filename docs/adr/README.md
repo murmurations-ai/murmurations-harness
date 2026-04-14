@@ -69,3 +69,5 @@ per the Engineering Lead #22 gate review ([issue #6](https://github.com/murmurat
 | [ADR-0015](./0015-pricing-catalog.md)            | Per-provider LLM pricing catalog populating WakeCostRecord.llm.costMicros                            | Accepted |
 | [ADR-0016](./0016-role-template.md)              | Extended role.md frontmatter for real agents (provider pin, scopes, budget, prompt ref)              | Accepted |
 | [ADR-0017](./0017-github-mutations.md)           | @murmuration/github mutation surface (comment, commit-on-branch, issue) with write-scope enforcement | Accepted |
+| [ADR-0018](./0018-cli-tmux-interface.md)         | CLI tmux-style interface and parity contract (leader keys, protocol.ts, batch verbs)                 | Proposed |
+| [ADR-0019](./0019-persistent-context-agents.md)  | Persistent context agents (long-running conversation windows across wakes)                           | Proposed |
