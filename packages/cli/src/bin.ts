@@ -297,13 +297,13 @@ const main = async (): Promise<void> => {
         const { PROTOCOL_METHODS, PROTOCOL_SCHEMA_VERSION } = await import("@murmurations-ai/core");
         process.stdout.write(`Daemon Protocol (schema v${String(PROTOCOL_SCHEMA_VERSION)})\n\n`);
         process.stdout.write("METHOD              MUT   BATCH REPL  TUI   WEB   SUMMARY\n");
-        process.stdout.write("─".repeat(80) + "\n");
+        process.stdout.write("─".repeat(85) + "\n");
         for (const m of PROTOCOL_METHODS) {
           const s = m.surfaces;
           const mark = (v: string): string =>
-            v === "shipped" ? " yes " : v === "planned" ? " --- " : "  no ";
+            v === "shipped" ? "yes  " : v === "planned" ? "---  " : "no   ";
           process.stdout.write(
-            `${m.name.padEnd(20)}${(m.mutating ? "yes" : "no").padEnd(6)}${mark(s.cliBatch)}${mark(s.cliRepl)}${mark(s.tuiDash)}${mark(s.webDash)} ${m.summary}\n`,
+            `${m.name.padEnd(20)}${(m.mutating ? "yes" : "no").padEnd(6)}${mark(s.cliBatch)}${mark(s.cliRepl)}${mark(s.tuiDash)}${mark(s.webDash)}${m.summary}\n`,
           );
         }
       } else {
