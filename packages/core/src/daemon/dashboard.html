@@ -99,10 +99,34 @@
 <h2>Groups</h2>
 <div class="groups" id="groups"></div>
 
-<h2>Agents</h2>
+<h2 style="display:flex;justify-content:space-between;align-items:center">Agents
+  <span style="display:flex;gap:6px;font-size:0.75rem;font-weight:400">
+    <select id="agent-sort" onchange="sessionStorage.setItem('agentSort',this.value);refresh()" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 6px;font-size:0.75rem">
+      <option value="name">Sort: Name</option>
+      <option value="wakes">Sort: Wakes</option>
+      <option value="artifacts">Sort: Artifacts</option>
+      <option value="idle">Sort: Idle %</option>
+      <option value="failures">Sort: Failures</option>
+    </select>
+    <select id="agent-filter" onchange="sessionStorage.setItem('agentFilter',this.value);refresh()" style="background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:2px 6px;font-size:0.75rem">
+      <option value="all">Filter: All</option>
+      <option value="idle">Idle</option>
+      <option value="running">Running</option>
+      <option value="failed">Failed</option>
+    </select>
+  </span>
+</h2>
 <div class="grid" id="agents"></div>
 
-<div class="events" id="events"></div>
+<h2 style="display:flex;justify-content:space-between;align-items:center">Daemon Log
+  <span id="log-level-btns" style="display:flex;gap:4px;font-size:0.7rem;font-weight:400">
+    <button onclick="setLogFilter('debug')" data-level="debug" style="background:#21262d;color:#8b949e;border:1px solid #30363d;border-radius:4px;padding:1px 6px;cursor:pointer;font-size:0.7rem">debug</button>
+    <button onclick="setLogFilter('info')" data-level="info" style="background:#30363d;color:#58a6ff;border:1px solid #30363d;border-radius:4px;padding:1px 6px;cursor:pointer;font-size:0.7rem">info</button>
+    <button onclick="setLogFilter('warn')" data-level="warn" style="background:#21262d;color:#8b949e;border:1px solid #30363d;border-radius:4px;padding:1px 6px;cursor:pointer;font-size:0.7rem">warn</button>
+    <button onclick="setLogFilter('error')" data-level="error" style="background:#21262d;color:#8b949e;border:1px solid #30363d;border-radius:4px;padding:1px 6px;cursor:pointer;font-size:0.7rem">error</button>
+  </span>
+</h2>
+<div id="log-viewer" style="max-height:250px;overflow-y:auto;font-size:0.75rem;color:#8b949e;border:1px solid #21262d;border-radius:6px;padding:6px;background:#0d1117"></div>
 
 <div class="modal" id="agent-modal">
   <div class="modal-box" style="max-width:600px;max-height:80vh;overflow-y:auto">
@@ -283,11 +307,41 @@ async function refresh() {
     // Update dropdowns with current data
     updateDropdowns(d);
 
-    // 3. Agents
-    document.getElementById('agents').innerHTML = d.agents.map(a => {
-      const ir = a.totalWakes > 0 ? Math.round((a.idleWakes / a.totalWakes) * 100) : 0;
-      const ar = a.totalWakes > 0 ? (a.totalArtifacts / a.totalWakes).toFixed(1) : '0';
-      const sc2 = a.state === 'idle' ? 'state-idle' : a.state === 'running' ? 'state-running' : 'state-failed';
+    // 3. Agents — sort and filter
+    var sortBy = sessionStorage.getItem('agentSort') || 'name';
+    var filterBy = sessionStorage.getItem('agentFilter') || 'all';
+    // Restore dropdown selections
+    var sortEl = document.getElementById('agent-sort');
+    if (sortEl) sortEl.value = sortBy;
+    // Update filter dropdown with group options
+    var filterEl = document.getElementById('agent-filter');
+    if (filterEl) {
+      var currentFilter = filterEl.value;
+      filterEl.innerHTML = '<option value="all">Filter: All</option><option value="idle">Idle</option><option value="running">Running</option><option value="failed">Failed</option>' +
+        (d.groups || []).map(function(g) { return '<option value="group:' + g.groupId + '">Group: ' + g.groupId + '</option>'; }).join('');
+      filterEl.value = currentFilter || filterBy;
+    }
+    var filteredAgents = d.agents.filter(function(a) {
+      if (filterBy === 'all') return true;
+      if (filterBy === 'idle' || filterBy === 'running' || filterBy === 'failed') return a.state === filterBy;
+      if (filterBy.startsWith('group:')) return (a.groups || []).indexOf(filterBy.slice(6)) >= 0;
+      return true;
+    });
+    filteredAgents.sort(function(a, b) {
+      if (sortBy === 'wakes') return b.totalWakes - a.totalWakes;
+      if (sortBy === 'artifacts') return b.totalArtifacts - a.totalArtifacts;
+      if (sortBy === 'idle') {
+        var ai = a.totalWakes > 0 ? a.idleWakes / a.totalWakes : 0;
+        var bi = b.totalWakes > 0 ? b.idleWakes / b.totalWakes : 0;
+        return bi - ai;
+      }
+      if (sortBy === 'failures') return b.consecutiveFailures - a.consecutiveFailures;
+      return a.agentId.localeCompare(b.agentId);
+    });
+    document.getElementById('agents').innerHTML = filteredAgents.map(a => {
+      var ir = a.totalWakes > 0 ? Math.round((a.idleWakes / a.totalWakes) * 100) : 0;
+      var ar = a.totalWakes > 0 ? (a.totalArtifacts / a.totalWakes).toFixed(1) : '0';
+      var sc2 = a.state === 'idle' ? 'state-idle' : a.state === 'running' ? 'state-running' : 'state-failed';
       return '<div class="card"><h3><a href="#" onclick="showAgent(\'' + a.agentId + '\');return false" style="color:#58a6ff;text-decoration:none">' + a.agentId + '</a></h3>' +
         st('State', '<span class="' + sc2 + '">' + a.state + '</span>') +
         st('Wakes', a.totalWakes) + st('Artifacts', a.totalArtifacts) +
@@ -342,10 +396,49 @@ sse.addEventListener('governance.transitioned', function(e) {
   refresh();
 });
 
+// Log viewer — captures SSE log.entry events + domain events
+var logEntries = [];
+var logFilter = 'info';
+var LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
+var LOG_COLORS = { debug: '#8b949e', info: '#58a6ff', warn: '#d29922', error: '#f85149' };
+
 function logEvent(msg) {
-  var div = document.createElement('div');
-  div.textContent = new Date().toLocaleTimeString() + ' ' + msg;
-  document.getElementById('events').prepend(div);
+  logEntries.unshift({ ts: new Date().toLocaleTimeString(), level: 'info', text: msg });
+  if (logEntries.length > 200) logEntries.pop();
+  renderLog();
+}
+
+sse.addEventListener('log.entry', function(e) {
+  var data = JSON.parse(e.data);
+  logEntries.unshift({ ts: data.ts ? data.ts.slice(11, 19) : new Date().toLocaleTimeString(), level: data.level || 'info', text: data.event + (Object.keys(data.data || {}).length > 0 ? ' ' + JSON.stringify(data.data).slice(0, 100) : '') });
+  if (logEntries.length > 200) logEntries.pop();
+  renderLog();
+});
+
+function renderLog() {
+  var minLevel = LOG_LEVELS[logFilter] || 1;
+  var filtered = logEntries.filter(function(e) { return (LOG_LEVELS[e.level] || 0) >= minLevel; });
+  var viewer = document.getElementById('log-viewer');
+  if (!viewer) return;
+  viewer.innerHTML = filtered.slice(0, 50).map(function(e) {
+    var c = LOG_COLORS[e.level] || '#8b949e';
+    return '<div style="padding:1px 0;border-bottom:1px solid #21262d"><span style="color:#8b949e">' + e.ts + '</span> <span style="color:' + c + ';font-weight:600">' + e.level + '</span> ' + e.text + '</div>';
+  }).join('');
+}
+
+function setLogFilter(level) {
+  logFilter = level;
+  var btns = document.querySelectorAll('#log-level-btns button');
+  btns.forEach(function(btn) {
+    if (btn.getAttribute('data-level') === level) {
+      btn.style.background = '#30363d';
+      btn.style.color = LOG_COLORS[level] || '#58a6ff';
+    } else {
+      btn.style.background = '#21262d';
+      btn.style.color = '#8b949e';
+    }
+  });
+  renderLog();
 }
 
 refresh();

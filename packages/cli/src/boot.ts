@@ -509,6 +509,8 @@ export interface BootDaemonOptions {
    * off-cycle wakes without editing identity files.
    */
   readonly now?: boolean;
+  /** Log level filter. Default: "info". */
+  readonly logLevel?: "debug" | "info" | "warn" | "error";
 }
 
 /**
@@ -521,6 +523,11 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const exampleRoot = options.rootDir ? resolve(options.rootDir) : resolveHelloWorldRoot();
   const dryRun = options.dryRun === true;
   const once = options.once === true;
+
+  // Construct event bus + structured logger (Engineering Standards #4 + #9)
+  const { DaemonEventBus, DaemonLoggerImpl } = await import("@murmuration/core");
+  const eventBus = new DaemonEventBus();
+  const logger = new DaemonLoggerImpl({ level: options.logLevel ?? "info", eventBus });
 
   // Load governance plugin — from CLI flag, or from murmuration/harness.yaml
   let governancePath = options.governancePath;
@@ -673,6 +680,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     agents: allRegistered,
     signalAggregator: filesystemOnlyAggregator,
     runArtifactWriter,
+    logger,
     ...(secretsBlock ? { secrets: secretsBlock } : {}),
     ...(governancePlugin ? { governance: governancePlugin } : {}),
     governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
@@ -1088,6 +1096,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
             })
           : filesystemOnlyAggregator,
         runArtifactWriter,
+        logger,
         ...(secretsBlock ? { secrets: secretsBlock } : {}),
         ...(governancePlugin ? { governance: governancePlugin } : {}),
         governancePersistDir: resolve(exampleRoot, ".murmuration", "governance"),
@@ -1134,9 +1143,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   // Command executor — owns command dispatch, status building, and detail handlers
   // (extracted from boot.ts per Engineering Standard #8)
-  const { DaemonEventBus } = await import("@murmuration/core");
   const { DaemonCommandExecutor } = await import("./command-executor.js");
-  const eventBus = new DaemonEventBus();
   const firstScope = allRegistered[0]?.signalScopes?.githubScopes?.[0];
   const repoCoord = firstScope ? { owner: firstScope.owner, repo: firstScope.repo } : undefined;
   const executor = new DaemonCommandExecutor({

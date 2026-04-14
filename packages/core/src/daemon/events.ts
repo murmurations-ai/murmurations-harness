@@ -56,6 +56,14 @@ export interface CommandExecutedEvent {
   readonly ok: boolean;
 }
 
+export interface LogEntryEvent {
+  readonly kind: "log.entry";
+  readonly level: string;
+  readonly event: string;
+  readonly ts: string;
+  readonly data: Record<string, unknown>;
+}
+
 /** All daemon event types as a discriminated union. */
 export type DaemonEvent =
   | WakeStartedEvent
@@ -63,7 +71,8 @@ export type DaemonEvent =
   | MeetingStartedEvent
   | MeetingCompletedEvent
   | GovernanceTransitionedEvent
-  | CommandExecutedEvent;
+  | CommandExecutedEvent
+  | LogEntryEvent;
 
 // ---------------------------------------------------------------------------
 // Listener type

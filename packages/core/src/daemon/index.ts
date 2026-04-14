@@ -40,12 +40,7 @@ import {
   validateWake,
 } from "../execution/index.js";
 import type { LoadedAgentIdentity } from "../identity/index.js";
-import {
-  REDACT,
-  scrubLogRecord,
-  type SecretDeclaration,
-  type SecretsProvider,
-} from "../secrets/index.js";
+import { REDACT, type SecretDeclaration, type SecretsProvider } from "../secrets/index.js";
 import {
   TimerScheduler,
   type Scheduler,
@@ -402,11 +397,10 @@ export interface DaemonConfig {
   ) => Promise<void>;
 }
 
-export interface DaemonLogger {
-  info(event: string, data: Record<string, unknown>): void;
-  warn(event: string, data: Record<string, unknown>): void;
-  error(event: string, data: Record<string, unknown>): void;
-}
+// DaemonLogger is now defined in logger.ts. Import for local use + re-export.
+import { DaemonLoggerImpl, type DaemonLogger, type LogLevel } from "./logger.js";
+export type { DaemonLogger, LogLevel };
+export { DaemonLoggerImpl };
 
 // ---------------------------------------------------------------------------
 // Daemon
@@ -1220,27 +1214,7 @@ const buildSpawnContext = async (
  * negligible overhead to a JSON-lines logger that was already iterating
  * the record to serialize it.
  */
-const defaultLogger = (): DaemonLogger => {
-  const write = (
-    level: "info" | "warn" | "error",
-    event: string,
-    data: Record<string, unknown>,
-  ): void => {
-    const scrubbed = scrubLogRecord(data);
-    const record = {
-      ts: new Date().toISOString(),
-      level,
-      event,
-      ...scrubbed,
-    };
-    process.stdout.write(`${JSON.stringify(record)}\n`);
-  };
-  return {
-    info: (event, data) => write("info", event, data),
-    warn: (event, data) => write("warn", event, data),
-    error: (event, data) => write("error", event, data),
-  };
-};
+const defaultLogger = (): DaemonLogger => new DaemonLoggerImpl();
 
 // Re-export the redaction symbol so tests and plugins in downstream
 // packages can opt into the symbol-bucket form without reaching into

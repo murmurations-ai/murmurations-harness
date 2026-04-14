@@ -6,6 +6,7 @@
  *   <target>/
  *     murmuration/
  *       soul.md              — murmuration purpose + bright lines
+ *       harness.yaml         — runtime config (governance, etc.)
  *     agents/
  *       <agent-name>/
  *         soul.md            — agent identity
@@ -16,9 +17,8 @@
  *     .env                   — secret placeholders (0600)
  *     .gitignore             — ignores .env, .murmuration/
  *
- * The command asks a few questions interactively, writes the files,
- * and prints the next steps. Designed to be the first thing a new
- * operator runs after installing the harness.
+ * The init interview is minimal — ask a few questions, produce maximum
+ * scaffolding with inline comments guiding later hand-edits.
  */
 
 import { existsSync } from "node:fs";
@@ -28,9 +28,55 @@ import { createInterface } from "node:readline";
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 const ask = (question: string): Promise<string> =>
-  new Promise((resolve) => {
-    rl.question(question, resolve);
+  new Promise((r) => {
+    rl.question(question, r);
   });
+
+// ---------------------------------------------------------------------------
+// Agent question helper
+// ---------------------------------------------------------------------------
+
+interface AgentAnswers {
+  readonly name: string;
+  readonly dir: string;
+  readonly provider: string;
+  readonly group: string;
+  readonly schedule: string;
+}
+
+const askAgentQuestions = async (isFirst: boolean): Promise<AgentAnswers> => {
+  const namePrompt = isFirst
+    ? "Name your first agent (e.g. research, coordinator, builder): "
+    : "Agent name: ";
+  const name = await ask(namePrompt);
+  const dir = name.trim().toLowerCase().replace(/\s+/g, "-");
+
+  const providerInput = await ask(
+    "  LLM provider (gemini / anthropic / openai / ollama) [gemini]: ",
+  );
+  const provider = providerInput.trim().toLowerCase() || "gemini";
+
+  const groupInput = await ask("  Group this agent belongs to (or Enter for none): ");
+  const group = groupInput.trim().toLowerCase().replace(/\s+/g, "-") || "";
+
+  const scheduleInput = await ask(
+    "  Wake schedule (daily / hourly / custom cron / Enter for 2s delay): ",
+  );
+  const schedule = scheduleInput.trim().toLowerCase();
+
+  return { name: name.trim(), dir, provider, group, schedule };
+};
+
+const formatScheduleYaml = (schedule: string): string => {
+  if (schedule === "daily") return 'cron: "0 9 * * *"  # daily at 9am UTC';
+  if (schedule === "hourly") return 'cron: "0 * * * *"  # every hour';
+  if (schedule.includes("*") || schedule.includes("/")) return `cron: "${schedule}"`;
+  return 'delayMs: 2000  # Change to cron for scheduled wakes: cron: "0 18 * * *"';
+};
+
+// ---------------------------------------------------------------------------
+// Main init
+// ---------------------------------------------------------------------------
 
 export const runInit = async (targetArg?: string): Promise<void> => {
   console.log("\nmurmuration init — create a new murmuration\n");
@@ -51,23 +97,30 @@ export const runInit = async (targetArg?: string): Promise<void> => {
   // 2. Murmuration purpose
   const purpose = await ask("What is this murmuration's purpose? (one sentence): ");
 
-  // 3. First agent
-  const agentName = await ask("Name your first agent (e.g. research, coordinator, builder): ");
-  const agentDir = agentName.trim().toLowerCase().replace(/\s+/g, "-");
+  // 3. GitHub config (optional)
+  const githubInput = await ask("GitHub repo (e.g. org/repo, or Enter to skip): ");
+  const githubRepo = githubInput.trim();
+  let githubOwner = "";
+  let githubRepoName = "";
+  if (githubRepo.includes("/")) {
+    const parts = githubRepo.split("/");
+    githubOwner = parts[0] ?? "";
+    githubRepoName = parts[1] ?? "";
+  }
 
-  // 4. Agent's LLM provider
-  const providerInput = await ask(
-    "LLM provider for this agent (gemini / anthropic / openai / ollama) [gemini]: ",
-  );
-  const provider = providerInput.trim().toLowerCase() || "gemini";
+  // 4. Agents
+  const agents: AgentAnswers[] = [];
+  agents.push(await askAgentQuestions(true));
 
-  // 5. Circle (optional)
-  const groupInput = await ask("Group this agent belongs to (or press Enter for none): ");
-  const group = groupInput.trim().toLowerCase().replace(/\s+/g, "-") || "";
+  let addMore = await ask("\nAdd another agent? (y/N): ");
+  while (addMore.trim().toLowerCase() === "y") {
+    agents.push(await askAgentQuestions(false));
+    addMore = await ask("\nAdd another agent? (y/N): ");
+  }
 
-  // 6. Governance model
+  // 5. Governance model
   const govInput = await ask(
-    "Governance model (self-organizing / chain-of-command / meritocratic / consensus / parliamentary / none) [none]: ",
+    "\nGovernance model (self-organizing / chain-of-command / meritocratic / consensus / parliamentary / none) [none]: ",
   );
   const governance = govInput.trim().toLowerCase() || "none";
 
@@ -79,10 +132,15 @@ export const runInit = async (targetArg?: string): Promise<void> => {
 
   console.log(`\nCreating murmuration at ${targetDir}...\n`);
 
+  // Collect all groups
+  const groups = [...new Set(agents.map((a) => a.group).filter(Boolean))];
+
   // Directories
   await mkdir(join(targetDir, "murmuration"), { recursive: true });
-  await mkdir(join(targetDir, "agents", agentDir), { recursive: true });
-  if (group) {
+  for (const agent of agents) {
+    await mkdir(join(targetDir, "agents", agent.dir), { recursive: true });
+  }
+  if (groups.length > 0) {
     await mkdir(join(targetDir, "governance", "groups"), { recursive: true });
   }
 
@@ -110,7 +168,7 @@ _What does this murmuration optimize for?_
     "utf8",
   );
 
-  // murmuration/harness.yaml — runtime config
+  // murmuration/harness.yaml
   const governancePluginMap: Record<string, string> = {
     "self-organizing": "@murmuration/governance-s3",
     "chain-of-command": "@murmuration/governance-command",
@@ -129,10 +187,13 @@ ${governance !== "none" ? `governance:\n  model: "${governance}"\n  plugin: "${g
     "utf8",
   );
 
-  // agents/<name>/soul.md
-  await writeFile(
-    join(targetDir, "agents", agentDir, "soul.md"),
-    `# ${agentName.trim()} — Soul
+  // Write each agent
+  const secretNames = new Set<string>();
+  for (const agent of agents) {
+    // soul.md
+    await writeFile(
+      join(targetDir, "agents", agent.dir, "soul.md"),
+      `# ${agent.name} — Soul
 
 ## Who I am
 
@@ -142,38 +203,55 @@ _Describe this agent's character, perspective, and approach._
 
 _Define the agent-specific bright lines beyond the murmuration soul._
 `,
-    "utf8",
-  );
+      "utf8",
+    );
 
-  // agents/<name>/role.md
-  const secretName = provider === "ollama" ? "" : `${provider.toUpperCase()}_API_KEY`;
-  const groupLine = group ? `\n  - "${group}"` : "";
-  await writeFile(
-    join(targetDir, "agents", agentDir, "role.md"),
-    `---
-agent_id: "${agentDir}"
-name: "${agentName.trim()}"
+    // role.md
+    const secretName = agent.provider === "ollama" ? "" : `${agent.provider.toUpperCase()}_API_KEY`;
+    if (secretName) secretNames.add(secretName);
+    const groupLine = agent.group ? `\n  - "${agent.group}"` : "";
+    const ghScopes = githubOwner
+      ? `
+  github_scopes:
+    - owner: "${githubOwner}"
+      repo: "${githubRepoName}"`
+      : "";
+    const writeScopes = githubOwner
+      ? `
+    issue_comments: ["${githubOwner}/${githubRepoName}"]
+    branch_commits:
+      - repo: "${githubOwner}/${githubRepoName}"
+        paths: ["**"]
+    labels: ["${githubOwner}/${githubRepoName}"]
+    issues: ["${githubOwner}/${githubRepoName}"]`
+      : `
+    issue_comments: []
+    branch_commits: []
+    labels: []
+    issues: []`;
+
+    await writeFile(
+      join(targetDir, "agents", agent.dir, "role.md"),
+      `---
+agent_id: "${agent.dir}"
+name: "${agent.name}"
 model_tier: "balanced"
 max_wall_clock_ms: 120000
 group_memberships:${groupLine || "\n  []"}
 
 llm:
-  provider: "${provider}"
+  provider: "${agent.provider}"
 
 wake_schedule:
-  delayMs: 2000  # Change to cron for scheduled wakes: cron: "0 18 * * *"
+  ${formatScheduleYaml(agent.schedule)}
 
 signals:
   sources:
     - "github-issue"
-    - "private-note"
+    - "private-note"${ghScopes}
 
 github:
-  write_scopes:
-    issue_comments: []
-    branch_commits: []
-    labels: []
-    issues: []
+  write_scopes:${writeScopes}
 
 budget:
   max_cost_micros: 100000
@@ -185,7 +263,7 @@ secrets:
   optional: ["GITHUB_TOKEN"]
 ---
 
-# ${agentName.trim()} — Role
+# ${agent.name} — Role
 
 ## Accountabilities
 
@@ -197,11 +275,13 @@ secrets:
 - **Notify:** _(what requires notification to Source)_
 - **Consent:** _(what requires group consent)_
 `,
-    "utf8",
-  );
+      "utf8",
+    );
+  }
 
-  // governance/groups/<group>.md
-  if (group) {
+  // Group docs
+  for (const group of groups) {
+    const members = agents.filter((a) => a.group === group).map((a) => a.dir);
     await writeFile(
       join(targetDir, "governance", "groups", `${group}.md`),
       `# ${group.charAt(0).toUpperCase() + group.slice(1)} Group
@@ -212,7 +292,7 @@ _Define this group's purpose._
 
 ## Members
 
-- ${agentDir}
+${members.map((m) => `- ${m}`).join("\n")}
 `,
       "utf8",
     );
@@ -220,46 +300,63 @@ _Define this group's purpose._
 
   // .env
   const envLines: string[] = [];
-  if (secretName) {
-    envLines.push(`${secretName}=your-api-key-here`);
+  for (const secret of secretNames) {
+    envLines.push(`${secret}=your-api-key-here`);
   }
-  envLines.push("# GITHUB_TOKEN=ghp_your-token-here");
+  if (githubOwner) {
+    envLines.push("GITHUB_TOKEN=ghp_your-token-here");
+  } else {
+    envLines.push("# GITHUB_TOKEN=ghp_your-token-here");
+  }
   const envContent = envLines.join("\n") + "\n";
   const envPath = join(targetDir, ".env");
   await writeFile(envPath, envContent, "utf8");
   await chmod(envPath, 0o600);
 
   // .gitignore
-  await writeFile(
-    join(targetDir, ".gitignore"),
-    `.env
-.murmuration/
-`,
-    "utf8",
-  );
+  await writeFile(join(targetDir, ".gitignore"), ".env\n.murmuration/\n", "utf8");
+
+  // Register session
+  const sessionName = targetDir.split("/").pop() ?? "murmuration";
+  try {
+    const { registerSession } = await import("./sessions.js");
+    registerSession(sessionName, targetDir);
+  } catch {
+    // sessions module may not be available in all contexts
+  }
 
   // -------------------------------------------------------------------
   // Print next steps
   // -------------------------------------------------------------------
 
+  const agentList = agents.map((a) => `    agents/${a.dir}/soul.md + role.md`).join("\n");
+  const groupList =
+    groups.length > 0 ? "\n" + groups.map((g) => `    governance/groups/${g}.md`).join("\n") : "";
+
   const governanceNote =
     governance !== "none"
-      ? `\n4. Boot with governance:\n   murmuration start --root ${target} --governance examples/governance-s3/index.mjs`
+      ? `\n4. To use governance, point to the plugin:\n   murmuration start --name ${sessionName} --governance examples/governance-s3/index.mjs`
       : "";
+
+  const githubNote = githubOwner
+    ? `\n${governance !== "none" ? "5" : "4"}. Ensure GITHUB_TOKEN has repo scope for ${githubOwner}/${githubRepoName}`
+    : "";
 
   console.log(`Done! Created:
   ${targetDir}/
     murmuration/soul.md
-    agents/${agentDir}/soul.md
-    agents/${agentDir}/role.md${group ? `\n    governance/groups/${group}.md` : ""}
+    murmuration/harness.yaml
+${agentList}${groupList}
     .env (0600)
     .gitignore
+
+Registered as "${sessionName}".
 
 Next steps:
 
 1. Edit .env — add your real API keys
 2. Edit the soul.md and role.md files — fill in the placeholders
 3. Boot the daemon:
-   murmuration start --root ${target}${governanceNote}
+   murmuration start --name ${sessionName}${governanceNote}${githubNote}
 `);
 };

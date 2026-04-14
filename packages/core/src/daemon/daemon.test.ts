@@ -20,7 +20,7 @@ import type { DaemonLogger, RegisteredAgent } from "./index.js";
 import { Daemon } from "./index.js";
 
 interface CapturedLog {
-  level: "info" | "warn" | "error";
+  level: "debug" | "info" | "warn" | "error";
   event: string;
   data: Record<string, unknown>;
 }
@@ -28,9 +28,10 @@ interface CapturedLog {
 const makeCapturingLogger = (): { logger: DaemonLogger; logs: CapturedLog[] } => {
   const logs: CapturedLog[] = [];
   const logger: DaemonLogger = {
-    info: (event, data) => logs.push({ level: "info", event, data }),
-    warn: (event, data) => logs.push({ level: "warn", event, data }),
-    error: (event, data) => logs.push({ level: "error", event, data }),
+    debug: (event, data) => logs.push({ level: "debug", event, data: data ?? {} }),
+    info: (event, data) => logs.push({ level: "info", event, data: data ?? {} }),
+    warn: (event, data) => logs.push({ level: "warn", event, data: data ?? {} }),
+    error: (event, data) => logs.push({ level: "error", event, data: data ?? {} }),
   };
   return { logger, logs };
 };

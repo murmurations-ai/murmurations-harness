@@ -171,6 +171,7 @@ interface StartArgs {
   readonly once: boolean;
   readonly now: boolean;
   readonly governancePath: string | undefined;
+  readonly logLevel: "debug" | "info" | "warn" | "error";
 }
 
 const parseStartArgs = (rest: readonly string[]): StartArgs => {
@@ -180,9 +181,17 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
   let once = false;
   let now = false;
   let governancePath: string | undefined;
+  let logLevel: "debug" | "info" | "warn" | "error" = "info";
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
-    if (arg === "--governance") {
+    if (arg === "--log-level") {
+      const next = rest[i + 1];
+      if (next !== "debug" && next !== "info" && next !== "warn" && next !== "error") {
+        throw new Error("--log-level must be debug, info, warn, or error");
+      }
+      logLevel = next;
+      i++;
+    } else if (arg === "--governance") {
       const next = rest[i + 1];
       if (next === undefined) throw new Error("--governance requires a module path");
       governancePath = next;
@@ -212,7 +221,7 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
       throw new Error(`unknown argument: ${arg ?? "(undefined)"}`);
     }
   }
-  return { rootDir, agentDir, dryRun, once, now, governancePath };
+  return { rootDir, agentDir, dryRun, once, now, governancePath, logLevel };
 };
 
 const usage = (): string =>
@@ -245,6 +254,8 @@ start options:
   --now            Trigger an immediate wake (overrides cron/interval schedule)
   --governance <path>  Path to a governance plugin module (default: no-op).
                    The module must export a GovernancePlugin as default.
+  --log-level <level>  Log level: debug, info, warn, error (default: info).
+                   Debug shows LLM prompts, signal contents, action details.
 
 Examples:
   murmuration start                                          # hello-world only
@@ -264,6 +275,7 @@ const main = async (): Promise<void> => {
         ...(args.once ? { once: true } : {}),
         ...(args.now ? { now: true, once: true } : {}),
         ...(args.governancePath !== undefined ? { governancePath: args.governancePath } : {}),
+        logLevel: args.logLevel,
       });
       break;
     }
