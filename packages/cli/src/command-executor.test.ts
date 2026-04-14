@@ -154,11 +154,16 @@ describe("DaemonCommandExecutor", () => {
     expect(status.recentMeetings).toEqual([]);
   });
 
-  it("buildStatus includes version and pid", async () => {
+  it("buildStatus includes version, schemaVersion, and pid", async () => {
     const executor = makeExecutor();
-    const status = (await executor.buildStatus()) as { version: string; pid: number };
+    const status = (await executor.buildStatus()) as {
+      version: string;
+      schemaVersion: number;
+      pid: number;
+    };
 
     expect(status.version).toBe("0.1.0");
+    expect(status.schemaVersion).toBe(1);
     expect(status.pid).toBe(process.pid);
   });
 

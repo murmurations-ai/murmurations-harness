@@ -17,6 +17,7 @@ import { openSync } from "node:fs";
 
 import {
   HARNESS_VERSION,
+  PROTOCOL_SCHEMA_VERSION,
   GovernanceStateStore,
   type AgentStateStore,
   type GovernancePlugin,
@@ -171,6 +172,7 @@ export class DaemonCommandExecutor {
 
     return {
       version: HARNESS_VERSION,
+      schemaVersion: PROTOCOL_SCHEMA_VERSION,
       pid: process.pid,
       name: process.env.MURMURATION_NAME ?? rootDir.split("/").pop() ?? "murmuration",
       rootDir,

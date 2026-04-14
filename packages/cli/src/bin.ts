@@ -257,6 +257,9 @@ start options:
   --log-level <level>  Log level: debug, info, warn, error (default: info).
                    Debug shows LLM prompts, signal contents, action details.
 
+Topics:
+  murmuration help protocol                                  # show daemon protocol + parity matrix
+
 Examples:
   murmuration start                                          # hello-world only
   murmuration start --root ../my-murmuration                 # all agents
@@ -283,7 +286,25 @@ const main = async (): Promise<void> => {
     case "-h":
     case "--help":
     case "help": {
-      process.stdout.write(usage());
+      const topic = argv[1];
+      if (topic === "protocol" || topic === "methods") {
+        const { PROTOCOL_METHODS, PROTOCOL_SCHEMA_VERSION } = await import("@murmurations-ai/core");
+        process.stdout.write(`Daemon Protocol (schema v${String(PROTOCOL_SCHEMA_VERSION)})\n\n`);
+        process.stdout.write(
+          "METHOD".padEnd(20) + "MUT  " + "BATCH  REPL   TUI    WEB    SUMMARY\n",
+        );
+        process.stdout.write("─".repeat(90) + "\n");
+        for (const m of PROTOCOL_METHODS) {
+          const s = m.surfaces;
+          const mark = (v: string): string =>
+            v === "shipped" ? "✅" : v === "planned" ? "🟡" : "❌";
+          process.stdout.write(
+            `${m.name.padEnd(20)}${m.mutating ? "yes" : "no "}  ${mark(s.cliBatch).padEnd(5)}  ${mark(s.cliRepl).padEnd(5)}  ${mark(s.tuiDash).padEnd(5)}  ${mark(s.webDash).padEnd(5)}  ${m.summary}\n`,
+          );
+        }
+      } else {
+        process.stdout.write(usage());
+      }
       break;
     }
     case "--version":
