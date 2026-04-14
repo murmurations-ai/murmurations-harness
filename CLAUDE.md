@@ -122,14 +122,35 @@ The harness core must not contain S3-specific terms (consent, objection, tension
 ## CLI Commands
 
 ```sh
-murmuration start --root <path> [--agent <id>] [--now] [--once] [--dry-run] [--governance <path>]
-murmuration group-wake --root <path> --group <id> [--governance] [--directive "msg"]
+# Daemon lifecycle
+murmuration start --root <path> [--agent <id>] [--now] [--once] [--dry-run] [--governance <path>] [--log-level debug]
+murmuration stop [--root|--name]
+murmuration restart [--root|--name]
+murmuration status [--root|--name]
+
+# Session management
+murmuration attach <name>             # Interactive REPL with :commands and leader keys
+murmuration list                      # Show all registered murmurations
+murmuration register <name> --root <path>
+murmuration config [edit|path]
+
+# Queries (require running daemon)
+murmuration agents [--root|--name] [--json] [--filter running|idle|failed]
+murmuration groups [--root|--name] [--json]
+murmuration events [--root|--name] [--json]
+murmuration cost   [--root|--name] [--json]
+
+# Actions
 murmuration directive --root <path> --agent <id> "message"
+murmuration group-wake --root <path> --group <id> [--governance] [--directive "msg"]
 murmuration backlog --root <path> --group <id> [--repo owner/repo] [--refresh]
 murmuration init [dir]
+
+# Help
+murmuration help protocol             # Show daemon protocol + parity matrix
 ```
 
-`--now` triggers an immediate wake (overrides cron schedule, implies `--once`). No identity file edits needed.
+`--now` triggers an immediate wake (overrides cron schedule, implies `--once`). All commands accept `--name <name>` as an alias for `--root <path>` when the murmuration is registered.
 
 ## Secrets
 

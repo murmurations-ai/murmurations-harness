@@ -80,7 +80,7 @@
 
 ### Testing ✅
 
-- [x] 353 tests across 29 test files
+- [x] 366 tests across 31 test files
 - [x] All passing through `pnpm check` (typecheck + lint + format + test)
 - [x] CI green on Node 20.x and 22.x
 

@@ -196,7 +196,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     let cmd = line.trim();
     // Support both `:command` (new) and bare `command` (backward compat)
     if (cmd.startsWith(":")) cmd = cmd.slice(1);
-    void handleCommand(cmd, send, name, rl, conn);
+    void handleCommand(cmd, send, name, rl, conn, agentIds);
   });
 
   rl.on("close", () => {
@@ -211,6 +211,7 @@ const handleCommand = async (
   _name: string,
   rl: Interface,
   conn: Socket,
+  agentIds: readonly string[],
 ): Promise<void> => {
   const parts = cmd.split(/\s+/);
   const verb = parts[0] ?? "";
@@ -404,6 +405,8 @@ const handleCommand = async (
     const agentId = parts[1];
     if (!agentId) {
       console.log("  Usage: edit <agent-id>  (opens role.md in $EDITOR)");
+    } else if (!agentIds.includes(agentId)) {
+      console.log(`  Unknown agent: ${agentId}. Known: ${agentIds.join(", ")}`);
     } else {
       // The daemon knows the root dir from status
       const resp = await send("status");
@@ -426,14 +429,18 @@ const handleCommand = async (
       console.log("  Usage: open <issue-url|agent-id|group-id>");
     } else if (target.startsWith("http")) {
       const cp = await import("node:child_process");
-      cp.exec(`open "${target}"`);
+      cp.execFile("open", [target], () => {
+        /* fire-and-forget */
+      });
     } else {
       // Try to open in GitHub
       const resp = await send("status");
       const r = resp.result as { githubUrl?: string };
       if (r.githubUrl) {
         const cp = await import("node:child_process");
-        cp.exec(`open "${r.githubUrl}"`);
+        cp.execFile("open", [r.githubUrl], () => {
+          /* fire-and-forget */
+        });
       } else {
         console.log("  No GitHub URL available.");
       }

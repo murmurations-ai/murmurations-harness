@@ -95,16 +95,31 @@ murmurations-harness/
 ## CLI commands
 
 ```bash
+# Daemon lifecycle
 murmuration init [dir]                      # Interactive scaffolding for a new murmuration
 murmuration start [--root|--name] [flags]   # Start the daemon
 murmuration stop [--root|--name]            # Stop the daemon
 murmuration restart [--root|--name]         # Stop + start
 murmuration status [--root|--name]          # Show agent status
-murmuration attach <name>                   # Interactive REPL (directive, wake, convene, switch)
+
+# Session management
+murmuration attach <name>                   # Interactive REPL (:status, :agents, :wake, etc.)
 murmuration list                            # Show all registered murmurations with liveness
 murmuration register <name> --root <path>   # Register a murmuration by name
+murmuration config [edit|path]              # Show/edit ~/.murmuration/config.toml
+
+# Queries (require running daemon)
+murmuration agents [--root|--name] [--json] [--filter running|idle|failed]
+murmuration groups [--root|--name] [--json]
+murmuration events [--root|--name] [--json]
+murmuration cost   [--root|--name] [--json]
+
+# Actions
 murmuration directive [flags] "message"     # Send a Source directive
 murmuration group-wake [flags]              # Convene a group meeting
+
+# Help
+murmuration help protocol                   # Show daemon protocol + parity matrix
 ```
 
 Flags: `--agent <id>`, `--dry-run`, `--once`, `--now`, `--governance <path>`, `--log-level debug|info|warn|error`

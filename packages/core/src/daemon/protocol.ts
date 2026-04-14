@@ -68,7 +68,8 @@ export const PROTOCOL_METHODS: readonly ProtocolMethod[] = [
     name: "agents.list",
     summary: "List all agents with state, wakes, artifacts",
     mutating: false,
-    surfaces: { cliBatch: "shipped", cliRepl: "shipped", tuiDash: "shipped", webDash: "shipped" },
+    // CLI verbs exist but call status RPC — real handler planned for v0.3
+    surfaces: { cliBatch: "planned", cliRepl: "planned", tuiDash: "shipped", webDash: "shipped" },
   },
   {
     name: "agents.get",
@@ -80,7 +81,7 @@ export const PROTOCOL_METHODS: readonly ProtocolMethod[] = [
     name: "groups.list",
     summary: "List all groups with member counts and stats",
     mutating: false,
-    surfaces: { cliBatch: "shipped", cliRepl: "shipped", tuiDash: "shipped", webDash: "shipped" },
+    surfaces: { cliBatch: "planned", cliRepl: "planned", tuiDash: "shipped", webDash: "shipped" },
   },
   {
     name: "groups.get",
@@ -103,13 +104,13 @@ export const PROTOCOL_METHODS: readonly ProtocolMethod[] = [
     name: "events.history",
     summary: "Recent daemon events (ring buffer dump)",
     mutating: false,
-    surfaces: { cliBatch: "shipped", cliRepl: "shipped", tuiDash: "planned", webDash: "shipped" },
+    surfaces: { cliBatch: "planned", cliRepl: "planned", tuiDash: "planned", webDash: "shipped" },
   },
   {
     name: "cost.summary",
     summary: "Cost summary by agent, day, or week",
     mutating: false,
-    surfaces: { cliBatch: "shipped", cliRepl: "shipped", tuiDash: "shipped", webDash: "shipped" },
+    surfaces: { cliBatch: "planned", cliRepl: "planned", tuiDash: "shipped", webDash: "shipped" },
   },
 
   // -- Commands (mutating) --------------------------------------------------
