@@ -242,6 +242,12 @@ Usage:
   murmuration register <name> --root <path>  Register a murmuration by name
   murmuration unregister <name>         Remove a registered murmuration
   murmuration list                      Show all registered murmurations
+  murmuration config [edit|path]        Show/edit ~/.murmuration/config.toml
+
+  murmuration agents [--root|--name] [--json] [--filter running|idle|failed]
+  murmuration groups [--root|--name] [--json]
+  murmuration events [--root|--name] [--json]
+  murmuration cost   [--root|--name] [--json]
 
 start options:
   --root <path>    Identity root directory (default: bundled hello-world example)
@@ -316,6 +322,137 @@ const main = async (): Promise<void> => {
     }
     case "init": {
       await runInit(argv[1]);
+      break;
+    }
+    case "agents": {
+      const { daemonRpc } = await import("./daemon-client.js");
+      const root = resolveRoot(argv.slice(1));
+      const jsonFlag = argv.includes("--json");
+      const status = (await daemonRpc(root, "status")) as {
+        agents: {
+          agentId: string;
+          state: string;
+          totalWakes: number;
+          totalArtifacts: number;
+          idleWakes: number;
+          consecutiveFailures: number;
+          groups: string[];
+        }[];
+      };
+      if (jsonFlag) {
+        process.stdout.write(JSON.stringify(status.agents, null, 2) + "\n");
+      } else {
+        const filterArg = argv.find((a) => a.startsWith("--filter"));
+        const filterVal = filterArg ? argv[argv.indexOf(filterArg) + 1] : undefined;
+        let agents = status.agents;
+        if (filterVal === "running" || filterVal === "idle" || filterVal === "failed") {
+          agents = agents.filter((a) => a.state === filterVal);
+        }
+        console.log(
+          "AGENT".padEnd(25) + " STATE".padEnd(10) + "  WAKES  ARTS  IDLE%  FAIL  GROUPS",
+        );
+        console.log("─".repeat(85));
+        for (const a of agents) {
+          const idle =
+            a.totalWakes > 0 ? `${String(Math.round((a.idleWakes / a.totalWakes) * 100))}%` : "—";
+          console.log(
+            `${a.agentId.padEnd(25)} ${a.state.padEnd(10)} ${String(a.totalWakes).padStart(6)}  ${String(a.totalArtifacts).padStart(4)}  ${idle.padStart(5)}  ${String(a.consecutiveFailures).padStart(4)}  ${a.groups.join(", ")}`,
+          );
+        }
+      }
+      break;
+    }
+    case "groups": {
+      const { daemonRpc } = await import("./daemon-client.js");
+      const root = resolveRoot(argv.slice(1));
+      const jsonFlag = argv.includes("--json");
+      const status = (await daemonRpc(root, "status")) as {
+        groups: {
+          groupId: string;
+          memberCount: number;
+          totalWakes: number;
+          totalArtifacts: number;
+          members: string[];
+        }[];
+      };
+      if (jsonFlag) {
+        process.stdout.write(JSON.stringify(status.groups, null, 2) + "\n");
+      } else {
+        console.log("GROUP".padEnd(20) + " MEMBERS  WAKES  ARTS  MEMBERS");
+        console.log("─".repeat(75));
+        for (const g of status.groups) {
+          console.log(
+            `${g.groupId.padEnd(20)} ${String(g.memberCount).padStart(7)}  ${String(g.totalWakes).padStart(5)}  ${String(g.totalArtifacts).padStart(4)}  ${g.members.join(", ")}`,
+          );
+        }
+      }
+      break;
+    }
+    case "events": {
+      const { daemonRpc } = await import("./daemon-client.js");
+      const root = resolveRoot(argv.slice(1));
+      const jsonFlag = argv.includes("--json");
+      const status = (await daemonRpc(root, "status")) as {
+        recentMeetings: {
+          groupId: string;
+          date: string;
+          kind: string;
+          minutesUrl?: string;
+          title?: string;
+          status: string;
+        }[];
+        inFlightMeetings: { groupId: string; kind: string; status: string }[];
+      };
+      if (jsonFlag) {
+        process.stdout.write(
+          JSON.stringify(
+            { recentMeetings: status.recentMeetings, inFlightMeetings: status.inFlightMeetings },
+            null,
+            2,
+          ) + "\n",
+        );
+      } else {
+        if (status.inFlightMeetings.length > 0) {
+          console.log("In-flight:");
+          for (const m of status.inFlightMeetings) {
+            console.log(`  ${m.groupId} ${m.kind} — ${m.status}`);
+          }
+        }
+        console.log("Recent meetings:");
+        for (const m of status.recentMeetings) {
+          console.log(
+            `  ${m.date}  ${m.groupId.padEnd(15)} ${m.kind.padEnd(14)} ${m.minutesUrl ?? ""}`,
+          );
+        }
+        if (status.recentMeetings.length === 0) {
+          console.log("  (none)");
+        }
+      }
+      break;
+    }
+    case "cost": {
+      const { daemonRpc } = await import("./daemon-client.js");
+      const root = resolveRoot(argv.slice(1));
+      const jsonFlag = argv.includes("--json");
+      const status = (await daemonRpc(root, "status")) as {
+        murmuration: { totalWakes: number; totalArtifacts: number };
+        agents: { agentId: string; totalWakes: number; totalArtifacts: number }[];
+      };
+      if (jsonFlag) {
+        process.stdout.write(JSON.stringify(status, null, 2) + "\n");
+      } else {
+        console.log(
+          `Total: ${String(status.murmuration.totalWakes)} wakes, ${String(status.murmuration.totalArtifacts)} artifacts\n`,
+        );
+        console.log("AGENT".padEnd(25) + "  WAKES  ARTIFACTS  ART/WAKE");
+        console.log("─".repeat(60));
+        for (const a of status.agents) {
+          const rate = a.totalWakes > 0 ? (a.totalArtifacts / a.totalWakes).toFixed(1) : "—";
+          console.log(
+            `${a.agentId.padEnd(25)} ${String(a.totalWakes).padStart(6)}  ${String(a.totalArtifacts).padStart(9)}  ${rate.padStart(8)}`,
+          );
+        }
+      }
       break;
     }
     case "backlog": {
