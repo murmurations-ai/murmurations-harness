@@ -157,4 +157,46 @@ describe("DaemonSocket", () => {
       socket.stop();
     }
   });
+
+  it("rejects non-string method (#86)", async () => {
+    const socketPath = makeSocketPath();
+    const socket = new DaemonSocket(socketPath, () => Promise.resolve({}));
+    socket.start();
+
+    try {
+      const client = await connectAndRead(socketPath);
+      client.write('{"id":"1","method":123}\n');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const resp = JSON.parse(client.lines[client.lines.length - 1] ?? "{}") as {
+        error?: string;
+      };
+      expect(resp.error).toBe("method must be a string");
+
+      client.close();
+    } finally {
+      socket.stop();
+    }
+  });
+
+  it("rejects non-object request (#86)", async () => {
+    const socketPath = makeSocketPath();
+    const socket = new DaemonSocket(socketPath, () => Promise.resolve({}));
+    socket.start();
+
+    try {
+      const client = await connectAndRead(socketPath);
+      client.write('"just a string"\n');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const resp = JSON.parse(client.lines[client.lines.length - 1] ?? "{}") as {
+        error?: string;
+      };
+      expect(resp.error).toBe("request must be an object");
+
+      client.close();
+    } finally {
+      socket.stop();
+    }
+  });
 });

@@ -276,4 +276,61 @@ describe("DaemonCommandExecutor", () => {
     expect(status.governance.totalItems).toBe(0);
     expect(status.governance.pending).toHaveLength(0);
   });
+
+  // -----------------------------------------------------------------------
+  // RPC query methods
+  // -----------------------------------------------------------------------
+
+  it("execute('agents.list') returns agent array", async () => {
+    const executor = makeExecutor();
+    const agents = (await executor.execute("agents.list", {})) as {
+      agentId: string;
+      groups: string[];
+    }[];
+
+    expect(agents).toHaveLength(3);
+    expect(agents[0]?.agentId).toBe("01-research");
+    expect(agents[0]?.groups).toContain("intelligence");
+  });
+
+  it("execute('groups.list') returns group array", async () => {
+    const executor = makeExecutor();
+    const groups = (await executor.execute("groups.list", {})) as {
+      groupId: string;
+      memberCount: number;
+    }[];
+
+    expect(groups).toHaveLength(2);
+    const content = groups.find((g) => g.groupId === "content");
+    expect(content?.memberCount).toBe(2);
+  });
+
+  it("execute('cost.summary') returns totals and per-agent", async () => {
+    const executor = makeExecutor();
+    const cost = (await executor.execute("cost.summary", {})) as {
+      totalWakes: number;
+      totalArtifacts: number;
+      agents: { agentId: string }[];
+    };
+
+    expect(cost.totalWakes).toBeGreaterThanOrEqual(0);
+    expect(cost.agents).toHaveLength(3);
+  });
+
+  // -----------------------------------------------------------------------
+  // Mutating flag enforcement (#84)
+  // -----------------------------------------------------------------------
+
+  it("execute rejects mutating methods when readOnly is true", async () => {
+    const executor = makeExecutor();
+    await expect(
+      executor.execute("directive", { message: "test" }, { readOnly: true }),
+    ).rejects.toThrow("mutating");
+  });
+
+  it("execute allows read-only methods when readOnly is true", async () => {
+    const executor = makeExecutor();
+    const agents = await executor.execute("agents.list", {}, { readOnly: true });
+    expect(Array.isArray(agents)).toBe(true);
+  });
 });

@@ -152,6 +152,45 @@ describe("ConversationStore", () => {
     // Token count should be recalculated
     expect(store.totalTokens).toBeLessThan(910); // less than original
   });
+
+  it("compact is a no-op when fewer messages than keepLastN", async () => {
+    const store = new ConversationStore(tmpDir);
+    await store.append({ role: "system", content: "soul", ts: "t0" });
+    await store.append({ role: "user", content: "signals", ts: "t1" });
+
+    await store.compact("should not apply", 10);
+
+    expect(store.messages).toHaveLength(2); // unchanged
+  });
+
+  it("load skips malformed JSONL lines", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    fs.writeFileSync(
+      path.join(tmpDir, "conversation.jsonl"),
+      '{"role":"system","content":"soul","ts":"t0"}\nNOT VALID JSON\n{"role":"user","content":"hello","ts":"t1"}\n',
+      "utf8",
+    );
+
+    const store = new ConversationStore(tmpDir);
+    expect(await store.load()).toBe(true);
+    expect(store.messages).toHaveLength(2); // skipped the bad line
+  });
+
+  it("token count recalculates exactly on compact", async () => {
+    const store = new ConversationStore(tmpDir);
+    await store.append({ role: "system", content: "soul", ts: "t0", tokenCount: 10 });
+    await store.append({ role: "user", content: "old", ts: "t1", tokenCount: 100 });
+    await store.append({ role: "assistant", content: "old reply", ts: "t2", tokenCount: 200 });
+    await store.append({ role: "user", content: "new", ts: "t3", tokenCount: 50 });
+    await store.append({ role: "assistant", content: "new reply", ts: "t4", tokenCount: 80 });
+
+    await store.compact("summary", 2);
+
+    // system(10) + compaction(~7/4≈2) + new(50) + new reply(80) = ~142
+    const compactionTokens = store.messages.find((m) => m.role === "compaction")?.tokenCount ?? 0;
+    expect(store.totalTokens).toBe(10 + compactionTokens + 50 + 80);
+  });
 });
 
 describe("parsePersistentConfig", () => {

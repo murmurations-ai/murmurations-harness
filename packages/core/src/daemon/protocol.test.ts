@@ -51,13 +51,18 @@ describe("protocol.ts", () => {
     expect(getMethod("nonexistent")).toBeUndefined();
   });
 
-  it("shipped batch methods include status, directive, stop", () => {
+  it("shipped batch methods include core + query methods", () => {
     const names = shippedBatchMethods().map((m) => m.name);
     expect(names).toContain("status");
     expect(names).toContain("directive");
     expect(names).toContain("stop");
     expect(names).toContain("wake-now");
     expect(names).toContain("group-wake");
+    // v0.3.0 additions
+    expect(names).toContain("agents.list");
+    expect(names).toContain("groups.list");
+    expect(names).toContain("events.history");
+    expect(names).toContain("cost.summary");
   });
 
   it("shipped REPL methods include status, directive", () => {
