@@ -574,7 +574,8 @@ main()
     // keeps the process alive (it IS the daemon). All other commands
     // fall through here and need an explicit exit because dynamic
     // imports may leave the event loop open.
-    if (command !== "start") process.exit(0);
+    // start = daemon (stays alive), attach = REPL (stays alive until user quits)
+    if (command !== "start" && command !== "attach") process.exit(0);
   })
   .catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
