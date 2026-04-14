@@ -55,5 +55,38 @@ describe("dashboard.html", () => {
     expect(html).toContain("addEventListener('meeting.started'");
     expect(html).toContain("addEventListener('meeting.completed'");
     expect(html).toContain("addEventListener('governance.transitioned'");
+    expect(html).toContain("addEventListener('log.entry'");
+  });
+
+  it("has agent sort and filter controls", () => {
+    expect(html).toContain('id="agent-sort"');
+    expect(html).toContain('id="agent-filter"');
+    expect(html).toContain("sessionStorage.setItem('agentSort'");
+    expect(html).toContain("sessionStorage.setItem('agentFilter'");
+  });
+
+  it("has log viewer with level filter buttons", () => {
+    expect(html).toContain('id="log-viewer"');
+    expect(html).toContain('id="log-level-btns"');
+    expect(html).toContain("function setLogFilter(");
+    expect(html).toContain("function renderLog(");
+  });
+
+  it("has convene governance modal with group picker", () => {
+    expect(html).toContain('id="convene-gov-modal"');
+    expect(html).toContain('id="convene-gov-group"');
+    expect(html).toContain("function confirmConveneGovernance(");
+  });
+
+  it("linkify regex is valid (no template literal artifacts)", () => {
+    const scriptMatch = /<script>([\s\S]*?)<\/script>/.exec(html);
+    const script = scriptMatch?.[1] ?? "";
+    // Extract the regex from the linkify function
+    const linkifyMatch = /function linkify\(text\)\s*\{[^}]*replace\(([^,]+),/.exec(script);
+    expect(linkifyMatch).toBeTruthy();
+    // The regex should compile without errors
+    const regexStr = linkifyMatch?.[1]?.trim() ?? "";
+    expect(regexStr).toContain("https?");
+    expect(regexStr).not.toContain("\\\\"); // no double-backslash artifacts
   });
 });
