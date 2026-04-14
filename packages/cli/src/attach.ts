@@ -268,91 +268,76 @@ const handleCommand = async (
       return; // don't prompt — runAttach takes over
     }
   } else if (verb === "agents") {
-    const resp = await send("status");
+    const { formatAgentsTable } = await import("./formatters.js");
+    const resp = await send("agents.list");
     if (resp.error) {
       console.log(`Error: ${resp.error}`);
     } else {
-      const r = resp.result as {
-        agents: {
-          agentId: string;
-          state: string;
-          totalWakes: number;
-          totalArtifacts: number;
-          idleWakes: number;
-          consecutiveFailures: number;
-          groups: string[];
-        }[];
-      };
+      const agents = resp.result as {
+        agentId: string;
+        state: string;
+        totalWakes: number;
+        totalArtifacts: number;
+        idleWakes: number;
+        consecutiveFailures: number;
+        groups: string[];
+      }[];
       const filterVal = parts[1];
-      let agents = r.agents;
-      if (filterVal === "running" || filterVal === "idle" || filterVal === "failed") {
-        agents = agents.filter((a) => a.state === filterVal);
-      }
-      for (const a of agents) {
-        const idle =
-          a.totalWakes > 0 ? `${String(Math.round((a.idleWakes / a.totalWakes) * 100))}%` : "—";
-        console.log(
-          `  ${a.agentId.padEnd(25)} ${a.state.padEnd(10)} ${String(a.totalWakes).padStart(3)}w ${String(a.totalArtifacts).padStart(3)}a ${idle.padStart(4)} idle  ${a.groups.join(", ")}`,
-        );
-      }
+      const filtered =
+        filterVal === "running" || filterVal === "idle" || filterVal === "failed"
+          ? agents.filter((a) => a.state === filterVal)
+          : agents;
+      console.log(formatAgentsTable(filtered));
     }
   } else if (verb === "groups") {
-    const resp = await send("status");
+    const { formatGroupsTable } = await import("./formatters.js");
+    const resp = await send("groups.list");
     if (resp.error) {
       console.log(`Error: ${resp.error}`);
     } else {
-      const r = resp.result as {
-        groups: {
-          groupId: string;
-          memberCount: number;
-          totalWakes: number;
-          totalArtifacts: number;
-          members: string[];
-        }[];
-      };
-      for (const g of r.groups) {
-        console.log(
-          `  ${g.groupId.padEnd(20)} ${String(g.memberCount)} members  ${String(g.totalWakes)}w ${String(g.totalArtifacts)}a  ${g.members.join(", ")}`,
-        );
-      }
+      console.log(
+        formatGroupsTable(
+          resp.result as {
+            groupId: string;
+            memberCount: number;
+            totalWakes: number;
+            totalArtifacts: number;
+            members: string[];
+          }[],
+        ),
+      );
     }
   } else if (verb === "events") {
-    const resp = await send("status");
+    const { formatEventsTable } = await import("./formatters.js");
+    const resp = await send("events.history");
     if (resp.error) {
       console.log(`Error: ${resp.error}`);
     } else {
-      const r = resp.result as {
-        recentMeetings: { date: string; groupId: string; kind: string; minutesUrl?: string }[];
-        inFlightMeetings: { groupId: string; kind: string }[];
-      };
-      if (r.inFlightMeetings.length > 0) {
-        for (const m of r.inFlightMeetings) console.log(`  [running] ${m.groupId} ${m.kind}`);
-      }
-      for (const m of r.recentMeetings) {
-        console.log(
-          `  ${m.date}  ${m.groupId.padEnd(15)} ${m.kind.padEnd(14)} ${m.minutesUrl ?? ""}`,
-        );
-      }
-      if (r.recentMeetings.length === 0 && r.inFlightMeetings.length === 0) console.log("  (none)");
+      console.log(
+        formatEventsTable(
+          resp.result as {
+            groupId: string;
+            date: string;
+            kind: string;
+            minutesUrl?: string;
+            status: string;
+          }[],
+          [],
+        ),
+      );
     }
   } else if (verb === "cost") {
-    const resp = await send("status");
+    const { formatCostTable } = await import("./formatters.js");
+    const resp = await send("cost.summary");
     if (resp.error) {
       console.log(`Error: ${resp.error}`);
     } else {
       const r = resp.result as {
-        murmuration: { totalWakes: number; totalArtifacts: number };
+        totalWakes: number;
+        totalArtifacts: number;
         agents: { agentId: string; totalWakes: number; totalArtifacts: number }[];
       };
-      console.log(
-        `  Total: ${String(r.murmuration.totalWakes)} wakes, ${String(r.murmuration.totalArtifacts)} artifacts`,
-      );
-      for (const a of r.agents.filter((x) => x.totalWakes > 0)) {
-        const rate = (a.totalArtifacts / a.totalWakes).toFixed(1);
-        console.log(
-          `  ${a.agentId.padEnd(25)} ${String(a.totalWakes).padStart(3)}w ${String(a.totalArtifacts).padStart(3)}a  ${rate} art/wake`,
-        );
-      }
+      console.log(formatCostTable(r.totalWakes, r.totalArtifacts, r.agents));
     }
   } else if (verb === "edit") {
     const agentId = parts[1];

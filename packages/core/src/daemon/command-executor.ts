@@ -132,6 +132,15 @@ export class DaemonCommandExecutor {
       case "stop":
         process.kill(process.pid, "SIGTERM");
         return { stopping: true };
+      // Read-only query methods
+      case "agents.list":
+        return this.#agentsList();
+      case "groups.list":
+        return this.#groupsList();
+      case "events.history":
+        return this.#eventsHistory();
+      case "cost.summary":
+        return this.#costSummary();
       default:
         throw new Error(`unknown command: ${method}`);
     }
@@ -455,6 +464,77 @@ export class DaemonCommandExecutor {
     } catch {
       // Keep stale cache on error
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Query methods (dedicated RPC handlers, not slicing status blob)
+  // -----------------------------------------------------------------------
+
+  async #agentsList(): Promise<unknown> {
+    await this.#deps.agentStateStore.load().catch(() => {
+      /* best effort */
+    });
+    return this.#deps.agentStateStore.getAllAgents().map((a) => {
+      const reg = this.#deps.allRegistered.find((r) => r.agentId === a.agentId);
+      return {
+        agentId: a.agentId,
+        state: a.currentState,
+        totalWakes: a.totalWakes,
+        totalArtifacts: a.totalArtifacts,
+        idleWakes: a.idleWakes,
+        consecutiveFailures: a.consecutiveFailures,
+        groups: reg?.groupMemberships ?? [],
+      };
+    });
+  }
+
+  #groupsList(): unknown {
+    const { allRegistered, agentStateStore } = this.#deps;
+    const groupMap = new Map<
+      string,
+      { agentId: string; totalWakes: number; totalArtifacts: number; idleWakes: number }[]
+    >();
+    for (const reg of allRegistered) {
+      for (const g of reg.groupMemberships) {
+        const a = agentStateStore.getAgent(reg.agentId);
+        const list = groupMap.get(g) ?? [];
+        list.push({
+          agentId: reg.agentId,
+          totalWakes: a?.totalWakes ?? 0,
+          totalArtifacts: a?.totalArtifacts ?? 0,
+          idleWakes: a?.idleWakes ?? 0,
+        });
+        groupMap.set(g, list);
+      }
+    }
+    return [...groupMap.entries()].map(([groupId, members]) => ({
+      groupId,
+      memberCount: members.length,
+      totalWakes: members.reduce((s, m) => s + m.totalWakes, 0),
+      totalArtifacts: members.reduce((s, m) => s + m.totalArtifacts, 0),
+      idleWakes: members.reduce((s, m) => s + m.idleWakes, 0),
+      members: members.map((m) => m.agentId),
+    }));
+  }
+
+  async #eventsHistory(): Promise<unknown> {
+    return this.#loadRecentMeetings();
+  }
+
+  #costSummary(): unknown {
+    const agents = this.#deps.agentStateStore.getAllAgents();
+    const totalWakes = agents.reduce((s, a) => s + a.totalWakes, 0);
+    const totalArtifacts = agents.reduce((s, a) => s + a.totalArtifacts, 0);
+    return {
+      totalWakes,
+      totalArtifacts,
+      agents: agents.map((a) => ({
+        agentId: a.agentId,
+        totalWakes: a.totalWakes,
+        totalArtifacts: a.totalArtifacts,
+        artifactRate: a.totalWakes > 0 ? a.totalArtifacts / a.totalWakes : 0,
+      })),
+    };
   }
 
   // -----------------------------------------------------------------------
