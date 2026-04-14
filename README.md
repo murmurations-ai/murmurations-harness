@@ -20,18 +20,28 @@ The Murmuration Harness runs any number of AI agents as a coordinated "murmurati
 ## Quick start
 
 ```bash
-# Prerequisites: Node 20+, pnpm 9+
+# Coming soon (Phase 7 — npm publish):
+npm install -g @murmuration/cli
+murmuration init my-murmuration
+murmuration start --name my-murmuration
+```
 
-# Clone and build
+Until then, install from source:
+
+```bash
+# Prerequisites: Node 20+, pnpm 9+
 git clone https://github.com/murmurations-ai/murmurations-harness.git
 cd murmurations-harness
 pnpm install && pnpm build
 
+# Alias for convenience (add to your shell profile)
+alias murmuration="node $(pwd)/packages/cli/dist/bin.js"
+
 # Create a new murmuration
-node packages/cli/dist/bin.js init ../my-murmuration
+murmuration init ../my-murmuration
 
 # Edit .env with your API keys, then:
-node packages/cli/dist/bin.js start --root ../my-murmuration
+murmuration start --root ../my-murmuration
 ```
 
 See [docs/GETTING-STARTED.md](./docs/GETTING-STARTED.md) for the full walkthrough.
