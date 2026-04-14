@@ -301,7 +301,7 @@ const main = async (): Promise<void> => {
         for (const m of PROTOCOL_METHODS) {
           const s = m.surfaces;
           const mark = (v: string): string =>
-            v === "shipped" ? "yes  " : v === "planned" ? "---  " : "no   ";
+            v === "shipped" ? "yes  " : v === "planned" ? "tbd  " : "no   ";
           process.stdout.write(
             `${m.name.padEnd(20)}${(m.mutating ? "yes" : "no").padEnd(6)}${mark(s.cliBatch)}${mark(s.cliRepl)}${mark(s.tuiDash)}${mark(s.webDash)}${m.summary}\n`,
           );
