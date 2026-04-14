@@ -1,0 +1,46 @@
+#!/usr/bin/env sh
+#
+# Pre-commit hook — auto-format staged files with Prettier.
+#
+# Why this exists
+# ---------------
+# CI's `format:check` step has failed multiple times on commits that landed
+# without a Prettier pass. See docs/LINT-DESIGN-GUIDE.md §14. This hook
+# removes the foot-gun: any staged file Prettier handles is auto-formatted
+# in place and re-staged before the commit completes. The commit message,
+# author, and content are otherwise untouched.
+#
+# Bypass (don't, unless you really mean it):
+#   git commit --no-verify
+#
+# Manual install (the prepare script in package.json does this automatically
+# on `pnpm install`):
+#   git config core.hooksPath .githooks
+#
+
+set -e
+
+# Collect staged files matching Prettier-handled extensions.
+# Filter mode ACMR: Added, Copied, Modified, Renamed (skip Deleted).
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(ts|tsx|js|jsx|mjs|cjs|json|md|yml|yaml)$' || true)
+
+if [ -z "$STAGED_FILES" ]; then
+  exit 0
+fi
+
+# Resolve a working `prettier` binary. Prefer the locally-installed one
+# via `pnpm exec` so the version matches the workspace.
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "pre-commit: pnpm not found in PATH; skipping format pass" >&2
+  exit 0
+fi
+
+# Format the staged files in place. `--ignore-unknown` drops anything
+# Prettier doesn't recognize. `--log-level warn` keeps the output quiet
+# unless something interesting happens.
+echo "$STAGED_FILES" | xargs pnpm exec prettier --write --ignore-unknown --log-level warn
+
+# Re-stage the (possibly reformatted) files so the commit picks them up.
+echo "$STAGED_FILES" | xargs git add
+
+exit 0
