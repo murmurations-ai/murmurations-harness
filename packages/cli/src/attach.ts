@@ -37,11 +37,26 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     process.exit(1);
   }
 
+  // Load user config
+  const { loadConfig } = await import("./config.js");
+  const config = loadConfig();
+  const prompt = config.ui.prompt.replace("{name}", name);
+
+  // Use terminal:false to prevent double-echo caused by Unix socket +
+  // readline raw mode conflict. Tab completion deferred to v0.3 (needs
+  // a custom raw-mode input handler that doesn't conflict with sockets).
+  let agentIds: readonly string[] = [];
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: false,
+  });
+
+  // NOW connect the socket (after readline owns stdin)
   const conn = createConnection(socketPath);
   let requestId = 0;
   const pending = new Map<string, (resp: SocketResponse) => void>();
 
-  // Parse incoming lines (responses + broadcast events)
   let buffer = "";
   conn.on("data", (chunk: Buffer) => {
     buffer += chunk.toString("utf8");
@@ -82,7 +97,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     });
   };
 
-  // Initial status
+  // Fetch initial status (socket is connected, readline already owns stdin)
   const status = await send("status");
   const statusResult = status.result as
     | {
@@ -98,22 +113,10 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   console.log(
     `[${name}] murmuration v${statusResult?.version ?? "?"} (schema ${String(schemaVersion)}) — ${String(statusResult?.agentCount ?? "?")} agents, PID ${String(statusResult?.pid ?? "?")}`,
   );
-
-  // Load user config
-  const { loadConfig } = await import("./config.js");
-  const config = loadConfig();
-  const prompt = config.ui.prompt.replace("{name}", name);
-
-  // Leader key support deferred to v0.3 — requires raw mode management
-  // that conflicts with readline. For now, use :commands directly.
-
   console.log("Type :help for commands. Ctrl-C to detach.\n");
 
-  // Cache agent lists for :edit validation
-  const agentIds = statusResult?.agents.map((a) => a.agentId) ?? [];
-
-  // REPL — use simple readline (no completer to avoid double-echo in some terminals)
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  // Cache agent lists for :edit validation and tab completion
+  agentIds = statusResult?.agents.map((a) => a.agentId) ?? [];
   rl.setPrompt(prompt);
   rl.prompt();
 
@@ -434,5 +437,6 @@ const printEvent = (evt: SocketEvent): void => {
     default:
       summary = JSON.stringify(evt.data).slice(0, 80);
   }
-  console.log(`  [${ts}] ${evt.event}: ${summary}`);
+  // Write to stderr to avoid interfering with readline's stdout management
+  process.stderr.write(`  [${ts}] ${evt.event}: ${summary}\n`);
 };
