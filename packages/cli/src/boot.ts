@@ -22,7 +22,7 @@
 
 import { existsSync, unlinkSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
@@ -1193,6 +1193,37 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
           },
         }
       : {}),
+    // Inject CLI command handlers (keeps core free of CLI imports)
+    onDirective: async (args, rootDir) => {
+      const { runDirective } = await import("./directive.js");
+      await runDirective(args, rootDir);
+    },
+    onGroupWake: async (args, rootDir) => {
+      const { runGroupWakeCommand } = await import("./group-wake.js");
+      return runGroupWakeCommand(args, rootDir);
+    },
+    onWakeNow: async (rootDir, agentId) => {
+      const { spawn: cpSpawn } = await import("node:child_process");
+      const { openSync: openF } = await import("node:fs");
+      const binPath = resolve(dirname(import.meta.url.replace("file://", "")), "bin.js");
+      const logPath = join(rootDir, ".murmuration", `wake-${agentId}.log`);
+      const child = cpSpawn(
+        process.execPath,
+        [binPath, "start", "--root", rootDir, "--agent", agentId, "--now"],
+        { detached: true, stdio: ["ignore", openF(logPath, "a"), openF(logPath, "a")] },
+      );
+      child.on("exit", (code) => {
+        eventBus.emit({
+          kind: "wake.completed",
+          agentId,
+          wakeId: `now-${agentId}`,
+          outcome: code === 0 ? "completed" : "failed",
+          artifactCount: 0,
+        });
+      });
+      child.unref();
+      return { pid: child.pid ?? 0 };
+    },
   });
 
   // readGovernanceStatus, buildStatus, agentDetailHandler, groupDetailHandler,
