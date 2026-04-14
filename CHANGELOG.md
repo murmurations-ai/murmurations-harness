@@ -3,6 +3,38 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.0] - 2026-04-14
+
+### Added
+
+- **Protocol registry** (`protocol.ts`) — single source of truth for all 17 RPC methods with parity matrix, mutating flags, and surface status
+- **Schema versioning** — `schemaVersion` field in status responses for client/daemon version mismatch detection
+- **Batch CLI verbs** — `murmuration agents`, `groups`, `events`, `cost` with `--json` and `--filter` flags
+- **Daemon RPC client** (`daemon-client.ts`) — Unix socket client for batch verbs with proper timeout cleanup
+- **Config system** — `~/.murmuration/config.toml` with leader key, prompt format, keybindings, aliases
+- **REPL `:` prefix** — all commands support `:command` syntax (bare verbs as backward-compatible fallback)
+- **Leader-key state machine** — `Ctrl-a` + keystroke for fast operator actions (configurable)
+- **New REPL commands** — `:agents`, `:groups`, `:events`, `:cost`, `:edit`, `:open`
+- **Tab completion** — commands, agent IDs, group IDs, filter values
+- **Generated help** — `murmuration help protocol` shows the parity matrix; REPL `:help` shows shipped methods
+- **`murmuration config`** — show, edit, or find config path
+
+### Changed
+
+- npm scope renamed from `@murmuration` to `@murmurations-ai`
+
+### Security
+
+- HTTP server binds to `127.0.0.1` only (was all interfaces)
+- CORS restricted to `localhost:port` (was wildcard `*`)
+- POST body limited to 64KB (was unbounded)
+- Socket buffer limited to 1MB per client (was unbounded)
+- `:open` uses `execFile` instead of `exec` (prevents command injection)
+- `:edit` validates agentId against known list (prevents path traversal)
+- Config parse errors logged instead of silently swallowed
+
+[0.2.0]: https://github.com/murmurations-ai/murmurations-harness/compare/v0.1.0...v0.2.0
+
 ## [0.1.0] - 2026-04-14
 
 ### Added
