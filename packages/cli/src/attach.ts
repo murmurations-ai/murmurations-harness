@@ -42,14 +42,39 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   const config = loadConfig();
   const prompt = config.ui.prompt.replace("{name}", name);
 
-  // Use terminal:false to prevent double-echo caused by Unix socket +
-  // readline raw mode conflict. Tab completion deferred to v0.3 (needs
-  // a custom raw-mode input handler that doesn't conflict with sockets).
   let agentIds: readonly string[] = [];
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
-    terminal: false,
+    terminal: true,
+    completer: (line: string): [string[], string] => {
+      const parts = line.split(/\s+/);
+      const cmd = parts[0] ?? "";
+      if (parts.length <= 1) {
+        const commands = [
+          ":status",
+          ":agents",
+          ":groups",
+          ":events",
+          ":cost",
+          ":directive",
+          ":wake",
+          ":convene",
+          ":edit",
+          ":open",
+          ":switch",
+          ":stop",
+          ":quit",
+          ":help",
+        ];
+        return [commands.filter((c) => c.startsWith(cmd)), line];
+      }
+      if (cmd === ":wake" || cmd === ":edit") {
+        const partial = parts[1] ?? "";
+        return [agentIds.filter((a) => a.startsWith(partial)), partial];
+      }
+      return [[], line];
+    },
   });
 
   // NOW connect the socket (after readline owns stdin)

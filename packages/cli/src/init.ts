@@ -24,12 +24,18 @@
 import { existsSync } from "node:fs";
 import { mkdir, writeFile, chmod } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createInterface } from "node:readline";
+import { createInterface, type Interface } from "node:readline";
 
-const rl = createInterface({ input: process.stdin, output: process.stdout });
+// DO NOT create readline at module scope — it grabs stdin and corrupts
+// terminal mode for other commands (e.g., attach REPL double echo).
+let rl: Interface | null = null;
+const getRL = (): Interface => {
+  rl ??= createInterface({ input: process.stdin, output: process.stdout });
+  return rl;
+};
 const ask = (question: string): Promise<string> =>
   new Promise((r) => {
-    rl.question(question, r);
+    getRL().question(question, r);
   });
 
 // ---------------------------------------------------------------------------
@@ -89,7 +95,7 @@ export const runInit = async (targetArg?: string): Promise<void> => {
     const existing = await ask(`${targetDir} already exists. Continue? (y/N): `);
     if (existing.trim().toLowerCase() !== "y") {
       console.log("Aborted.");
-      rl.close();
+      rl?.close();
       return;
     }
   }
@@ -124,7 +130,7 @@ export const runInit = async (targetArg?: string): Promise<void> => {
   );
   const governance = govInput.trim().toLowerCase() || "none";
 
-  rl.close();
+  rl?.close();
 
   // -------------------------------------------------------------------
   // Write the files
