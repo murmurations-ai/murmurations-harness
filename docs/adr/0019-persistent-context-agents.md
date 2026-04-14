@@ -39,24 +39,28 @@ When `mode` is omitted, the default is `"stateless"` — no change to existing b
 A persistent-context agent operates as follows:
 
 **First wake (cold start):**
+
 1. Identity chain (soul + role) becomes the system prompt — same as stateless
 2. Initial signals become the first user message
 3. LLM responds with artifacts + reasoning
 4. The full conversation (system prompt + user turn + assistant turn) is persisted to `.murmuration/runs/<agent>/conversation.jsonl`
 
 **Subsequent wakes (warm start):**
+
 1. Load the persisted conversation history
 2. Append a new user turn containing only **new/changed signals** since last wake (not the full signal bundle — deltas only)
 3. LLM responds with artifacts + reasoning, building on prior context
 4. Updated conversation is persisted
 
 **Context compaction (approaching limit):**
+
 1. When total token count exceeds `summarize_at`, trigger compaction
 2. Compaction summarizes older conversation turns into a compressed form that preserves: key decisions made, file paths referenced, governance items discussed, action items created, current working state
 3. The summary replaces the older turns, freeing context space
 4. A compaction marker is written to the conversation log for auditability
 
 **Context reset (manual or governance-triggered):**
+
 1. Source or a governance decision can reset an agent's context: `murmuration reset-context --agent <id>`
 2. The old conversation is archived to `.murmuration/runs/<agent>/conversation-<timestamp>.jsonl`
 3. Next wake starts cold
@@ -84,9 +88,9 @@ class PersistentContextExecutor implements AgentExecutor {
   // Calls LLM with full conversation
   // Persists updated conversation
   // Returns AgentResult (same interface as stateless)
-  
-  async spawn(context: AgentSpawnContext): Promise<AgentSpawnHandle>
-  async waitForCompletion(handle: AgentSpawnHandle): Promise<AgentResult>
+
+  async spawn(context: AgentSpawnContext): Promise<AgentSpawnHandle>;
+  async waitForCompletion(handle: AgentSpawnHandle): Promise<AgentResult>;
 }
 ```
 
@@ -122,16 +126,16 @@ Each line carries `tokenCount` so the executor can track cumulative context size
 
 Guidelines for operators:
 
-| Agent type | Recommended mode | Why |
-|---|---|---|
-| **Coordinator** (Wren) | Persistent | Tracks cross-agent dependencies, evolving priorities, meeting threads |
-| **Research** | Persistent | Builds mental models of the domain, tracks signal evolution |
-| **Editorial** | Persistent | Maintains voice consistency, remembers style decisions |
-| **Analytics** | Persistent | Tracks metric trends, remembers baselines |
-| **Publishing** | Stateless | Runs a checklist — no memory needed |
-| **QA** | Stateless | Evaluates each artifact independently |
-| **Design** | Stateless | Produces visual output from brief — no carry-over |
-| **CFO** | Persistent | Tracks budget burn, cost trends |
+| Agent type             | Recommended mode | Why                                                                   |
+| ---------------------- | ---------------- | --------------------------------------------------------------------- |
+| **Coordinator** (Wren) | Persistent       | Tracks cross-agent dependencies, evolving priorities, meeting threads |
+| **Research**           | Persistent       | Builds mental models of the domain, tracks signal evolution           |
+| **Editorial**          | Persistent       | Maintains voice consistency, remembers style decisions                |
+| **Analytics**          | Persistent       | Tracks metric trends, remembers baselines                             |
+| **Publishing**         | Stateless        | Runs a checklist — no memory needed                                   |
+| **QA**                 | Stateless        | Evaluates each artifact independently                                 |
+| **Design**             | Stateless        | Produces visual output from brief — no carry-over                     |
+| **CFO**                | Persistent       | Tracks budget burn, cost trends                                       |
 
 ### §7 — Cost implications
 
@@ -151,6 +155,7 @@ This is important: persistent context is an executor concern, not a daemon conce
 ## Consequences
 
 ### Positive
+
 - Agents that need accumulated understanding get it without architectural changes to the daemon
 - Per-agent opt-in — operators choose which agents benefit from persistence
 - Conversation history is auditable (JSONL on disk, same pattern as existing run artifacts)
@@ -158,12 +163,14 @@ This is important: persistent context is an executor concern, not a daemon conce
 - The existing AgentExecutor interface is unchanged — PersistentContextExecutor is a new implementation, not a modification
 
 ### Negative
+
 - Higher LLM costs for persistent agents (mitigated by budget ceilings)
 - Context compaction is lossy — important details may be summarized away (mitigated by keeping compaction summaries rich)
 - Debugging is harder — agent behavior depends on conversation history, not just current signals (mitigated by JSONL audit trail)
 - New failure mode: corrupted conversation file (mitigated by cold-start fallback)
 
 ### Neutral
+
 - Stateless agents are unaffected — this is purely additive
 - The LLM client interface already supports multi-turn — no changes needed
 
