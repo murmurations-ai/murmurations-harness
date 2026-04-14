@@ -109,61 +109,11 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
   console.log("Type :help for commands. Ctrl-C to detach.\n");
 
-  // Cache agent/group lists for tab completion
+  // Cache agent lists for :edit validation
   const agentIds = statusResult?.agents.map((a) => a.agentId) ?? [];
-  const groupIds = statusResult?.groups.map((g) => g.groupId) ?? [];
 
-  // REPL
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    completer: (line: string) => {
-      const parts = line.split(/\s+/);
-      const cmd = parts[0] ?? "";
-      if (parts.length <= 1) {
-        const commands = [
-          ":status",
-          ":agents",
-          ":groups",
-          ":events",
-          ":cost",
-          ":directive",
-          ":wake",
-          ":convene",
-          ":edit",
-          ":open",
-          ":switch",
-          ":stop",
-          ":quit",
-          ":help",
-          // Bare fallbacks
-          "status",
-          "directive",
-          "wake",
-          "convene",
-          "switch",
-          "stop",
-          "quit",
-          "help",
-        ];
-        return [commands.filter((c) => c.startsWith(cmd)), line];
-      }
-      if (cmd === "wake" || cmd === ":wake" || cmd === "edit" || cmd === ":edit") {
-        const partial = parts[1] ?? "";
-        return [agentIds.filter((a) => a.startsWith(partial)), partial];
-      }
-      if (cmd === "convene" || cmd === ":convene") {
-        const partial = parts[1] ?? "";
-        return [groupIds.filter((g) => g.startsWith(partial)), partial];
-      }
-      if (cmd === "agents" || cmd === ":agents") {
-        const partial = parts[1] ?? "";
-        const filters = ["running", "idle", "failed"];
-        return [filters.filter((f) => f.startsWith(partial)), partial];
-      }
-      return [[], line];
-    },
-  });
+  // REPL — use simple readline (no completer to avoid double-echo in some terminals)
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
   rl.setPrompt(prompt);
   rl.prompt();
 
