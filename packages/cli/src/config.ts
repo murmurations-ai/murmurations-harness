@@ -143,7 +143,10 @@ export const loadConfig = (): MurmurationConfig => {
         pinned: Array.isArray(sessions.pinned) ? sessions.pinned : DEFAULT_CONFIG.sessions.pinned,
       },
     };
-  } catch {
+  } catch (err: unknown) {
+    process.stderr.write(
+      `Warning: failed to parse ${CONFIG_PATH}: ${err instanceof Error ? err.message : String(err)}, using defaults\n`,
+    );
     return DEFAULT_CONFIG;
   }
 };

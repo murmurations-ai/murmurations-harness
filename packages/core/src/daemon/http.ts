@@ -66,7 +66,7 @@ export class DaemonHttp {
     this.#server = createServer((req, res) => {
       void this.#handleRequest(req, res);
     });
-    this.#server.listen(this.#port);
+    this.#server.listen(this.#port, "127.0.0.1");
   }
 
   public stop(): void {
@@ -94,7 +94,7 @@ export class DaemonHttp {
 
   async #handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // CORS headers for local development
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Origin", `http://localhost:${String(this.#port)}`);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
@@ -171,11 +171,20 @@ export class DaemonHttp {
     }
 
     if (url === "/api/command" && req.method === "POST") {
+      const MAX_BODY = 65536; // 64KB limit
       let body = "";
+      let oversized = false;
       req.on("data", (chunk: Buffer) => {
         body += chunk.toString("utf8");
+        if (body.length > MAX_BODY && !oversized) {
+          oversized = true;
+          res.writeHead(413, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "request body too large" }));
+          req.destroy();
+        }
       });
       req.on("end", () => {
+        if (oversized) return;
         try {
           const parsed = JSON.parse(body) as { method: string; params?: Record<string, unknown> };
           if (this.#commandHandler) {

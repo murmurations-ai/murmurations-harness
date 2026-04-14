@@ -39,6 +39,18 @@ export const daemonRpc = async (
       conn.write(msg);
     });
 
+    // Timeout after 5 seconds — cleared on success/error
+    const timer = setTimeout(() => {
+      conn.destroy();
+      reject(new Error("Daemon did not respond within 5 seconds"));
+    }, 5000);
+
+    const settle = (fn: () => void): void => {
+      clearTimeout(timer);
+      conn.destroy();
+      fn();
+    };
+
     let buffer = "";
     conn.on("data", (chunk: Buffer) => {
       buffer += chunk.toString("utf8");
@@ -49,11 +61,10 @@ export const daemonRpc = async (
         try {
           const msg = JSON.parse(line) as SocketResponse;
           if (msg.id === "rpc-1") {
-            conn.destroy();
             if (msg.error) {
-              reject(new Error(msg.error));
+              settle(() => reject(new Error(msg.error)));
             } else {
-              resolvePromise(msg.result);
+              settle(() => resolvePromise(msg.result));
             }
           }
         } catch {
@@ -63,13 +74,7 @@ export const daemonRpc = async (
     });
 
     conn.on("error", (err) => {
-      reject(new Error(`Daemon connection failed: ${err.message}`));
+      settle(() => reject(new Error(`Daemon connection failed: ${err.message}`)));
     });
-
-    // Timeout after 5 seconds
-    setTimeout(() => {
-      conn.destroy();
-      reject(new Error("Daemon did not respond within 5 seconds"));
-    }, 5000);
   });
 };

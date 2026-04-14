@@ -78,9 +78,14 @@ export class DaemonSocket {
       }
 
       let buffer = "";
+      const MAX_BUFFER = 1_048_576; // 1MB limit
 
       client.on("data", (chunk: Buffer) => {
         buffer += chunk.toString("utf8");
+        if (buffer.length > MAX_BUFFER) {
+          client.destroy();
+          return;
+        }
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
         for (const line of lines) {
