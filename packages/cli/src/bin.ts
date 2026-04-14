@@ -570,8 +570,16 @@ const main = async (): Promise<void> => {
   }
 };
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`murmuration: fatal: ${message}\n`);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    // Non-daemon commands should exit cleanly. The `start` command
+    // keeps the process alive (it IS the daemon). All other commands
+    // fall through here and need an explicit exit because dynamic
+    // imports may leave the event loop open.
+    if (command !== "start") process.exit(0);
+  })
+  .catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`murmuration: fatal: ${message}\n`);
+    process.exit(1);
+  });
