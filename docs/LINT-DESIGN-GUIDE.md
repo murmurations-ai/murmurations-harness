@@ -401,11 +401,25 @@ Our config sets `no-non-null-assertion` to `warn` (not `error`). That means `foo
 
 ---
 
-## 14. Prettier drift
+## 14. Prettier drift — and the pre-commit hook that prevents it
 
-Every time a batch of Phase 2 commits lands, `format:check` accumulates drift. **Always run `pnpm run format` before committing any batch of changes**, even if you think you didn't touch the files Prettier wants to reformat — Prettier often has opinions about files that were edited by other commits.
+Every time a batch of commits lands, `format:check` accumulates drift. **Always run `pnpm run format` before committing any batch of changes**, even if you think you didn't touch the files Prettier wants to reformat — Prettier often has opinions about files that were edited by other commits.
 
 If you see 10+ files in `format:check` failures, run `pnpm run format` and commit the result as a separate "format pass" commit or combined into the current fix.
+
+### Pre-commit hook (active by default)
+
+The repo ships a Git pre-commit hook at `.githooks/pre-commit` that auto-formats any staged file Prettier handles, then re-stages it before the commit completes. The hook is wired in via `package.json`'s `prepare` script, which runs `git config core.hooksPath .githooks` automatically on `pnpm install`. So:
+
+- Fresh clone → `pnpm install` → hook is active. No manual setup.
+- Each `git commit` → hook formats staged `.ts/.js/.json/.md/.yml` files in place, re-stages them, and lets the commit proceed.
+- If `pnpm` isn't on `PATH`, the hook prints a warning and skips the format pass instead of failing the commit.
+
+**Bypass (don't, unless you really mean it):** `git commit --no-verify`.
+
+The hook does **not** run `lint`, `typecheck`, or `test` — those would slow commits to a crawl. The deal is: the hook handles the cheapest, most-foot-gunny check (Prettier drift), and CI handles the rest. Run `pnpm run check` locally before pushing if you want the full suite.
+
+If you're an agent committing programmatically, the hook works the same way. You don't need to do anything special — your commit will just include any auto-formatted versions of your staged files.
 
 ---
 
