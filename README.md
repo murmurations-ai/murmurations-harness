@@ -4,7 +4,7 @@
 
 The Murmuration Harness is an open-source TypeScript runtime that lets a single human — the **Source** — coordinate a murmuration of AI agents to do real work. It is not an autonomous agent framework. It is a tool that amplifies human agency.
 
-> **Status:** Active development. Core runtime, CLI, web dashboard, 5 governance models, and 353 tests. See [docs/EXECUTION-PLAN.md](./docs/EXECUTION-PLAN.md) for detailed status.
+> **Status:** Active development. Core runtime, CLI, web dashboard, 5 governance models, and 366 tests. See [docs/EXECUTION-PLAN.md](./docs/EXECUTION-PLAN.md) for detailed status.
 
 ## Philosophy: Source as a human role
 
@@ -165,7 +165,7 @@ pnpm build                # build all packages
 pnpm typecheck            # tsc --noEmit across all packages
 pnpm lint                 # eslint (strict-type-checked)
 pnpm format:check         # prettier check
-pnpm test                 # vitest (353 tests, 29 files)
+pnpm test                 # vitest (366 tests, 31 files)
 pnpm check                # all of the above (CI locally)
 ```
 
