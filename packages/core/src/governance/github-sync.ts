@@ -1,25 +1,27 @@
 /**
- * GovernanceGitHubSync — syncs governance state to GitHub issues.
+ * GovernanceSync — syncs governance state to a CollaborationProvider.
  *
- * Creates GitHub issues for new governance items, swaps labels on
- * state transitions, and posts decision records as closing comments.
+ * Creates items for new governance entries, swaps labels on state
+ * transitions, and posts decision records as closing comments.
  * The GovernanceStateStore calls this on every create/transition
  * when a sync is configured.
  *
- * This is the GitHub-as-System-of-Record implementation for
- * governance (Phase 1.2 of the execution plan).
+ * ADR-0021: migrated from GitHub-specific to CollaborationProvider.
+ * The `GovernanceSyncGitHub` interface is kept as a legacy alias.
  */
 
+/* eslint-disable @typescript-eslint/no-deprecated -- this file defines and uses the deprecated legacy interface for backwards compat */
 import type {
   GovernanceItem,
   GovernanceStateTransition,
   GovernanceDecisionRecord,
 } from "./index.js";
+import type { CollaborationProvider, ItemRef } from "../collaboration/types.js";
 
 /**
- * Minimal GitHub client interface — just what governance sync needs.
- * Avoids importing the full @murmurations-ai/github package into core.
- * The CLI wires the real GithubClient at boot.
+ * @deprecated Use CollaborationProvider directly. Kept for backwards
+ * compatibility with existing boot.ts wiring that wraps GithubClient
+ * into this shape. New code should pass a CollaborationProvider.
  */
 export interface GovernanceSyncGitHub {
   createIssue(input: {
@@ -43,24 +45,34 @@ export interface GovernanceSyncGitHub {
   closeIssue?(issueNumber: number): Promise<{ ok: boolean; error?: string }>;
 }
 
-export interface GovernanceGitHubSyncConfig {
-  readonly github: GovernanceSyncGitHub;
+export interface GovernanceSyncConfig {
+  /** CollaborationProvider (preferred) or legacy GovernanceSyncGitHub. */
+  readonly provider?: CollaborationProvider;
+  /** @deprecated Use `provider` instead. */
+  readonly github?: GovernanceSyncGitHub;
   /** Group ID for labelling. */
   readonly defaultGroup?: string;
 }
 
+/** @deprecated Use GovernanceSyncConfig. */
+export type GovernanceGitHubSyncConfig = GovernanceSyncConfig;
+
 /**
- * Sync governance events to GitHub. Fire-and-forget — errors are
- * logged but never block governance operations.
+ * Sync governance events to a collaboration provider. Fire-and-forget —
+ * errors are logged but never block governance operations.
  */
 export class GovernanceGitHubSync {
-  readonly #github: GovernanceSyncGitHub;
+  readonly #provider: CollaborationProvider | undefined;
+  readonly #legacyGitHub: GovernanceSyncGitHub | undefined;
   readonly #defaultGroup: string | undefined;
-  /** Map governance item ID → GitHub issue number for comments. */
+  /** Map governance item ID → item ref (or issue number string) for comments. */
+  readonly #itemMap = new Map<string, ItemRef>();
+  /** Legacy: map governance item ID → GitHub issue number. */
   readonly #issueMap = new Map<string, number>();
 
-  public constructor(config: GovernanceGitHubSyncConfig) {
-    this.#github = config.github;
+  public constructor(config: GovernanceSyncConfig) {
+    this.#provider = config.provider;
+    this.#legacyGitHub = config.github;
     this.#defaultGroup = config.defaultGroup;
   }
 
@@ -69,7 +81,12 @@ export class GovernanceGitHubSync {
     return this.#issueMap;
   }
 
-  /** Create a GitHub issue for a new governance item. Returns the issue URL. */
+  /** Read-only view of item refs (for provider-based sync). */
+  public get itemMap(): ReadonlyMap<string, ItemRef> {
+    return this.#itemMap;
+  }
+
+  /** Create a coordination item for a new governance item. Returns the item URL. */
   public async onCreate(item: GovernanceItem): Promise<string | undefined> {
     try {
       const payload = typeof item.payload === "object" && item.payload !== null ? item.payload : {};
@@ -97,18 +114,29 @@ export class GovernanceGitHubSync {
         .filter(Boolean)
         .join("\n");
 
-      const result = await this.#github.createIssue({
-        title: `[${item.kind.toUpperCase()}] ${topic.slice(0, 80) || item.kind}`,
-        body,
-        labels,
-      });
+      const title = `[${item.kind.toUpperCase()}] ${topic.slice(0, 80) || item.kind}`;
 
-      if (result.ok && result.issueNumber) {
-        this.#issueMap.set(item.id, result.issueNumber);
-        return result.htmlUrl;
+      // Prefer CollaborationProvider; fall back to legacy GitHub interface
+      if (this.#provider) {
+        const result = await this.#provider.createItem({ title, body, labels });
+        if (result.ok) {
+          this.#itemMap.set(item.id, result.value);
+          this.#issueMap.set(item.id, Number(result.value.id));
+          return result.value.url;
+        }
+      } else if (this.#legacyGitHub) {
+        const result = await this.#legacyGitHub.createIssue({ title, body, labels });
+        if (result.ok && result.issueNumber) {
+          const ref: ItemRef = result.htmlUrl
+            ? { id: String(result.issueNumber), url: result.htmlUrl }
+            : { id: String(result.issueNumber) };
+          this.#itemMap.set(item.id, ref);
+          this.#issueMap.set(item.id, result.issueNumber);
+          return result.htmlUrl;
+        }
       }
     } catch {
-      // Fire-and-forget — governance operations never block on GitHub
+      // Fire-and-forget — governance operations never block
     }
     return undefined;
   }
@@ -120,8 +148,9 @@ export class GovernanceGitHubSync {
     isTerminal?: boolean,
   ): Promise<void> {
     try {
+      const ref = this.#itemMap.get(item.id);
       const issueNumber = this.#issueMap.get(item.id);
-      if (!issueNumber) return;
+      if (!ref && !issueNumber) return;
 
       const comment = [
         `**State transition:** ${transition.from} → ${transition.to}`,
@@ -132,30 +161,36 @@ export class GovernanceGitHubSync {
         .filter(Boolean)
         .join("\n");
 
-      await this.#github.createIssueComment(issueNumber, comment);
-
-      // Swap state labels: remove old, add new
-      if (this.#github.removeLabels) {
-        await this.#github.removeLabels(issueNumber, [`state:${transition.from}`]);
-      }
-      if (this.#github.addLabels) {
-        await this.#github.addLabels(issueNumber, [`state:${transition.to}`]);
-      }
-
-      // Close the issue when the item reaches a terminal state
-      if (isTerminal && this.#github.closeIssue) {
-        await this.#github.closeIssue(issueNumber);
+      if (this.#provider && ref) {
+        await this.#provider.postComment(ref, comment);
+        await this.#provider.removeLabel(ref, `state:${transition.from}`);
+        await this.#provider.addLabels(ref, [`state:${transition.to}`]);
+        if (isTerminal) {
+          await this.#provider.updateItemState(ref, "closed");
+        }
+      } else if (this.#legacyGitHub && issueNumber) {
+        await this.#legacyGitHub.createIssueComment(issueNumber, comment);
+        if (this.#legacyGitHub.removeLabels) {
+          await this.#legacyGitHub.removeLabels(issueNumber, [`state:${transition.from}`]);
+        }
+        if (this.#legacyGitHub.addLabels) {
+          await this.#legacyGitHub.addLabels(issueNumber, [`state:${transition.to}`]);
+        }
+        if (isTerminal && this.#legacyGitHub.closeIssue) {
+          await this.#legacyGitHub.closeIssue(issueNumber);
+        }
       }
     } catch {
-      // Fire-and-forget — governance operations never block on GitHub
+      // Fire-and-forget — governance operations never block
     }
   }
 
   /** Post a decision record as a closing comment. */
   public async onDecision(record: GovernanceDecisionRecord): Promise<void> {
     try {
+      const ref = this.#itemMap.get(record.itemId);
       const issueNumber = this.#issueMap.get(record.itemId);
-      if (!issueNumber) return;
+      if (!ref && !issueNumber) return;
 
       const comment = [
         `## Decision Record`,
@@ -174,7 +209,11 @@ export class GovernanceGitHubSync {
         .filter(Boolean)
         .join("\n");
 
-      await this.#github.createIssueComment(issueNumber, comment);
+      if (this.#provider && ref) {
+        await this.#provider.postComment(ref, comment);
+      } else if (this.#legacyGitHub && issueNumber) {
+        await this.#legacyGitHub.createIssueComment(issueNumber, comment);
+      }
     } catch {
       // Fire-and-forget
     }

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-deprecated -- testing legacy interface backwards compat */
 import { describe, it, expect, vi } from "vitest";
 import { GovernanceGitHubSync, type GovernanceSyncGitHub } from "./github-sync.js";
 import type { GovernanceItem, GovernanceStateTransition } from "./index.js";
