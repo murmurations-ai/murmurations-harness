@@ -3,6 +3,22 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.2] - 2026-04-16
+
+### Added
+
+- **S3 three-phase meeting architecture** — meetings now follow agenda-formation → member-round → facilitator-synthesis. Facilitator generates a focused 3-5 item agenda from governance queue, backlog, and signals. Members address agenda items specifically, not generic "what's working."
+- **Source directive override** — `--directive` (or `--agenda`) flag makes the directive the sole agenda item. Agents address ONLY the directive, suppressing all standard meeting behavior. Source has reliable override authority.
+- **Facilitator agenda generation** (Phase 0) — when no directive is present, the facilitator LLM call generates the meeting agenda before the member round begins.
+- **AgendaItem type** — meetings track agenda items with title, description, and source (directive/governance/operational).
+- **Meeting minutes include agenda** — both console output and GitHub issue minutes show the meeting agenda.
+
+### Changed
+
+- Member prompts are agenda-driven ("Address each agenda item from your domain perspective") instead of generic ("Share your perspective on priorities")
+- System prompt for members explicitly constrains: "Your job is to address the meeting agenda — not to discuss anything outside of it"
+- Backlog context passed separately for agenda generation, not merged with directive body
+
 ## [0.3.1] - 2026-04-15
 
 ### Added

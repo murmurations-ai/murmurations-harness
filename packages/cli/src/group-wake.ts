@@ -317,7 +317,8 @@ export const runGroupWakeCommand = async (
       ? "retrospective"
       : "operational";
 
-  const directiveIdx = args.indexOf("--directive");
+  // --directive or --agenda both set the Source directive (which becomes the sole agenda)
+  const directiveIdx = Math.max(args.indexOf("--directive"), args.indexOf("--agenda"));
   const directiveBody = directiveIdx >= 0 ? args[directiveIdx + 1] : undefined;
 
   // Load group config
@@ -439,13 +440,11 @@ export const runGroupWakeCommand = async (
     backlogContext = await fetchGroupBacklog(root, groupId, repoInfo);
   }
 
-  // Build the effective directive with backlog context
-  const backlogSection =
+  // Backlog is now passed as separate context for agenda generation (not merged with directive)
+  const backlogForAgenda =
     repoInfo && backlogContext
-      ? `\n\n## Open Issues (${repoInfo.owner}/${repoInfo.repo})\n\n${backlogContext}`
-      : "";
-  const effectiveDirective =
-    [directiveBody ?? "", backlogSection].filter(Boolean).join("") || undefined;
+      ? `## Open Issues (${repoInfo.owner}/${repoInfo.repo})\n\n${backlogContext}`
+      : undefined;
 
   // Load retrospective metrics if this is a retrospective
   let retrospectiveMetrics: import("@murmurations-ai/core").RetrospectiveMetrics | undefined;
@@ -482,7 +481,8 @@ export const runGroupWakeCommand = async (
     facilitator: config.facilitator,
     signals: [],
     governanceQueue,
-    ...(effectiveDirective ? { directiveBody: effectiveDirective } : {}),
+    ...(directiveBody ? { directiveBody } : {}),
+    ...(backlogForAgenda ? { backlogContext: backlogForAgenda } : {}),
     ...(retrospectiveMetrics ? { retrospectiveMetrics } : {}),
   };
 
@@ -512,6 +512,16 @@ export const runGroupWakeCommand = async (
   console.log(`\n${"=".repeat(60)}`);
   console.log(`Circle Meeting: ${config.name} (${kind})`);
   console.log(`${"=".repeat(60)}\n`);
+
+  // Show the agenda
+  if (result.agenda.length > 0) {
+    console.log("AGENDA:");
+    for (const [i, item] of result.agenda.entries()) {
+      const tag = item.source === "directive" ? " [SOURCE DIRECTIVE]" : "";
+      console.log(`  ${String(i + 1)}. ${item.title}${tag}`);
+    }
+    console.log("");
+  }
 
   for (const c of result.contributions) {
     console.log(`--- ${c.agentId} ---`);
@@ -578,11 +588,15 @@ export const runGroupWakeCommand = async (
   // Post meeting minutes as a GitHub issue
   let meetingMinutesUrl: string | undefined;
   const dayUtc = new Date().toISOString().slice(0, 10);
+  const agendaSection =
+    result.agenda.length > 0
+      ? `\n## Agenda\n\n${result.agenda.map((a, i) => `${String(i + 1)}. **${a.title}**${a.source === "directive" ? " [SOURCE DIRECTIVE]" : ""}: ${a.description}`).join("\n")}\n`
+      : "";
   const minutes = [
     `**Members:** ${config.members.join(", ")}`,
     `**Facilitator:** ${config.facilitator}`,
-    directiveBody ? `**Directive:** ${directiveBody}` : "",
-    "",
+    directiveBody ? `**Source Directive:** ${directiveBody}` : "",
+    agendaSection,
     ...result.contributions.map((c) => `## ${c.agentId}\n\n${c.content}\n`),
     `## Facilitator Synthesis\n\n${result.synthesis}`,
     ...(receipts.length > 0
