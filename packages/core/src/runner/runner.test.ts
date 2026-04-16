@@ -30,14 +30,28 @@ const writeFixture = async (path: string, content: string): Promise<void> => {
 };
 
 const makeSpawn = (overrides: Partial<AgentSpawnContext> = {}): AgentSpawnContext => ({
-  wakeId: makeWakeId(),
+  wakeId: makeWakeId("test-wake"),
   agentId: makeAgentId("test-agent"),
   identity: {
     agentId: makeAgentId("test-agent"),
     layers: [
-      { kind: "murmuration-soul" as const, content: "# Soul\nShared." },
-      { kind: "agent-soul" as const, content: "# Agent Soul\nChar." },
-      { kind: "agent-role" as const, content: "# Role\nTest agent role." },
+      {
+        kind: "murmuration-soul" as const,
+        content: "# Soul\nShared.",
+        sourcePath: "murmuration/soul.md",
+      },
+      {
+        kind: "agent-soul" as const,
+        agentId: makeAgentId("test-agent"),
+        content: "# Agent Soul\nChar.",
+        sourcePath: "agents/test-agent/soul.md",
+      },
+      {
+        kind: "agent-role" as const,
+        agentId: makeAgentId("test-agent"),
+        content: "# Role\nTest agent role.",
+        sourcePath: "agents/test-agent/role.md",
+      },
     ],
     frontmatter: {
       agentId: makeAgentId("test-agent"),
@@ -46,10 +60,22 @@ const makeSpawn = (overrides: Partial<AgentSpawnContext> = {}): AgentSpawnContex
       groupMemberships: [],
     },
   },
-  signals: { signals: [], actionItems: [], updatedAt: new Date() },
-  wakeReason: "scheduled",
+  signals: {
+    wakeId: makeWakeId("test-wake"),
+    assembledAt: new Date(),
+    signals: [],
+    actionItems: [],
+    warnings: [],
+  },
+  wakeReason: { kind: "manual", invokedBy: "test" },
   wakeMode: "individual",
-  budget: { maxCostMicros: 100_000, maxGithubApiCalls: 10, onBreach: "warn" },
+  budget: {
+    maxInputTokens: 10_000,
+    maxOutputTokens: 10_000,
+    maxWallClockMs: 15_000,
+    model: { provider: "ollama", model: "test", tier: "fast", maxTokens: 4096 },
+    maxCostMicros: 100_000,
+  },
   environment: {},
   ...overrides,
 });
