@@ -33,6 +33,9 @@ export { DEFAULT_RETRY_POLICY } from "./retry.js";
 // Model tier resolution
 export { MODEL_TIER_TABLE, resolveModelForTier } from "./tiers.js";
 
+// Observability (ADR-0020 Phase 4)
+export { initLlmTelemetry, shutdownLlmTelemetry } from "./telemetry.js";
+
 // Error taxonomy
 export {
   LLMClientError,

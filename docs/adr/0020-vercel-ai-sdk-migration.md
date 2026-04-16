@@ -1,6 +1,6 @@
 # ADR-0020 — Replace custom LLM adapters with Vercel AI SDK
 
-- **Status:** Proposed
+- **Status:** Accepted (all four phases shipped)
 - **Date:** 2026-04-15
 - **Decision-maker(s):** Source (design)
 - **Supersedes:** ADR-0014 (custom four-provider LLM client)

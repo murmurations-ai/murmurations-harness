@@ -43,7 +43,9 @@
     "@ai-sdk/anthropic": "^3.0.69",
     "@ai-sdk/google": "^3.0.63",
     "@ai-sdk/openai": "^3.0.53",
+    "@langfuse/otel": "^5.1.0",
     "@murmurations-ai/core": "workspace:*",
+    "@opentelemetry/sdk-node": "^0.214.0",
     "ai": "^6.0.162",
     "zod": "^4.3.6"
   }
