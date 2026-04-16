@@ -1,6 +1,6 @@
 # ADR-0022 — Langfuse-powered agent self-reflection and continuous improvement
 
-- **Status:** Proposed
+- **Status:** Accepted (Engineering Circle consented with caveats 2026-04-16, meeting minutes xeeban/emergent-praxis#352). Implementation must address: performance safeguards (async/non-blocking), data security (PII redaction, encryption), operational overhead assessment, and anomaly heuristic validation.
 - **Date:** 2026-04-16
 - **Decision-maker(s):** Source (design), Engineering Circle (consent)
 - **Related:** ADR-0020 (Vercel AI SDK / Langfuse observability), research spike at `docs/research/spike-langfuse-self-reflection.md`

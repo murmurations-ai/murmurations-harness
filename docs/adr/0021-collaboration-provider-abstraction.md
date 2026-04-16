@@ -1,6 +1,6 @@
 # ADR-0021 — Abstract collaboration layer behind a pluggable provider interface
 
-- **Status:** Proposed
+- **Status:** Accepted (Engineering Circle consented 2026-04-16, meeting minutes xeeban/emergent-praxis#352)
 - **Date:** 2026-04-15
 - **Decision-maker(s):** Source (design)
 - **Related:** ADR-0012 (GitHub client), ADR-0017 (GitHub mutations), ADR-0020 (Vercel AI SDK migration pattern)
