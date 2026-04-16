@@ -11,7 +11,7 @@
  * - Calls costHook.onLlmCall with token counts
  */
 
-import { generateText, type LanguageModel } from "ai";
+import { generateText, tool as vercelTool, stepCountIs, type LanguageModel } from "ai";
 
 import type { LLMClientError } from "../errors.js";
 import {
@@ -147,6 +147,21 @@ export class VercelAdapter implements LLMAdapter {
 
       const systemPrompt =
         request.systemPromptOverride ?? request.messages.find((m) => m.role === "system")?.content;
+
+      // Convert tool definitions to Vercel v6 format
+      const tools = request.tools
+        ? Object.fromEntries(
+            request.tools.map((t) => [
+              t.name,
+              vercelTool({
+                description: t.description,
+                inputSchema: t.parameters as import("zod").ZodType,
+                execute: async (input) => t.execute(input as Record<string, unknown>),
+              }),
+            ]),
+          )
+        : undefined;
+
       const result = await generateText({
         model: this.#model,
         ...(systemPrompt ? { system: systemPrompt } : {}),
@@ -156,20 +171,44 @@ export class VercelAdapter implements LLMAdapter {
         ...(request.topP !== undefined ? { topP: request.topP } : {}),
         ...(request.stopSequences ? { stopSequences: [...request.stopSequences] } : {}),
         ...(options.signal ? { abortSignal: options.signal } : {}),
+        ...(tools ? { tools } : {}),
+        ...(request.maxSteps !== undefined && request.maxSteps > 1
+          ? { stopWhen: stepCountIs(request.maxSteps) }
+          : {}),
+        // Per-step cost tracking for multi-step tool loops
+        onStepFinish: (step) => {
+          if (options.costHook) {
+            options.costHook.onLlmCall({
+              provider: this.providerId,
+              model: this.modelUsed,
+              inputTokens: step.usage.inputTokens ?? 0,
+              outputTokens: step.usage.outputTokens ?? 0,
+            });
+          }
+        },
       });
 
-      const inputTokens = result.usage.inputTokens ?? 0;
-      const outputTokens = result.usage.outputTokens ?? 0;
+      const inputTokens = result.totalUsage.inputTokens ?? 0;
+      const outputTokens = result.totalUsage.outputTokens ?? 0;
 
-      // Emit cost hook
-      if (options.costHook) {
-        options.costHook.onLlmCall({
-          provider: this.providerId,
-          model: this.modelUsed,
-          inputTokens,
-          outputTokens,
-        });
-      }
+      // Note: cost hook is emitted per-step via onStepFinish above.
+      // For single-step completions (no tools), onStepFinish fires exactly once.
+
+      // Collect tool calls from all steps
+      const toolCalls = result.steps
+        .flatMap((s) => {
+          const calls = s.toolCalls;
+          const results = s.toolResults;
+          return calls.map((tc, i) => ({
+            name: tc.toolName,
+            args: (tc as unknown as { input: Record<string, unknown> }).input,
+            result:
+              results[i] != null
+                ? (results[i] as unknown as { output: unknown }).output
+                : undefined,
+          }));
+        })
+        .filter((tc) => tc.name);
 
       const response: LLMResponse = {
         content: result.text,
@@ -178,6 +217,8 @@ export class VercelAdapter implements LLMAdapter {
         outputTokens,
         modelUsed: this.modelUsed,
         providerUsed: this.providerId,
+        ...(toolCalls.length > 0 ? { toolCalls } : {}),
+        ...(result.steps.length > 1 ? { steps: result.steps.length } : {}),
       };
 
       return { ok: true, value: response };

@@ -19,6 +19,8 @@ export type {
   ProviderId,
   Result,
   StopReason,
+  ToolDefinition,
+  ToolCallResult,
 } from "./types.js";
 
 // Cost hook

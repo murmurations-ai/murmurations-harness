@@ -23,6 +23,25 @@ export interface LLMMessage {
   readonly content: string;
 }
 
+/**
+ * A tool the LLM can call during a wake. Uses Zod schemas for input
+ * validation, matching Vercel AI SDK's tool() pattern.
+ */
+export interface ToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  /** Zod schema for input validation. Passed to Vercel's tool(). */
+  readonly parameters: unknown; // ZodType at runtime; unknown here to avoid zod import
+  readonly execute: (input: Record<string, unknown>) => Promise<unknown>;
+}
+
+/** A tool call made by the LLM and its result. */
+export interface ToolCallResult {
+  readonly name: string;
+  readonly args: Record<string, unknown>;
+  readonly result: unknown;
+}
+
 /** Input to {@link LLMClient.complete}. */
 export interface LLMRequest {
   /** Concrete model id; resolved via tier table if omitted in the client config. */
@@ -34,6 +53,10 @@ export interface LLMRequest {
   readonly stopSequences?: readonly string[];
   /** Optional override for the system prompt; some providers split system from messages. */
   readonly systemPromptOverride?: string;
+  /** Tools the LLM can call during this completion. */
+  readonly tools?: readonly ToolDefinition[];
+  /** Maximum number of LLM round-trips for tool calling loops. Default: 1 (no loop). */
+  readonly maxSteps?: number;
 }
 
 /** Output of a successful completion. */
@@ -48,6 +71,10 @@ export interface LLMResponse {
   /** Provider may rewrite the model id (version pin); this is what actually ran. */
   readonly modelUsed: string;
   readonly providerUsed: ProviderId;
+  /** Tool calls made during the completion (empty if no tools were used). */
+  readonly toolCalls?: readonly ToolCallResult[];
+  /** Number of LLM round-trips (1 = no tool loop, >1 = multi-step). */
+  readonly steps?: number;
 }
 
 /** Declarative description of what a given {@link LLMClient} instance can do. */

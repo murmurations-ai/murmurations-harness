@@ -25,6 +25,9 @@ const makeRequest = (overrides: Partial<LLMRequest> = {}): LLMRequest => ({
   ...overrides,
 });
 
+/** V3 finish reason must be an object with `unified` (not a plain string). */
+const fr = (reason: string) => ({ unified: reason, raw: reason });
+
 const makeMockModel = (
   text: string,
   usage = { inputTokens: { total: 10 }, outputTokens: { total: 20 } },
@@ -33,7 +36,7 @@ const makeMockModel = (
     doGenerate: {
       content: [{ type: "text", text }],
       usage,
-      finishReason: "stop",
+      finishReason: fr("stop"),
     },
   });
 
@@ -57,6 +60,7 @@ describe("VercelAdapter", () => {
       expect(result.value.outputTokens).toBe(100);
       expect(result.value.providerUsed).toBe("gemini");
       expect(result.value.modelUsed).toBe("test-model");
+      expect(result.value.stopReason).toBe("stop");
     }
   });
 
@@ -105,7 +109,7 @@ describe("VercelAdapter", () => {
       doGenerate: {
         content: [{ type: "text", text: "ok" }],
         usage: { inputTokens: { total: undefined }, outputTokens: { total: undefined } },
-        finishReason: "stop",
+        finishReason: fr("stop"),
       },
     });
     const adapter = new VercelAdapter("ollama", "llama3", model);
@@ -136,6 +140,176 @@ describe("VercelAdapter", () => {
     await adapter.complete(makeRequest({ systemPromptOverride: "You are a researcher." }), {});
     // MockLanguageModelV3 records calls
     expect(model.doGenerateCalls).toHaveLength(1);
+  });
+
+  it("converts tools and collects tool call results", async () => {
+    // MockLanguageModelV3 with array has off-by-one (pushes before indexing),
+    // so we use a function to control step responses precisely.
+    let callCount = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: [
+              {
+                type: "tool-call" as const,
+                toolCallId: "tc-1",
+                toolName: "readFile",
+                input: JSON.stringify({ path: "/tmp/test.md" }),
+              },
+            ],
+            usage: { inputTokens: { total: 30 }, outputTokens: { total: 10 } },
+            finishReason: fr("tool-calls"),
+            warnings: [],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: "File contents: hello world" }],
+          usage: { inputTokens: { total: 40 }, outputTokens: { total: 20 } },
+          finishReason: fr("stop"),
+          warnings: [],
+        };
+      },
+    });
+
+    const adapter = new VercelAdapter("openai", "gpt-4o", model);
+    const { z } = await import("zod");
+
+    const result = await adapter.complete(
+      makeRequest({
+        tools: [
+          {
+            name: "readFile",
+            description: "Read a file",
+            parameters: z.object({ path: z.string() }),
+            execute: (input) => Promise.resolve(`contents of ${(input as { path: string }).path}`),
+          },
+        ],
+        maxSteps: 3,
+      }),
+      {},
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.content).toBe("File contents: hello world");
+      expect(result.value.stopReason).toBe("stop");
+      expect(result.value.toolCalls).toBeDefined();
+      expect(result.value.toolCalls!.length).toBeGreaterThanOrEqual(1);
+      expect(result.value.toolCalls![0]!.name).toBe("readFile");
+      expect(result.value.steps).toBe(2);
+    }
+  });
+
+  it("emits cost hook per step in multi-step tool loops", async () => {
+    let callCount = 0;
+    const model = new MockLanguageModelV3({
+      doGenerate: () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            content: [
+              {
+                type: "tool-call" as const,
+                toolCallId: "tc-1",
+                toolName: "echo",
+                input: JSON.stringify({ msg: "hi" }),
+              },
+            ],
+            usage: { inputTokens: { total: 10 }, outputTokens: { total: 5 } },
+            finishReason: fr("tool-calls"),
+            warnings: [],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: "done" }],
+          usage: { inputTokens: { total: 20 }, outputTokens: { total: 15 } },
+          finishReason: fr("stop"),
+          warnings: [],
+        };
+      },
+    });
+
+    const adapter = new VercelAdapter("anthropic", "claude", model);
+    const hookCalls: { inputTokens: number; outputTokens: number }[] = [];
+    const costHook: LLMCostHook = {
+      onLlmCall: (call) => hookCalls.push(call),
+    };
+    const { z } = await import("zod");
+
+    await adapter.complete(
+      makeRequest({
+        tools: [
+          {
+            name: "echo",
+            description: "Echo",
+            parameters: z.object({ msg: z.string() }),
+            execute: (input) => Promise.resolve((input as { msg: string }).msg),
+          },
+        ],
+        maxSteps: 3,
+      }),
+      { costHook },
+    );
+
+    // Should emit one hook call per step
+    expect(hookCalls).toHaveLength(2);
+    expect(hookCalls[0]!.inputTokens).toBe(10);
+    expect(hookCalls[1]!.inputTokens).toBe(20);
+  });
+
+  it("handles single-step with no tools (no toolCalls in response)", async () => {
+    const model = makeMockModel("just text");
+    const adapter = new VercelAdapter("gemini", "test", model);
+    const result = await adapter.complete(makeRequest(), {});
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.toolCalls).toBeUndefined();
+      expect(result.value.steps).toBeUndefined();
+    }
+  });
+
+  it("maps tool-calls finish reason correctly", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: {
+        content: [
+          {
+            type: "tool-call" as const,
+            toolCallId: "tc-1",
+            toolName: "readFile",
+            input: JSON.stringify({ path: "/test" }),
+          },
+        ],
+        usage: { inputTokens: { total: 10 }, outputTokens: { total: 5 } },
+        finishReason: fr("tool-calls"),
+        warnings: [],
+      },
+    });
+
+    const adapter = new VercelAdapter("openai", "gpt-4o", model);
+    const { z } = await import("zod");
+
+    const result = await adapter.complete(
+      makeRequest({
+        tools: [
+          {
+            name: "readFile",
+            description: "Read a file",
+            parameters: z.object({ path: z.string() }),
+            execute: () => Promise.resolve("file content"),
+          },
+        ],
+        // maxSteps defaults to undefined (single step, no loop)
+      }),
+      {},
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.stopReason).toBe("tool_use");
+    }
   });
 });
 
