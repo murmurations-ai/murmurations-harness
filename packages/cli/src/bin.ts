@@ -45,6 +45,10 @@ const resolveRoot = (args: readonly string[], fallback = "."): string => {
     const val = args[nameIdx + 1];
     if (val) return resolveSessionRoot(val);
   }
+  // Auto-detect: if current directory has a murmuration/ subdirectory, use it
+  if (existsSync(resolve(process.cwd(), "murmuration"))) {
+    return process.cwd();
+  }
   return fallback;
 };
 
@@ -230,6 +234,11 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
       throw new Error(`unknown argument: ${arg ?? "(undefined)"}`);
     }
   }
+  // Auto-detect: if no --root and current directory has murmuration/, use cwd
+  if (!rootDir && existsSync(resolve(process.cwd(), "murmuration"))) {
+    rootDir = process.cwd();
+  }
+
   return { rootDir, agentDir, dryRun, once, now, governancePath, collaboration, logLevel };
 };
 
