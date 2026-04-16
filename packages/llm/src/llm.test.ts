@@ -36,18 +36,22 @@ const makeRequest = (overrides: Partial<LLMRequest> = {}): LLMRequest => ({
   ...overrides,
 });
 
-/** V3 finish reason must be an object with `unified` (not a plain string). */
-const fr = (reason: string) => ({ unified: reason, raw: reason });
+/** V3 finish reason must be an object with `unified` as a specific literal. */
+const fr = <T extends string>(reason: T) => ({ unified: reason, raw: reason });
 
 const makeMockModel = (
   text: string,
-  usage = { inputTokens: { total: 10 }, outputTokens: { total: 20 } },
+  usage = {
+    inputTokens: { total: 10, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: 20, text: undefined, reasoning: undefined },
+  },
 ): MockLanguageModelV3 =>
   new MockLanguageModelV3({
     doGenerate: {
       content: [{ type: "text", text }],
       usage,
       finishReason: fr("stop"),
+      warnings: [],
     },
   });
 
@@ -58,8 +62,8 @@ const makeMockModel = (
 describe("VercelAdapter", () => {
   it("happy path — maps response content and tokens", async () => {
     const model = makeMockModel("Hello from the LLM!", {
-      inputTokens: { total: 50 },
-      outputTokens: { total: 100 },
+      inputTokens: { total: 50, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+      outputTokens: { total: 100, text: undefined, reasoning: undefined },
     });
     const adapter = new VercelAdapter("gemini", "test-model", model);
     const result = await adapter.complete(makeRequest(), {});
@@ -77,8 +81,8 @@ describe("VercelAdapter", () => {
 
   it("emits cost hook with token counts", async () => {
     const model = makeMockModel("response", {
-      inputTokens: { total: 100 },
-      outputTokens: { total: 200 },
+      inputTokens: { total: 100, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+      outputTokens: { total: 200, text: undefined, reasoning: undefined },
     });
     const adapter = new VercelAdapter("openai", "gpt-4o", model);
     const hookCalls: { inputTokens: number; outputTokens: number }[] = [];
@@ -119,8 +123,21 @@ describe("VercelAdapter", () => {
     const model = new MockLanguageModelV3({
       doGenerate: {
         content: [{ type: "text", text: "ok" }],
-        usage: { inputTokens: { total: undefined }, outputTokens: { total: undefined } },
+        usage: {
+          inputTokens: {
+            total: undefined,
+            noCache: undefined,
+            cacheRead: undefined,
+            cacheWrite: undefined,
+          },
+          outputTokens: {
+            total: undefined,
+            text: undefined,
+            reasoning: undefined,
+          },
+        },
         finishReason: fr("stop"),
+        warnings: [],
       },
     });
     const adapter = new VercelAdapter("ollama", "llama3", model);
@@ -154,11 +171,10 @@ describe("VercelAdapter", () => {
   });
 
   it("converts tools and collects tool call results", async () => {
-    // MockLanguageModelV3 with array has off-by-one (pushes before indexing),
-    // so we use a function to control step responses precisely.
     let callCount = 0;
     const model = new MockLanguageModelV3({
-      doGenerate: () => {
+      // eslint-disable-next-line @typescript-eslint/require-await
+      doGenerate: async () => {
         callCount++;
         if (callCount === 1) {
           return {
@@ -170,14 +186,30 @@ describe("VercelAdapter", () => {
                 input: JSON.stringify({ path: "/tmp/test.md" }),
               },
             ],
-            usage: { inputTokens: { total: 30 }, outputTokens: { total: 10 } },
+            usage: {
+              inputTokens: {
+                total: 30,
+                noCache: undefined,
+                cacheRead: undefined,
+                cacheWrite: undefined,
+              },
+              outputTokens: { total: 10, text: undefined, reasoning: undefined },
+            },
             finishReason: fr("tool-calls"),
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: "File contents: hello world" }],
-          usage: { inputTokens: { total: 40 }, outputTokens: { total: 20 } },
+          usage: {
+            inputTokens: {
+              total: 40,
+              noCache: undefined,
+              cacheRead: undefined,
+              cacheWrite: undefined,
+            },
+            outputTokens: { total: 20, text: undefined, reasoning: undefined },
+          },
           finishReason: fr("stop"),
           warnings: [],
         };
@@ -214,11 +246,12 @@ describe("VercelAdapter", () => {
   });
 
   it("emits cost hook per step in multi-step tool loops", async () => {
-    let callCount = 0;
+    let stepCount = 0;
     const model = new MockLanguageModelV3({
-      doGenerate: () => {
-        callCount++;
-        if (callCount === 1) {
+      // eslint-disable-next-line @typescript-eslint/require-await
+      doGenerate: async () => {
+        stepCount++;
+        if (stepCount === 1) {
           return {
             content: [
               {
@@ -228,14 +261,30 @@ describe("VercelAdapter", () => {
                 input: JSON.stringify({ msg: "hi" }),
               },
             ],
-            usage: { inputTokens: { total: 10 }, outputTokens: { total: 5 } },
+            usage: {
+              inputTokens: {
+                total: 10,
+                noCache: undefined,
+                cacheRead: undefined,
+                cacheWrite: undefined,
+              },
+              outputTokens: { total: 5, text: undefined, reasoning: undefined },
+            },
             finishReason: fr("tool-calls"),
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: "done" }],
-          usage: { inputTokens: { total: 20 }, outputTokens: { total: 15 } },
+          usage: {
+            inputTokens: {
+              total: 20,
+              noCache: undefined,
+              cacheRead: undefined,
+              cacheWrite: undefined,
+            },
+            outputTokens: { total: 15, text: undefined, reasoning: undefined },
+          },
           finishReason: fr("stop"),
           warnings: [],
         };
@@ -293,7 +342,19 @@ describe("VercelAdapter", () => {
             input: JSON.stringify({ path: "/test" }),
           },
         ],
-        usage: { inputTokens: { total: 10 }, outputTokens: { total: 5 } },
+        usage: {
+          inputTokens: {
+            total: 10,
+            noCache: undefined,
+            cacheRead: undefined,
+            cacheWrite: undefined,
+          },
+          outputTokens: {
+            total: 5,
+            text: undefined,
+            reasoning: undefined,
+          },
+        },
         finishReason: fr("tool-calls"),
         warnings: [],
       },
