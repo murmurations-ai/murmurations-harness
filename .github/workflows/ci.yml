@@ -60,7 +60,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          node packages/cli/dist/bin.js start > /tmp/gate.log 2>&1 &
+          node packages/cli/dist/bin.js start --root examples/hello-world-agent > /tmp/gate.log 2>&1 &
           PID=$!
           sleep 4
           kill -INT $PID || true
