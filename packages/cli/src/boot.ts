@@ -530,26 +530,24 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const dryRun = options.dryRun === true;
   const once = options.once === true;
 
+  // Load harness.yaml config, then overlay CLI flags
+  const { loadHarnessConfig, mergeWithCliFlags } = await import("./harness-config.js");
+  const fileConfig = await loadHarnessConfig(exampleRoot);
+  const cliOverrides: Parameters<typeof mergeWithCliFlags>[1] = {};
+  if (options.governancePath)
+    (cliOverrides as Record<string, unknown>).governancePath = options.governancePath;
+  if (options.collaboration)
+    (cliOverrides as Record<string, unknown>).collaboration = options.collaboration;
+  if (options.logLevel) (cliOverrides as Record<string, unknown>).logLevel = options.logLevel;
+  const config = mergeWithCliFlags(fileConfig, cliOverrides);
+
   // Construct event bus + structured logger (Engineering Standards #4 + #9)
   const { DaemonEventBus, DaemonLoggerImpl } = await import("@murmurations-ai/core");
   const eventBus = new DaemonEventBus();
-  const logger = new DaemonLoggerImpl({ level: options.logLevel ?? "info", eventBus });
+  const logger = new DaemonLoggerImpl({ level: config.logging.level, eventBus });
 
-  // Load governance plugin — from CLI flag, or from murmuration/harness.yaml
-  let governancePath = options.governancePath;
-  if (!governancePath) {
-    // Try reading from murmuration/harness.yaml
-    try {
-      const { readFile: rf } = await import("node:fs/promises");
-      const harnessYaml = await rf(resolve(exampleRoot, "murmuration", "harness.yaml"), "utf8");
-      const pluginMatch = /plugin:\s*"?([^"\n]+)"?/i.exec(harnessYaml);
-      if (pluginMatch?.[1] && pluginMatch[1] !== "none") {
-        governancePath = pluginMatch[1];
-      }
-    } catch {
-      // No harness.yaml — that's fine, use no-op governance
-    }
-  }
+  // Load governance plugin — from merged config (CLI > harness.yaml > default)
+  const governancePath = config.governance.plugin;
   let governancePlugin: import("@murmurations-ai/core").GovernancePlugin | undefined;
   if (governancePath) {
     const pluginUrl = pathToFileURL(resolve(governancePath)).href;
@@ -723,7 +721,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   // client path continues to work alongside the provider.
   // -------------------------------------------------------------------
 
-  const collaborationMode = options.collaboration ?? "github";
+  const collaborationMode = config.collaboration.provider;
 
   const localCollaborationProvider =
     collaborationMode === "local"
