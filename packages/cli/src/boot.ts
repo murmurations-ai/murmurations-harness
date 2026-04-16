@@ -511,6 +511,12 @@ export interface BootDaemonOptions {
   readonly now?: boolean;
   /** Log level filter. Default: "info". */
   readonly logLevel?: "debug" | "info" | "warn" | "error";
+  /**
+   * Collaboration provider: "github" (default) or "local".
+   * "local" uses filesystem-based coordination — no GitHub token needed.
+   * ADR-0021.
+   */
+  readonly collaboration?: "github" | "local";
 }
 
 /**
@@ -709,6 +715,29 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   }
 
   // -------------------------------------------------------------------
+  // Collaboration provider (ADR-0021)
+  //
+  // "local" creates a filesystem provider immediately.
+  // "github" (default) is wired later after agent registration, since
+  // the target repo comes from agent signal scopes. The legacy GitHub
+  // client path continues to work alongside the provider.
+  // -------------------------------------------------------------------
+
+  const collaborationMode = options.collaboration ?? "github";
+
+  const localCollaborationProvider =
+    collaborationMode === "local"
+      ? new (await import("@murmurations-ai/core")).LocalCollaborationProvider({
+          itemsDir: join(exampleRoot, ".murmuration", "items"),
+          artifactsDir: exampleRoot,
+        })
+      : undefined;
+
+  if (localCollaborationProvider) {
+    logger.info("daemon.collaboration.provider", { provider: "local" });
+  }
+
+  // -------------------------------------------------------------------
   // Per-agent composition (Phase 2D3)
   //
   // For each registered agent: instantiate the LLM client pinned by
@@ -899,74 +928,81 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       })) ?? [],
   );
 
-  // Construct governance GitHub sync if we have a write-capable github client
-  const governanceSync = githubClient
+  // Construct governance sync — prefer CollaborationProvider (ADR-0021), fall back to GitHub
+  const governanceSync = localCollaborationProvider
     ? new GovernanceGitHubSync({
-        github: {
-          createIssue: async (input) => {
-            const result = await githubClient.createIssue(
-              makeRepoCoordinate(
-                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
-                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
-              ),
-              { title: input.title, body: input.body, labels: [...input.labels] },
-            );
-            if (!result.ok) return { ok: false, error: result.error.message };
-            return {
-              ok: true,
-              issueNumber: result.value.number.value,
-              htmlUrl: result.value.htmlUrl,
-            };
-          },
-          createIssueComment: async (issueNumber, body) => {
-            const result = await githubClient.createIssueComment(
-              makeRepoCoordinate(
-                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
-                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
-              ),
-              makeIssueNumber(issueNumber),
-              { body },
-            );
-            if (!result.ok) return { ok: false, error: result.error.message };
-            return { ok: true };
-          },
-          addLabels: async (issueNumber, labels) => {
-            const repo = makeRepoCoordinate(
-              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
-              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
-            );
-            const result = await githubClient.addLabels(repo, makeIssueNumber(issueNumber), [
-              ...labels,
-            ]);
-            if (!result.ok) return { ok: false, error: result.error.message };
-            return { ok: true };
-          },
-          removeLabels: async (issueNumber, labels) => {
-            const repo = makeRepoCoordinate(
-              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
-              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
-            );
-            for (const label of labels) {
-              await githubClient.removeLabel(repo, makeIssueNumber(issueNumber), label);
-            }
-            return { ok: true };
-          },
-          closeIssue: async (issueNumber) => {
-            const repo = makeRepoCoordinate(
-              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
-              allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
-            );
-            const result = await githubClient.updateIssueState(
-              repo,
-              makeIssueNumber(issueNumber),
-              "closed",
-            );
-            if (!result.ok) return { ok: false, error: result.error.message };
-            return { ok: true };
-          },
-        },
+        provider: localCollaborationProvider,
+        ...(allRegistered[0]?.groupMemberships[0]
+          ? { defaultGroup: allRegistered[0].groupMemberships[0] }
+          : {}),
       })
-    : undefined;
+    : githubClient
+      ? new GovernanceGitHubSync({
+          github: {
+            createIssue: async (input) => {
+              const result = await githubClient.createIssue(
+                makeRepoCoordinate(
+                  allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
+                  allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
+                ),
+                { title: input.title, body: input.body, labels: [...input.labels] },
+              );
+              if (!result.ok) return { ok: false, error: result.error.message };
+              return {
+                ok: true,
+                issueNumber: result.value.number.value,
+                htmlUrl: result.value.htmlUrl,
+              };
+            },
+            createIssueComment: async (issueNumber, body) => {
+              const result = await githubClient.createIssueComment(
+                makeRepoCoordinate(
+                  allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
+                  allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
+                ),
+                makeIssueNumber(issueNumber),
+                { body },
+              );
+              if (!result.ok) return { ok: false, error: result.error.message };
+              return { ok: true };
+            },
+            addLabels: async (issueNumber, labels) => {
+              const repo = makeRepoCoordinate(
+                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
+                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
+              );
+              const result = await githubClient.addLabels(repo, makeIssueNumber(issueNumber), [
+                ...labels,
+              ]);
+              if (!result.ok) return { ok: false, error: result.error.message };
+              return { ok: true };
+            },
+            removeLabels: async (issueNumber, labels) => {
+              const repo = makeRepoCoordinate(
+                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
+                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
+              );
+              for (const label of labels) {
+                await githubClient.removeLabel(repo, makeIssueNumber(issueNumber), label);
+              }
+              return { ok: true };
+            },
+            closeIssue: async (issueNumber) => {
+              const repo = makeRepoCoordinate(
+                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
+                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
+              );
+              const result = await githubClient.updateIssueState(
+                repo,
+                makeIssueNumber(issueNumber),
+                "closed",
+              );
+              if (!result.ok) return { ok: false, error: result.error.message };
+              return { ok: true };
+            },
+          },
+        })
+      : undefined;
 
   // Build the onWakeActions callback — executes structured actions
   // from individual agent wakes against GitHub.

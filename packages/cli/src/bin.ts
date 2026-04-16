@@ -171,6 +171,7 @@ interface StartArgs {
   readonly once: boolean;
   readonly now: boolean;
   readonly governancePath: string | undefined;
+  readonly collaboration: "github" | "local" | undefined;
   readonly logLevel: "debug" | "info" | "warn" | "error";
 }
 
@@ -181,6 +182,7 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
   let once = false;
   let now = false;
   let governancePath: string | undefined;
+  let collaboration: "github" | "local" | undefined;
   let logLevel: "debug" | "info" | "warn" | "error" = "info";
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
@@ -217,11 +219,18 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
       once = true;
     } else if (arg === "--now") {
       now = true;
+    } else if (arg === "--collaboration") {
+      const next = rest[i + 1];
+      if (next !== "github" && next !== "local") {
+        throw new Error("--collaboration must be 'github' or 'local'");
+      }
+      collaboration = next;
+      i++;
     } else {
       throw new Error(`unknown argument: ${arg ?? "(undefined)"}`);
     }
   }
-  return { rootDir, agentDir, dryRun, once, now, governancePath, logLevel };
+  return { rootDir, agentDir, dryRun, once, now, governancePath, collaboration, logLevel };
 };
 
 const usage = (): string =>
@@ -260,6 +269,8 @@ start options:
   --now            Trigger an immediate wake (overrides cron/interval schedule)
   --governance <path>  Path to a governance plugin module (default: no-op).
                    The module must export a GovernancePlugin as default.
+  --collaboration <provider>  Collaboration provider: github (default) or local.
+                   Local uses filesystem for coordination (no GitHub needed).
   --log-level <level>  Log level: debug, info, warn, error (default: info).
                    Debug shows LLM prompts, signal contents, action details.
 
@@ -284,6 +295,7 @@ const main = async (): Promise<void> => {
         ...(args.once ? { once: true } : {}),
         ...(args.now ? { now: true, once: true } : {}),
         ...(args.governancePath !== undefined ? { governancePath: args.governancePath } : {}),
+        ...(args.collaboration !== undefined ? { collaboration: args.collaboration } : {}),
         logLevel: args.logLevel,
       });
       break;

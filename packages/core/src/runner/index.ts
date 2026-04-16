@@ -410,14 +410,15 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
         } catch {
           // Commit is best-effort
         }
+        // eslint-disable-next-line @typescript-eslint/no-deprecated -- legacy fallback
       } else if (clients.github && clients.targetRepo) {
-        // eslint-disable-line @typescript-eslint/no-deprecated -- legacy fallback
         try {
           const targetBranch = clients.targetBranch ?? "main";
-          const headResult = await clients.github.getRef(clients.targetRepo, targetBranch); // eslint-disable-line @typescript-eslint/no-deprecated
+          // eslint-disable-next-line @typescript-eslint/no-deprecated
+          const headResult = await clients.github.getRef(clients.targetRepo, targetBranch);
           if (headResult.ok && headResult.value) {
+            // eslint-disable-next-line @typescript-eslint/no-deprecated
             const commitResult = await clients.github.createCommitOnBranch(
-              // eslint-disable-line @typescript-eslint/no-deprecated
               clients.targetRepo,
               targetBranch,
               {
