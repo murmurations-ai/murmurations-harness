@@ -41,7 +41,8 @@
     "@murmurations-ai/github": "workspace:*",
     "@murmurations-ai/llm": "workspace:*",
     "@murmurations-ai/secrets-dotenv": "workspace:*",
-    "@murmurations-ai/signals": "workspace:*"
+    "@murmurations-ai/signals": "workspace:*",
+    "yaml": "^2.8.3"
   },
   "engines": {
     "node": ">=20.0.0"
