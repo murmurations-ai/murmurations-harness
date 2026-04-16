@@ -69,6 +69,7 @@ const helloWorld: RegisteredAgent = {
     required: [],
     optional: [],
   },
+  tools: { mcp: [], cli: [] },
 };
 
 describe("Daemon", () => {

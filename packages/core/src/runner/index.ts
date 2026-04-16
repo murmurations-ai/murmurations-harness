@@ -36,6 +36,23 @@ export interface DefaultRunnerOptions {
   readonly commitPathPrefix?: string;
 }
 
+/** Tool definition compatible with LLM tool calling (ADR-0020 Phase 2). */
+export interface RunnerToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: unknown;
+  readonly execute: (input: Record<string, unknown>) => Promise<unknown>;
+}
+
+/** MCP server config for tool loading (ADR-0020 Phase 3). */
+export interface RunnerMcpServerConfig {
+  readonly name: string;
+  readonly command: string;
+  readonly args?: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  readonly cwd?: string;
+}
+
 export interface DefaultRunnerClients {
   readonly llm?: {
     complete(
@@ -45,6 +62,8 @@ export interface DefaultRunnerClients {
         systemPromptOverride?: string;
         maxOutputTokens?: number;
         temperature?: number;
+        tools?: readonly RunnerToolDefinition[];
+        maxSteps?: number;
       },
       extra?: { signal?: AbortSignal },
     ): Promise<
@@ -57,6 +76,14 @@ export interface DefaultRunnerClients {
           error: { code: string; message: string };
         }
     >;
+  };
+  /** MCP tool loader — connects to MCP servers and returns tool definitions. */
+  readonly mcpToolLoader?: {
+    loadTools(
+      servers: readonly RunnerMcpServerConfig[],
+      parentEnv?: Readonly<Record<string, string>>,
+    ): Promise<RunnerToolDefinition[]>;
+    close(): Promise<void>;
   };
   readonly github?: {
     getRef(repo: unknown, branch: string): Promise<{ ok: boolean; value?: { oid: string } }>;
@@ -252,7 +279,14 @@ GOVERNANCE_EVENT: none — OR one of:
 If you were asked to draft a proposal (e.g. an action item saying "draft proposal for X"), file it as PROPOSAL: <your proposal>
 `;
 
-    // 9. Call LLM
+    // 9. Load MCP tools (ADR-0020 Phase 3)
+    const mcpConfigs = spawn.mcpServerConfigs ?? [];
+    let tools: RunnerToolDefinition[] | undefined;
+    if (clients.mcpToolLoader && mcpConfigs.length > 0) {
+      tools = await clients.mcpToolLoader.loadTools(mcpConfigs, spawn.environment);
+    }
+
+    // 10. Call LLM
     const llmModel =
       spawn.identity.frontmatter.modelTier === "fast"
         ? "gemini-2.5-flash"
@@ -260,16 +294,25 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
           ? "gemini-2.5-pro"
           : "gemini-2.5-flash";
 
-    const result = await clients.llm.complete(
-      {
-        model: llmModel,
-        messages: [{ role: "user", content: userPrompt }],
-        systemPromptOverride: systemPrompt,
-        maxOutputTokens: 16000,
-        temperature: 0.3,
-      },
-      ...(signal ? [{ signal }] : []),
-    );
+    let result: Awaited<ReturnType<NonNullable<DefaultRunnerClients["llm"]>["complete"]>>;
+    try {
+      result = await clients.llm.complete(
+        {
+          model: llmModel,
+          messages: [{ role: "user", content: userPrompt }],
+          systemPromptOverride: systemPrompt,
+          maxOutputTokens: 16000,
+          temperature: 0.3,
+          ...(tools && tools.length > 0 ? { tools, maxSteps: 5 } : {}),
+        },
+        ...(signal ? [{ signal }] : []),
+      );
+    } finally {
+      // Always close MCP connections after LLM call
+      if (clients.mcpToolLoader && mcpConfigs.length > 0) {
+        await clients.mcpToolLoader.close();
+      }
+    }
 
     if (!result.ok) {
       throw new Error(`LLM failed: ${result.error.code} — ${result.error.message}`);

@@ -205,6 +205,22 @@ const secretsSchema = z
   })
   .default({ required: [], optional: [] });
 
+// ADR-0020 Phase 3: MCP tool declarations
+const mcpServerSchema = z.object({
+  name: z.string().min(1),
+  command: z.string().min(1),
+  args: z.array(z.string()).default([]),
+  env: z.record(z.string(), z.string()).optional(),
+  cwd: z.string().optional(),
+});
+
+const toolsSchema = z
+  .object({
+    mcp: z.array(mcpServerSchema).default([]),
+    cli: z.array(z.string().min(1)).default([]),
+  })
+  .default({ mcp: [], cli: [] });
+
 /** Shape expected from `role.md` YAML frontmatter. Spec §5.3 + ADR-0016. */
 export const roleFrontmatterSchema = z.object({
   agent_id: z.string().min(1),
@@ -224,6 +240,9 @@ export const roleFrontmatterSchema = z.object({
   prompt: promptSchema,
   budget: budgetSchema,
   secrets: secretsSchema,
+
+  // ADR-0020 Phase 3: tool declarations
+  tools: toolsSchema,
 });
 
 /** Parsed, validated shape of a `role.md` frontmatter block. */

@@ -449,6 +449,19 @@ export interface AgentSpawnContext {
    */
   readonly capabilities?: AgentCapabilities;
   /**
+   * Full MCP server configurations for the runner to connect at wake time.
+   * The `capabilities.mcpServers` field has display names only; this field
+   * has the command, args, and env needed to spawn the servers.
+   * ADR-0020 Phase 3.
+   */
+  readonly mcpServerConfigs?: readonly {
+    readonly name: string;
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly env?: Readonly<Record<string, string>>;
+    readonly cwd?: string;
+  }[];
+  /**
    * Free-form, stable-per-wake environment key/value pairs (e.g. feature
    * flags, debug switches). Executors MUST pass these through to the
    * spawned session but MUST NOT interpret them.

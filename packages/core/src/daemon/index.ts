@@ -173,6 +173,21 @@ export interface RegisteredAgent {
     readonly required: readonly string[];
     readonly optional: readonly string[];
   };
+
+  /**
+   * Tool declarations from role.md frontmatter (ADR-0020 Phase 3).
+   * MCP servers are connected at wake time; CLI tools are informational.
+   */
+  readonly tools: {
+    readonly mcp: readonly {
+      readonly name: string;
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly env?: Readonly<Record<string, string>>;
+      readonly cwd?: string;
+    }[];
+    readonly cli: readonly string[];
+  };
 }
 
 /**
@@ -252,6 +267,17 @@ export const registeredAgentFromLoadedIdentity = (
     optional: frontmatter.secrets.optional,
   };
 
+  const tools = {
+    mcp: frontmatter.tools.mcp.map((s) => ({
+      name: s.name,
+      command: s.command,
+      args: s.args,
+      ...(s.env ? { env: s.env } : {}),
+      ...(s.cwd ? { cwd: s.cwd } : {}),
+    })),
+    cli: frontmatter.tools.cli,
+  };
+
   return {
     agentId: chain.agentId.value,
     displayName: frontmatter.name,
@@ -271,6 +297,7 @@ export const registeredAgentFromLoadedIdentity = (
     ...(promptPath !== undefined ? { promptPath } : {}),
     budget,
     secrets,
+    tools,
   };
 };
 
@@ -1192,10 +1219,11 @@ const buildSpawnContext = async (
         canCreateIssues: agent.githubWriteScopes.issues.length > 0,
         canLabelIssues: agent.githubWriteScopes.labels.length > 0,
       },
-      cliTools: [], // populated from role.md tools.cli when implemented
-      mcpServers: [], // populated from role.md tools.mcp when implemented
+      cliTools: agent.tools.cli,
+      mcpServers: agent.tools.mcp.map((s) => s.name),
       signalSources: agent.signalScopes?.sources ?? [],
     },
+    mcpServerConfigs: agent.tools.mcp,
     environment: {},
   };
 };

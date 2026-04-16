@@ -409,6 +409,59 @@ describe("roleFrontmatterSchema (ADR-0016 extensions)", () => {
     const loader = new IdentityLoader({ rootDir });
     await expect(loader.load("bad-repo")).rejects.toThrow(FrontmatterInvalidError);
   });
+
+  it("tools defaults to empty mcp/cli when omitted (backwards compat)", async () => {
+    await writeMinimalFixture(
+      "no-tools",
+      ['agent_id: "no-tools"', 'name: "No Tools"', "model_tier: fast"].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    const loaded = await loader.load("no-tools");
+    expect(loaded.frontmatter.tools.mcp).toEqual([]);
+    expect(loaded.frontmatter.tools.cli).toEqual([]);
+  });
+
+  it("parses tools.mcp server declarations", async () => {
+    await writeMinimalFixture(
+      "with-tools",
+      [
+        'agent_id: "with-tools"',
+        'name: "Tool Agent"',
+        "model_tier: balanced",
+        "tools:",
+        "  mcp:",
+        "    - name: filesystem",
+        "      command: npx",
+        "      args:",
+        "        - -y",
+        "        - '@modelcontextprotocol/server-filesystem'",
+        "        - ./workspace",
+        "    - name: github",
+        "      command: npx",
+        "      args:",
+        "        - -y",
+        "        - '@modelcontextprotocol/server-github'",
+        "      env:",
+        "        GITHUB_TOKEN: '$GITHUB_TOKEN'",
+        "  cli:",
+        "    - gh",
+        "    - gcloud",
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    const loaded = await loader.load("with-tools");
+    expect(loaded.frontmatter.tools.mcp).toHaveLength(2);
+    expect(loaded.frontmatter.tools.mcp[0]?.name).toBe("filesystem");
+    expect(loaded.frontmatter.tools.mcp[0]?.command).toBe("npx");
+    expect(loaded.frontmatter.tools.mcp[0]?.args).toEqual([
+      "-y",
+      "@modelcontextprotocol/server-filesystem",
+      "./workspace",
+    ]);
+    expect(loaded.frontmatter.tools.mcp[1]?.name).toBe("github");
+    expect(loaded.frontmatter.tools.mcp[1]?.env).toEqual({ GITHUB_TOKEN: "$GITHUB_TOKEN" });
+    expect(loaded.frontmatter.tools.cli).toEqual(["gh", "gcloud"]);
+  });
 });
 
 // ---------------------------------------------------------------------------
