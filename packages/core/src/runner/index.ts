@@ -26,6 +26,7 @@ import type {
   Signal,
   WakeAction,
 } from "../execution/index.js";
+import { scanSkills, formatSkillsPromptBlock } from "../skills/index.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -190,7 +191,8 @@ export function createDefaultRunner(
     }
 
     // 1. System prompt from identity chain
-    const systemPrompt = spawn.identity.layers
+    const effectiveRoot = rootDir ?? resolve(dirname(""), "..");
+    const identityPrompt = spawn.identity.layers
       .map((layer) => {
         const title =
           layer.kind === "murmuration-soul"
@@ -204,8 +206,13 @@ export function createDefaultRunner(
       })
       .join("\n\n---\n\n");
 
+    // 1b. Scan for available skills (Three-Tier Progressive Disclosure)
+    const skillsDir = join(effectiveRoot, "skills");
+    const skills = await scanSkills(skillsDir);
+    const skillsBlock = formatSkillsPromptBlock(skills);
+    const systemPrompt = identityPrompt + skillsBlock;
+
     // 2. Wake prompt from agent's prompts/wake.md
-    const effectiveRoot = rootDir ?? resolve(dirname(""), "..");
     const promptPath = join(effectiveRoot, "agents", agentDir, "prompts", "wake.md");
     let wakePrompt: string;
     try {
