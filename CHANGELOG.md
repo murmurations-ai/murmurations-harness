@@ -3,6 +3,33 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.0] - 2026-04-15
+
+### Added
+
+- **Vercel AI SDK migration** (ADR-0020) — replaced 4 hand-rolled HTTP adapters (Gemini, Anthropic, OpenAI, Ollama) with a single `VercelAdapter` wrapping `generateText()`. Net -1,200 LOC of plumbing code.
+- **Tool calling** — `ToolDefinition` and `ToolCallResult` types, multi-step tool loops via `stepCountIs()`, per-step cost tracking via `onStepFinish`
+- **MCP integration** — new `@murmurations-ai/mcp` package with `McpToolLoader`. Agents declare MCP servers in `role.md` frontmatter (`tools.mcp`); runner connects at wake time, discovers tools, passes to LLM
+- **Langfuse observability** — `initLlmTelemetry()` / `shutdownLlmTelemetry()` backed by `@langfuse/otel` + OpenTelemetry. Vercel AI SDK emits OTEL spans; Langfuse receives them when keys are set (silent no-op otherwise)
+- **Identity schema** — `tools.mcp` (array of `{name, command, args, env, cwd}`) and `tools.cli` (string array) with defaults for backwards compatibility
+- **Runner MCP path** — loads MCP tools before LLM call, passes `tools` + `maxSteps: 5`, closes connections in `finally` block
+- **427 tests** across 36 files (up from 392 / 34), including comprehensive error mapping, telemetry, tool loader, and runner integration tests
+
+### Changed
+
+- `LLMRequest` gains optional `tools` and `maxSteps` fields
+- `LLMResponse` gains optional `toolCalls` and `steps` fields
+- `DefaultRunnerClients` gains optional `mcpToolLoader` client
+- `AgentSpawnContext` gains `mcpServerConfigs` field
+- `RegisteredAgent` gains `tools` field
+- ADR-0020 status updated to Accepted (all four phases shipped)
+
+### Dependencies
+
+- Added: `ai`, `@ai-sdk/google`, `@ai-sdk/anthropic`, `@ai-sdk/openai`, `zod` (in llm)
+- Added: `@modelcontextprotocol/sdk` (in mcp)
+- Added: `@langfuse/otel`, `@opentelemetry/sdk-node` (in llm)
+
 ## [0.2.0] - 2026-04-14
 
 ### Added
