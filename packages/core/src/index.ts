@@ -11,7 +11,7 @@
  */
 
 /** Harness version. Bumped on each release. */
-export const HARNESS_VERSION = "0.3.1" as const;
+export const HARNESS_VERSION = "0.3.2" as const;
 
 export * from "./execution/index.js";
 export * from "./execution/subprocess.js";

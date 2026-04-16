@@ -1,6 +1,6 @@
 {
   "name": "@murmurations-ai/cli",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Command-line interface for the Murmuration Harness daemon — start, stop, status.",
   "license": "MIT",
   "author": "Emergent Praxis murmuration",
