@@ -1,9 +1,9 @@
 /**
  * `createLLMClient` factory + `LLMClient` wrapper.
  *
- * The wrapper delegates to one adapter. Provider is selected via the
- * discriminated `LLMClientConfig` union. Default cost hook / per-call
- * cost hook resolution happens here, not in adapters.
+ * ADR-0020: The wrapper delegates to VercelAdapter, which uses Vercel
+ * AI SDK's generateText() under the hood. Provider selection via
+ * discriminated `LLMClientConfig` union is unchanged.
  */
 
 import type { SecretValue } from "@murmurations-ai/core";
@@ -14,13 +14,11 @@ import type { RetryPolicy } from "./retry.js";
 import { resolveModelForTier } from "./tiers.js";
 import type { LLMClientCapabilities, LLMRequest, LLMResponse, ModelTier, Result } from "./types.js";
 import type { LLMAdapter } from "./adapters/adapter.js";
-import { createAnthropicAdapter } from "./adapters/anthropic.js";
-import { createGeminiAdapter } from "./adapters/gemini.js";
-import { createOllamaAdapter } from "./adapters/ollama.js";
-import { createOpenAIAdapter } from "./adapters/openai.js";
+import { VercelAdapter } from "./adapters/vercel-adapter.js";
+import { createVercelModel } from "./adapters/provider-registry.js";
 
 // ---------------------------------------------------------------------------
-// Public interface
+// Public interface (unchanged from pre-migration)
 // ---------------------------------------------------------------------------
 
 export interface CallOptions {
@@ -44,6 +42,7 @@ interface BaseClientConfig {
   readonly baseUrl?: string;
   readonly userAgent?: string;
   readonly fetch?: typeof fetch;
+  /** @deprecated Vercel AI SDK manages retries internally. */
   readonly retryPolicy?: RetryPolicy;
   readonly defaultCostHook?: LLMCostHook;
   readonly requestTimeoutMs?: number;
@@ -57,61 +56,28 @@ export type LLMClientConfig =
   | (BaseClientConfig & { readonly provider: "ollama"; readonly token: null });
 
 // ---------------------------------------------------------------------------
-// Factory
+// Factory (unchanged signature — lazy Vercel model creation)
 // ---------------------------------------------------------------------------
 
 export const createLLMClient = (config: LLMClientConfig): LLMClient => {
   const tier = config.tier ?? "balanced";
   const resolvedModel = config.model ?? resolveModelForTier(config.provider, tier);
 
-  let adapter: LLMAdapter;
-  switch (config.provider) {
-    case "gemini": {
-      adapter = createGeminiAdapter({
-        token: config.token,
-        model: resolvedModel,
-        ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
-        ...(config.userAgent !== undefined ? { userAgent: config.userAgent } : {}),
-        ...(config.fetch !== undefined ? { fetch: config.fetch } : {}),
-        ...(config.retryPolicy !== undefined ? { retryPolicy: config.retryPolicy } : {}),
-      });
-      break;
-    }
-    case "anthropic": {
-      adapter = createAnthropicAdapter({
-        token: config.token,
-        model: resolvedModel,
-        ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
-        ...(config.userAgent !== undefined ? { userAgent: config.userAgent } : {}),
-        ...(config.fetch !== undefined ? { fetch: config.fetch } : {}),
-        ...(config.retryPolicy !== undefined ? { retryPolicy: config.retryPolicy } : {}),
-      });
-      break;
-    }
-    case "openai": {
-      adapter = createOpenAIAdapter({
-        token: config.token,
-        model: resolvedModel,
-        ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
-        ...(config.userAgent !== undefined ? { userAgent: config.userAgent } : {}),
-        ...(config.fetch !== undefined ? { fetch: config.fetch } : {}),
-        ...(config.retryPolicy !== undefined ? { retryPolicy: config.retryPolicy } : {}),
-      });
-      break;
-    }
-    case "ollama": {
-      adapter = createOllamaAdapter({
-        model: resolvedModel,
-        ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
-        ...(config.userAgent !== undefined ? { userAgent: config.userAgent } : {}),
-        ...(config.fetch !== undefined ? { fetch: config.fetch } : {}),
-        ...(config.retryPolicy !== undefined ? { retryPolicy: config.retryPolicy } : {}),
-      });
-      break;
-    }
-  }
+  // Vercel model is created lazily on first complete() call to keep
+  // createLLMClient synchronous (preserves call-site compatibility).
+  let adapterPromise: Promise<LLMAdapter> | null = null;
 
-  return new LLMClientImpl(adapter, config.defaultCostHook);
+  const getAdapter = (): Promise<LLMAdapter> => {
+    adapterPromise ??= createVercelModel({
+      provider: config.provider,
+      model: resolvedModel,
+      token: config.provider === "ollama" ? null : config.token,
+      ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
+    }).then((vercelModel) => new VercelAdapter(config.provider, resolvedModel, vercelModel));
+    return adapterPromise;
+  };
+
+  return new LLMClientImpl(getAdapter, config.defaultCostHook);
 };
 
 // ---------------------------------------------------------------------------
@@ -119,27 +85,36 @@ export const createLLMClient = (config: LLMClientConfig): LLMClient => {
 // ---------------------------------------------------------------------------
 
 class LLMClientImpl implements LLMClient {
-  readonly #adapter: LLMAdapter;
+  readonly #getAdapter: () => Promise<LLMAdapter>;
   readonly #defaultCostHook: LLMCostHook | undefined;
 
-  public constructor(adapter: LLMAdapter, defaultCostHook: LLMCostHook | undefined) {
-    this.#adapter = adapter;
+  public constructor(
+    getAdapter: () => Promise<LLMAdapter>,
+    defaultCostHook: LLMCostHook | undefined,
+  ) {
+    this.#getAdapter = getAdapter;
     this.#defaultCostHook = defaultCostHook;
   }
 
-  public complete(
+  public async complete(
     request: LLMRequest,
-    options: CallOptions = {},
+    options?: CallOptions,
   ): Promise<Result<LLMResponse, LLMClientError>> {
-    const costHook = options.costHook ?? this.#defaultCostHook;
-    return this.#adapter.complete(request, {
-      ...(costHook !== undefined ? { costHook } : {}),
-      ...(options.signal !== undefined ? { signal: options.signal } : {}),
-      ...(options.idempotencyKey !== undefined ? { idempotencyKey: options.idempotencyKey } : {}),
+    const adapter = await this.#getAdapter();
+    const costHook = options?.costHook ?? this.#defaultCostHook;
+    const signal = options?.signal;
+    return adapter.complete(request, {
+      ...(costHook ? { costHook } : {}),
+      ...(signal ? { signal } : {}),
     });
   }
 
   public capabilities(): LLMClientCapabilities {
-    return this.#adapter.capabilities;
+    return {
+      supportsStreaming: true,
+      supportsToolUse: true,
+      supportsJsonMode: true,
+      maxContextTokens: 200_000,
+    };
   }
 }

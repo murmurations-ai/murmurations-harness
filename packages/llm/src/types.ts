@@ -52,12 +52,12 @@ export interface LLMResponse {
 
 /** Declarative description of what a given {@link LLMClient} instance can do. */
 export interface LLMClientCapabilities {
-  readonly provider: ProviderId;
-  readonly supportedTiers: readonly ModelTier[];
-  readonly supportsStreaming: false; // Phase 2: always false
-  readonly supportsToolUse: false; // Phase 2: always false
-  readonly supportsVision: false; // Phase 2: always false
-  readonly supportsJsonMode: false; // Phase 2: always false
+  readonly provider?: ProviderId | undefined;
+  readonly supportedTiers?: readonly ModelTier[] | undefined;
+  readonly supportsStreaming: boolean;
+  readonly supportsToolUse: boolean;
+  readonly supportsVision?: boolean | undefined;
+  readonly supportsJsonMode: boolean;
   readonly maxContextTokens: number;
 }
 
