@@ -13,7 +13,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { McpToolLoader } from "./tool-loader.js";
+import { McpToolLoader, extractTextContent } from "./tool-loader.js";
 import type { McpServerConfig } from "./tool-loader.js";
 
 describe("McpToolLoader", () => {
@@ -57,5 +57,56 @@ describe("McpToolLoader", () => {
     // the interface accepts the expected shape
     expect(config.env).toEqual({ SERVER_VAR: "server-value" });
     await loader.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractTextContent
+// ---------------------------------------------------------------------------
+
+describe("extractTextContent", () => {
+  it("extracts text from text content items", () => {
+    const content = [
+      { type: "text", text: "Hello" },
+      { type: "text", text: "World" },
+    ];
+    expect(extractTextContent(content)).toBe("Hello\nWorld");
+  });
+
+  it("returns single text item without newlines", () => {
+    const content = [{ type: "text", text: "Only one" }];
+    expect(extractTextContent(content)).toBe("Only one");
+  });
+
+  it("filters non-text content and falls back to JSON", () => {
+    const content = [
+      { type: "image", data: "base64..." },
+      { type: "resource", uri: "file://foo" },
+    ];
+    expect(extractTextContent(content)).toBe(JSON.stringify(content));
+  });
+
+  it("extracts text and ignores non-text items", () => {
+    const content = [
+      { type: "image", data: "base64..." },
+      { type: "text", text: "Found it" },
+    ];
+    expect(extractTextContent(content)).toBe("Found it");
+  });
+
+  it("returns JSON for non-array input", () => {
+    expect(extractTextContent("raw string")).toBe('"raw string"');
+    expect(extractTextContent(null)).toBe("null");
+    expect(extractTextContent(42)).toBe("42");
+    expect(extractTextContent({ foo: "bar" })).toBe('{"foo":"bar"}');
+  });
+
+  it("returns JSON for empty array", () => {
+    expect(extractTextContent([])).toBe("[]");
+  });
+
+  it("handles items with type text but missing text field", () => {
+    const content = [{ type: "text" }]; // no text field
+    expect(extractTextContent(content)).toBe(JSON.stringify(content));
   });
 });

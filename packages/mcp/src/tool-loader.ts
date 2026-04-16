@@ -36,8 +36,8 @@ export interface McpServerConfig {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Extract text from MCP callTool result.content (typed as unknown). */
-const extractTextContent = (raw: unknown): string => {
+/** Extract text from MCP callTool result.content (typed as unknown). @internal */
+export const extractTextContent = (raw: unknown): string => {
   if (!Array.isArray(raw)) return JSON.stringify(raw);
   const items = raw as readonly Record<string, unknown>[];
   const texts: string[] = [];

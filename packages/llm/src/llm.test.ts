@@ -11,6 +11,17 @@ import { makeSecretValue } from "@murmurations-ai/core";
 import { VercelAdapter } from "./adapters/vercel-adapter.js";
 import { createLLMClient } from "./client.js";
 import type { LLMCostHook } from "./cost-hook.js";
+import {
+  LLMUnauthorizedError,
+  LLMForbiddenError,
+  LLMRateLimitError,
+  LLMTransportError,
+  LLMContentPolicyError,
+  LLMContextLengthError,
+  LLMValidationError,
+  LLMParseError,
+  LLMInternalError,
+} from "./errors.js";
 import type { LLMRequest } from "./types.js";
 import { resolveModelForTier, MODEL_TIER_TABLE } from "./tiers.js";
 
@@ -310,6 +321,183 @@ describe("VercelAdapter", () => {
     if (result.ok) {
       expect(result.value.stopReason).toBe("tool_use");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Error mapping (mapError)
+// ---------------------------------------------------------------------------
+
+describe("VercelAdapter error mapping", () => {
+  const makeErrorModel = (err: Error | { statusCode: number; message: string }) => {
+    return new MockLanguageModelV3({
+      doGenerate: () => {
+        throw err instanceof Error
+          ? err
+          : Object.assign(new Error(err.message), { statusCode: err.statusCode });
+      },
+    });
+  };
+
+  it("maps 401 → LLMUnauthorizedError", async () => {
+    const adapter = new VercelAdapter(
+      "gemini",
+      "test",
+      makeErrorModel({ statusCode: 401, message: "bad key" }),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMUnauthorizedError);
+  });
+
+  it("maps 403 → LLMForbiddenError", async () => {
+    const adapter = new VercelAdapter(
+      "openai",
+      "test",
+      makeErrorModel({ statusCode: 403, message: "forbidden" }),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMForbiddenError);
+  });
+
+  it("maps 429 → LLMRateLimitError", async () => {
+    const adapter = new VercelAdapter(
+      "anthropic",
+      "test",
+      makeErrorModel({ statusCode: 429, message: "slow down" }),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMRateLimitError);
+  });
+
+  it("maps 500 → LLMTransportError", async () => {
+    const adapter = new VercelAdapter(
+      "gemini",
+      "test",
+      makeErrorModel({ statusCode: 500, message: "server error" }),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMTransportError);
+  });
+
+  it("maps 503 → LLMTransportError", async () => {
+    const adapter = new VercelAdapter(
+      "ollama",
+      "test",
+      makeErrorModel({ statusCode: 503, message: "unavailable" }),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMTransportError);
+  });
+
+  it("maps 400 → LLMValidationError", async () => {
+    const adapter = new VercelAdapter(
+      "openai",
+      "test",
+      makeErrorModel({ statusCode: 400, message: "bad request" }),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMValidationError);
+  });
+
+  it("maps 422 → LLMValidationError", async () => {
+    const adapter = new VercelAdapter(
+      "openai",
+      "test",
+      makeErrorModel({ statusCode: 422, message: "unprocessable" }),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMValidationError);
+  });
+
+  it("maps content filter message → LLMContentPolicyError", async () => {
+    const adapter = new VercelAdapter(
+      "openai",
+      "test",
+      makeErrorModel(new Error("content filter violation")),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMContentPolicyError);
+  });
+
+  it("maps content policy message → LLMContentPolicyError", async () => {
+    const adapter = new VercelAdapter(
+      "gemini",
+      "test",
+      makeErrorModel(new Error("blocked by content policy")),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMContentPolicyError);
+  });
+
+  it("maps context length message → LLMContextLengthError", async () => {
+    const adapter = new VercelAdapter(
+      "anthropic",
+      "test",
+      makeErrorModel(new Error("context too long")),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMContextLengthError);
+  });
+
+  it("maps max tokens message → LLMContextLengthError", async () => {
+    const adapter = new VercelAdapter(
+      "openai",
+      "test",
+      makeErrorModel(new Error("exceeds max tokens")),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMContextLengthError);
+  });
+
+  it("maps parse error message → LLMParseError", async () => {
+    const adapter = new VercelAdapter(
+      "gemini",
+      "test",
+      makeErrorModel(new Error("failed to parse response")),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMParseError);
+  });
+
+  it("maps unknown error → LLMInternalError", async () => {
+    const adapter = new VercelAdapter(
+      "gemini",
+      "test",
+      makeErrorModel(new Error("something unexpected")),
+    );
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBeInstanceOf(LLMInternalError);
+  });
+
+  it("re-throws AbortError (not wrapped)", async () => {
+    const abort = new DOMException("aborted", "AbortError");
+    const model = new MockLanguageModelV3({
+      doGenerate: () => {
+        throw abort;
+      },
+    });
+    const adapter = new VercelAdapter("gemini", "test", model);
+    await expect(adapter.complete(makeRequest(), {})).rejects.toThrow("aborted");
+  });
+
+  it("preserves provider in error", async () => {
+    const adapter = new VercelAdapter("anthropic", "claude-3", makeErrorModel(new Error("oops")));
+    const result = await adapter.complete(makeRequest(), {});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.provider).toBe("anthropic");
   });
 });
 
