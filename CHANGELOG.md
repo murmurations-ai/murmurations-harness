@@ -3,6 +3,18 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.1] - 2026-04-15
+
+### Added
+
+- **AgentSkills.io integration** — Three-Tier Progressive Disclosure for agent skills. SkillScanner recursively scans `skills/` directory for `SKILL.md` files, parses YAML frontmatter (name, description), and injects `<available_skills>` XML block into agent system prompts. Agents use MCP `read` tool to load full skill instructions on demand. 100% interoperable with OpenClaw and Claude Code SKILL.md format.
+- 14 new skill scanner tests (scanning, parsing, XML formatting, edge cases)
+- 441 total tests across 37 files
+
+### Dependencies
+
+- Added: `gray-matter` (in core, for SKILL.md frontmatter parsing)
+
 ## [0.3.0] - 2026-04-15
 
 ### Added

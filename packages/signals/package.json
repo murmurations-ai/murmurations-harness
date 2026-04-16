@@ -1,6 +1,6 @@
 {
   "name": "@murmurations-ai/signals",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Default SignalAggregator for the Murmuration Harness — github + filesystem sources with interim trust taxonomy.",
   "license": "MIT",
   "author": "Emergent Praxis murmuration",

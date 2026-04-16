@@ -13,6 +13,7 @@ The harness follows a strict "borrow infrastructure, build differentiators" prin
 
 - [Vercel AI SDK](https://sdk.vercel.ai/) — LLM calls, streaming, tool calling, structured output
 - [MCP TypeScript SDK](https://modelcontextprotocol.io/) — standardized tool exposure for agents
+- [AgentSkills.io](https://agentskills.io) — portable skill format (SKILL.md) with Three-Tier Progressive Disclosure
 - [Langfuse](https://langfuse.com/) via OpenTelemetry — LLM observability and tracing
 
 **Build (our differentiators — untouched by borrowed infrastructure):**
@@ -21,7 +22,7 @@ The harness follows a strict "borrow infrastructure, build differentiators" prin
 - Multi-agent murmuration coordination (scheduler, executor, identity chain, signal aggregation)
 - GitHub state sync (issues as coordination layer, structured actions, write-scope enforcement)
 
-The LLM layer (`@murmurations-ai/llm`) wraps Vercel AI SDK's `generateText()` behind our `LLMClient` interface, adding errors-as-values (`Result<T, LLMClientError>`), per-call cost tracking, and a 10-class error taxonomy. The MCP layer (`@murmurations-ai/mcp`) connects to MCP servers at wake time and converts their tools to Vercel-compatible `ToolDefinition[]` via `jsonSchema()`. Langfuse observability is opt-in: set two env vars and every LLM call reports spans automatically.
+The LLM layer (`@murmurations-ai/llm`) wraps Vercel AI SDK's `generateText()` behind our `LLMClient` interface, adding errors-as-values (`Result<T, LLMClientError>`), per-call cost tracking, and a 10-class error taxonomy. The MCP layer (`@murmurations-ai/mcp`) connects to MCP servers at wake time and converts their tools to Vercel-compatible `ToolDefinition[]` via `jsonSchema()`. The SkillScanner (`packages/core/src/skills/`) implements AgentSkills.io's Three-Tier Progressive Disclosure: scans `skills/` for `SKILL.md` frontmatter at wake time, injects `<available_skills>` XML into the system prompt, and agents load full skill content on demand via MCP `read` tool. Langfuse observability is opt-in: set two env vars and every LLM call reports spans automatically.
 
 ---
 

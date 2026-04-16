@@ -60,7 +60,7 @@ Read these before writing code:
 
 1. Fork the repo and create a branch from `main`
 2. Run `pnpm check` before pushing — CI runs the same checks
-3. Write tests for new features (36 test files, 427+ tests)
+3. Write tests for new features (37 test files, 441+ tests)
 4. Follow the Engineering Standards in `docs/ARCHITECTURE.md`
 5. One PR per concern — don't bundle unrelated changes
 

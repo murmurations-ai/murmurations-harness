@@ -82,6 +82,7 @@ Each release targets a GitHub Milestone. Issues are assigned to milestones durin
 | v0.1.0  | —              | Initial publish (7 packages, 353 tests)                                      | **Released** |
 | v0.2.0  | tmux CLI       | ADR-0018: protocol.ts, parity matrix, batch verbs, REPL                      | **Released** |
 | v0.3.0  | Vercel + MCP   | ADR-0020: Vercel AI SDK, tool calling, MCP, Langfuse (8 packages, 427 tests) | **Released** |
+| v0.3.1  | AgentSkills    | Three-Tier Progressive Disclosure, SKILL.md scanner (441 tests)              | **Released** |
 | v0.4.0  | Multi-instance | Phase 6: multiple daemons, one repo                                          | Planning     |
 | v1.0.0  | Stable API     | Public API freeze, migration guide, Docker                                   | Planning     |
 

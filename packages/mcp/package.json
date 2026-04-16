@@ -1,6 +1,6 @@
 {
   "name": "@murmurations-ai/mcp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "MCP tool loader for the Murmuration Harness — connects to MCP servers and converts tools to LLM-compatible format.",
   "license": "MIT",
   "author": "Emergent Praxis murmuration",
