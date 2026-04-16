@@ -77,13 +77,13 @@ Each release targets a GitHub Milestone. Issues are assigned to milestones durin
 
 ### Current milestones
 
-| Version | Milestone          | Theme                                             | Status       |
-| ------- | ------------------ | ------------------------------------------------- | ------------ |
-| v0.1.0  | —                  | Initial publish                                   | **Released** |
-| v0.2.0  | tmux CLI           | ADR-0018: protocol.ts, parity matrix, batch verbs | Planning     |
-| v0.3.0  | Persistent context | ADR-0019: PersistentContextExecutor               | Planning     |
-| v0.4.0  | Multi-instance     | Phase 6: multiple daemons, one repo               | Planning     |
-| v1.0.0  | Stable API         | Public API freeze, migration guide, Docker        | Planning     |
+| Version | Milestone      | Theme                                                                        | Status       |
+| ------- | -------------- | ---------------------------------------------------------------------------- | ------------ |
+| v0.1.0  | —              | Initial publish (7 packages, 353 tests)                                      | **Released** |
+| v0.2.0  | tmux CLI       | ADR-0018: protocol.ts, parity matrix, batch verbs, REPL                      | **Released** |
+| v0.3.0  | Vercel + MCP   | ADR-0020: Vercel AI SDK, tool calling, MCP, Langfuse (8 packages, 427 tests) | **Released** |
+| v0.4.0  | Multi-instance | Phase 6: multiple daemons, one repo                                          | Planning     |
+| v1.0.0  | Stable API     | Public API freeze, migration guide, Docker                                   | Planning     |
 
 ## Changelog
 

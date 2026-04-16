@@ -4,7 +4,7 @@
 
 The Murmuration Harness is an open-source TypeScript runtime that lets a single human — the **Source** — coordinate a murmuration of AI agents to do real work. It is not an autonomous agent framework. It is a tool that amplifies human agency.
 
-> **Status:** Active development. Core runtime, CLI, web dashboard, 5 governance models, and 366 tests. See [docs/EXECUTION-PLAN.md](./docs/EXECUTION-PLAN.md) for detailed status.
+> **v0.3.0** — Vercel AI SDK, MCP tool calling, Langfuse observability. 8 packages on npm, 427 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
 
 ## Philosophy: Source as a human role
 
@@ -17,20 +17,18 @@ The harness is built on the concept of **Source** — the person who holds the c
 - Sets the bright lines that agents must never cross
 - Bears the risk and accountability that AI cannot hold
 
-The harness is designed around this insight: **AI agents are powerful tools, but the driver must be human.** A murmuration without a Source is a swarm without purpose. The governance models, the agent identity chain (soul → role), the decision tiers (autonomous / notify / consent / source-only) — all of these exist to keep Source in control while letting agents do the heavy lifting.
-
 Think of it as a suit of power armor: the human provides the direction, the judgment, and the values. The harness provides the strength, the reach, and the tirelessness. Neither is useful without the other.
 
 ## What this is
 
-The harness runs any number of AI agents as a coordinated "murmuration" — scheduling agent wakes, coordinating work via GitHub Issues, running governance rounds, and providing operator visibility through CLI, TUI, and web dashboards. GitHub is the system of record for all collaborative state.
+The harness runs any number of AI agents as a coordinated "murmuration" — scheduling wakes, coordinating work via GitHub Issues, running governance rounds, and providing operator visibility through CLI, TUI, and web dashboards. GitHub is the system of record for all collaborative state.
 
 ### Design principles
 
 1. **Source is human** — the harness amplifies human agency, it does not replace it
 2. **Pluggable governance** — choose your decision-making model (S3, Chain of Command, Meritocratic, Consensus, Parliamentary) or write your own
 3. **GitHub-first** — GitHub Issues are the async coordination layer; the harness reads and writes them
-4. **LLM-agnostic** — bring your own API keys (Gemini, Anthropic, OpenAI, Ollama)
+4. **Borrow infrastructure, build differentiators** — Vercel AI SDK for LLM calls, MCP for tools, Langfuse for observability; build only governance, coordination, and GitHub sync
 5. **Agents wake and figure out what to do** — they read signals and decide, not task-specific prompts
 6. **Real work, not theater** — every action produces artifacts; meetings execute structured actions against GitHub
 7. **Identity is inherited** — murmuration soul → agent soul → role; governance and operations are separate concerns
@@ -38,57 +36,100 @@ The harness runs any number of AI agents as a coordinated "murmuration" — sche
 ## Quick start
 
 ```bash
-# Coming soon (Phase 7 — npm publish):
+# Prerequisites: Node 20+, pnpm 9+
 npm install -g @murmurations-ai/cli
+
 murmuration init my-murmuration
-murmuration start --name my-murmuration
+cd my-murmuration
+
+# Add API keys to .env:
+#   GEMINI_API_KEY=...    (or ANTHROPIC_API_KEY, OPENAI_API_KEY)
+#   GITHUB_TOKEN=...
+
+murmuration start
 ```
 
-Until then, install from source:
+Or install from source:
 
 ```bash
-# Prerequisites: Node 20+, pnpm 9+
 git clone https://github.com/murmurations-ai/murmurations-harness.git
 cd murmurations-harness
 pnpm install && pnpm build
 
-# Alias for convenience (add to your shell profile)
 alias murmuration="node $(pwd)/packages/cli/dist/bin.js"
-
-# Create a new murmuration
 murmuration init ../my-murmuration
-
-# Edit .env with your API keys, then:
 murmuration start --root ../my-murmuration
 ```
 
 See [docs/GETTING-STARTED.md](./docs/GETTING-STARTED.md) for the full walkthrough.
+
+## LLM providers
+
+The harness uses the [Vercel AI SDK](https://sdk.vercel.ai/) (ADR-0020) for all LLM calls. Four providers are supported out of the box:
+
+| Provider          | Package                       | Model examples                   |
+| ----------------- | ----------------------------- | -------------------------------- |
+| **Google Gemini** | `@ai-sdk/google`              | gemini-2.5-flash, gemini-2.5-pro |
+| **Anthropic**     | `@ai-sdk/anthropic`           | claude-sonnet-4-20250514         |
+| **OpenAI**        | `@ai-sdk/openai`              | gpt-4o, gpt-4o-mini              |
+| **Ollama**        | `@ai-sdk/openai` (compatible) | llama3, mistral                  |
+
+Configure per agent in `role.md`:
+
+```yaml
+llm:
+  provider: "gemini"
+  model: "gemini-2.5-flash"
+```
+
+### Tool calling (MCP)
+
+Agents can use tools during wakes via the [Model Context Protocol](https://modelcontextprotocol.io/). Declare MCP servers in `role.md`:
+
+```yaml
+tools:
+  mcp:
+    - name: filesystem
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "./workspace"]
+    - name: github
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-github"]
+      env:
+        GITHUB_TOKEN: "$GITHUB_TOKEN"
+```
+
+At wake time, the runner connects to declared MCP servers, discovers tools, and passes them to the LLM. The LLM can call tools in a multi-step loop (up to 5 rounds). Connections are cleaned up after each wake.
+
+### Observability (Langfuse)
+
+Set `LANGFUSE_SECRET_KEY` and `LANGFUSE_PUBLIC_KEY` in your environment. The harness automatically reports LLM spans to [Langfuse](https://langfuse.com/) via OpenTelemetry — token usage, latency, model info, and cost per wake. If the keys are absent, observability is a silent no-op.
 
 ## Repository layout
 
 ```
 murmurations-harness/
 ├── packages/
-│   ├── core/              # @murmurations-ai/core — daemon, scheduler, executors, governance, signals
-│   ├── cli/               # @murmurations-ai/cli — `murmuration` CLI (start, stop, attach, init, etc.)
-│   ├── github/            # @murmurations-ai/github — typed GitHub client with write-scope enforcement
-│   ├── llm/               # @murmurations-ai/llm — multi-provider LLM client (Gemini, Anthropic, OpenAI, Ollama)
-│   ├── signals/           # @murmurations-ai/signals — signal aggregator (GitHub issues, filesystem)
-│   ├── secrets-dotenv/    # @murmurations-ai/secrets-dotenv — .env secrets provider
-│   └── dashboard-tui/     # @murmurations-ai/dashboard-tui — terminal UI dashboard
+│   ├── core/              # Daemon, scheduler, executors, governance, runner, signals
+│   ├── cli/               # `murmuration` CLI (start, stop, attach, init, etc.)
+│   ├── github/            # Typed GitHub client with write-scope enforcement
+│   ├── llm/               # Vercel AI SDK adapter (Gemini, Anthropic, OpenAI, Ollama)
+│   ├── mcp/               # MCP tool loader (connects to MCP servers at wake time)
+│   ├── signals/           # Signal aggregator (GitHub issues, filesystem)
+│   ├── secrets-dotenv/    # .env secrets provider
+│   └── dashboard-tui/     # Terminal UI dashboard
 ├── examples/
-│   ├── governance-s3/           # Self-Organizing (Sociocracy 3.0) governance plugin
-│   ├── governance-command/      # Chain of Command governance plugin
-│   ├── governance-meritocratic/ # Meritocratic governance plugin
-│   ├── governance-consensus/    # Full Consensus governance plugin
-│   ├── governance-parliamentary/# Parliamentary governance plugin
-│   └── hello-world-agent/       # Minimal agent for testing
+│   ├── governance-s3/           # Self-Organizing (Sociocracy 3.0)
+│   ├── governance-command/      # Chain of Command
+│   ├── governance-meritocratic/ # Meritocratic
+│   ├── governance-consensus/    # Full Consensus
+│   ├── governance-parliamentary/# Parliamentary
+│   ├── hello-world-agent/       # Minimal agent for testing
+│   └── research-agent/          # Full ADR-0016 research agent example
 ├── docs/
 │   ├── ARCHITECTURE.md          # Architecture + 10 Engineering Standards
 │   ├── GETTING-STARTED.md       # Setup guide
-│   ├── LINT-DESIGN-GUIDE.md     # TypeScript patterns for strict mode
-│   ├── CLI-TMUX-DESIGN.md       # tmux-style CLI design spec (ADR-0018)
-│   └── adr/                     # 19 Architecture Decision Records
+│   └── adr/                     # 20 Architecture Decision Records
 └── .github/workflows/ci.yml    # CI: build, typecheck, lint, format, test (Node 20 + 22)
 ```
 
@@ -96,23 +137,23 @@ murmurations-harness/
 
 ```bash
 # Daemon lifecycle
-murmuration init [dir]                      # Interactive scaffolding for a new murmuration
+murmuration init [dir]                      # Interactive scaffolding
 murmuration start [--root|--name] [flags]   # Start the daemon
 murmuration stop [--root|--name]            # Stop the daemon
 murmuration restart [--root|--name]         # Stop + start
 murmuration status [--root|--name]          # Show agent status
 
 # Session management
-murmuration attach <name>                   # Interactive REPL (:status, :agents, :wake, etc.)
-murmuration list                            # Show all registered murmurations with liveness
-murmuration register <name> --root <path>   # Register a murmuration by name
-murmuration config [edit|path]              # Show/edit ~/.murmuration/config.toml
+murmuration attach <name>                   # Interactive REPL
+murmuration list                            # Show registered murmurations
+murmuration register <name> --root <path>   # Register by name
+murmuration config [edit|path]              # Show/edit config.toml
 
 # Queries (require running daemon)
-murmuration agents [--root|--name] [--json] [--filter running|idle|failed]
-murmuration groups [--root|--name] [--json]
-murmuration events [--root|--name] [--json]
-murmuration cost   [--root|--name] [--json]
+murmuration agents [--json] [--filter running|idle|failed]
+murmuration groups [--json]
+murmuration events [--json]
+murmuration cost   [--json]
 
 # Actions
 murmuration directive [flags] "message"     # Send a Source directive
@@ -126,18 +167,9 @@ Flags: `--agent <id>`, `--dry-run`, `--once`, `--now`, `--governance <path>`, `-
 
 ## Web dashboard
 
-Set `MURMURATION_HTTP_PORT=3210` and visit `http://localhost:3210/dashboard`. The dashboard shows:
-
-- Murmuration overview (agents, groups, wakes, artifacts, idle rate)
-- Governance items (pending + resolved, with Convene button for Source)
-- Recent meetings (fetched from GitHub — source of truth)
-- Groups with member stats and meeting history
-- Agents with sort/filter, wake buttons, and detail modals
-- Daemon log viewer with level filtering
+Set `MURMURATION_HTTP_PORT=3210` and visit `http://localhost:3210/dashboard`. Shows agents, groups, governance items, meetings, cost tracking, and daemon logs.
 
 ## Governance models
-
-The harness ships with 5 governance plugins in `examples/`:
 
 | Model                    | Decision method                | Terminology                   |
 | ------------------------ | ------------------------------ | ----------------------------- |
@@ -149,23 +181,15 @@ The harness ships with 5 governance plugins in `examples/`:
 
 Select at boot: `murmuration start --governance examples/governance-s3/index.mjs`
 
-Or configure in `murmuration/harness.yaml`:
-
-```yaml
-governance:
-  model: "self-organizing"
-  plugin: "@murmurations-ai/governance-s3"
-```
-
 ## Development
 
 ```bash
 pnpm install              # install dependencies
-pnpm build                # build all packages
+pnpm build                # build all 8 packages
 pnpm typecheck            # tsc --noEmit across all packages
 pnpm lint                 # eslint (strict-type-checked)
 pnpm format:check         # prettier check
-pnpm test                 # vitest (366 tests, 31 files)
+pnpm test                 # vitest (427 tests, 36 files)
 pnpm check                # all of the above (CI locally)
 ```
 
@@ -174,6 +198,7 @@ pnpm check                # all of the above (CI locally)
 See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the full architecture, including:
 
 - Architecture layers (Source → GitHub → Harness → Governance → Strategy → Dashboard)
+- Borrow vs Build (Vercel AI SDK, MCP, Langfuse vs governance, coordination, GitHub sync)
 - GitHub as System of Record
 - Structured actions (MeetingAction, WakeAction)
 - Post-wake validation and "Did Work" enforcement
@@ -185,4 +210,4 @@ MIT — see [LICENSE](./LICENSE).
 
 ## Provenance
 
-Built in public by the [Emergent Praxis](https://github.com/xeeban/emergent-praxis) murmuration. Source: Nori Nishigaya (@xeeban).
+Built in public by the [Emergent Praxis](https://github.com/xeeban/emergent-praxis) murmuration. Source: Nori Nishigaya ([@xeeban](https://github.com/xeeban)).

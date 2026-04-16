@@ -43,23 +43,24 @@ Read these before writing code:
 
 ## Monorepo structure
 
-7 packages in `packages/`:
+8 packages in `packages/`:
 
-| Package                           | What it does                                                      |
-| --------------------------------- | ----------------------------------------------------------------- |
-| `@murmurations-ai/core`           | Daemon, scheduler, executors, governance, signals, identity, cost |
-| `@murmurations-ai/cli`            | `murmuration` CLI (start, stop, attach, init, etc.)               |
-| `@murmurations-ai/github`         | Typed GitHub client with write-scope enforcement                  |
-| `@murmurations-ai/llm`            | Multi-provider LLM client (Gemini, Anthropic, OpenAI, Ollama)     |
-| `@murmurations-ai/signals`        | Signal aggregator (GitHub issues, filesystem)                     |
-| `@murmurations-ai/secrets-dotenv` | .env secrets provider                                             |
-| `@murmurations-ai/dashboard-tui`  | Terminal UI dashboard                                             |
+| Package                           | What it does                                                                       |
+| --------------------------------- | ---------------------------------------------------------------------------------- |
+| `@murmurations-ai/core`           | Daemon, scheduler, executors, governance, runner, identity, cost                   |
+| `@murmurations-ai/cli`            | `murmuration` CLI (start, stop, attach, init, etc.)                                |
+| `@murmurations-ai/github`         | Typed GitHub client with write-scope enforcement                                   |
+| `@murmurations-ai/llm`            | Vercel AI SDK adapter + Langfuse observability (Gemini, Anthropic, OpenAI, Ollama) |
+| `@murmurations-ai/mcp`            | MCP tool loader (connects to MCP servers, converts tools for LLM)                  |
+| `@murmurations-ai/signals`        | Signal aggregator (GitHub issues, filesystem)                                      |
+| `@murmurations-ai/secrets-dotenv` | .env secrets provider                                                              |
+| `@murmurations-ai/dashboard-tui`  | Terminal UI dashboard                                                              |
 
 ## Pull requests
 
 1. Fork the repo and create a branch from `main`
 2. Run `pnpm check` before pushing — CI runs the same checks
-3. Write tests for new features (31 test files, 366+ tests)
+3. Write tests for new features (36 test files, 427+ tests)
 4. Follow the Engineering Standards in `docs/ARCHITECTURE.md`
 5. One PR per concern — don't bundle unrelated changes
 
