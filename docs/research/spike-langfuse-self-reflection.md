@@ -6,7 +6,9 @@
 
 ## Vision
 
-A self-improving murmuration where agents observe their own performance data, identify patterns, and propose governance changes through the existing S3 consent process. Langfuse closes the feedback loop: agents don't just produce output — they learn from how they produce it.
+A self-improving murmuration where agents observe their own performance data, identify patterns, and propose governance changes through whatever governance model the murmuration uses. Langfuse closes the feedback loop: agents don't just produce output — they learn from how they produce it.
+
+**Governance-agnostic by design.** The self-reflection pipeline produces data and proposals. The governance plugin decides what happens next — whether that's S3 consent rounds, Chain of Command authority approval, meritocratic expert review, consensus, or parliamentary vote. The harness never prescribes the governance flow.
 
 ```
 Agent wake → LLM call → Langfuse trace
@@ -41,7 +43,15 @@ Today, an agent's self-reflection is limited to a single line: `EFFECTIVENESS: h
 - Wake on 2026-04-14 cost $0.031 (2.4x average) — unusually long output.
 ```
 
-An agent seeing this might file: `TENSION: My input token count has grown 35% this week. I propose reviewing my system prompt for unnecessary content to reduce cost without losing effectiveness.`
+An agent seeing this might file a `GOVERNANCE_EVENT`: `TENSION: My input token count has grown 35% this week. I propose reviewing my system prompt for unnecessary content to reduce cost without losing effectiveness.`
+
+What happens next depends entirely on the governance plugin:
+
+- **S3:** The tension enters a consent round — the circle discusses, proposes, consents or objects
+- **Chain of Command:** The tension goes to Source for a directive — approve, reject, or modify
+- **Meritocratic:** The relevant expert (e.g., Performance Agent #27) evaluates and scores the proposal
+- **Consensus:** All circle members must agree before the change is made
+- **Parliamentary:** The proposal becomes a motion, debated, and voted on by majority
 
 ## Architecture: Three integration layers
 
@@ -245,7 +255,8 @@ Phases 1 and 2 can ship independently. Phase 3 is the core integration. Phases 4
 
 - Agents learn which prompt patterns produce the best artifact-to-cost ratio
 - Circles evolve their own meeting cadence based on measured throughput
-- The murmuration self-tunes: wake schedules, model tiers, token budgets, and tool configurations all adapt through governance rather than manual tuning
+- The murmuration self-tunes: wake schedules, model tiers, token budgets, and tool configurations all adapt through the governance system rather than manual tuning
+- Different governance models produce different improvement dynamics: S3 murmurations self-improve through consent-driven experimentation; Command murmurations improve through Source-directed optimization; Meritocratic murmurations improve through expert-weighted evaluation
 
 ## Dependencies
 
@@ -257,5 +268,6 @@ Phases 1 and 2 can ship independently. Phase 3 is the core integration. Phases 4
 
 1. **API rate limits** — Langfuse API has rate limits. Querying 28 agents at wake time = 28 API calls. Mitigate: cache metrics per wake cycle, not per agent.
 2. **Cold start** — New murmurations have no historical data. The signal source should gracefully return empty when insufficient data exists.
-3. **Circular feedback** — An agent that sees "high cost" might produce shorter output, which tanks quality, which triggers "low effectiveness," which triggers more prompt changes. Mitigate: the skill should emphasize proposing changes through governance (human consent), not self-modifying.
+3. **Circular feedback** — An agent that sees "high cost" might produce shorter output, which tanks quality, which triggers "low effectiveness," which triggers more prompt changes. Mitigate: agents MUST propose changes through the governance system, never self-modify. The governance plugin — whatever model it uses — ensures a human or structured process evaluates the proposal before any change takes effect. This is the fundamental safety guarantee: the feedback loop goes through governance, not around it.
 4. **Privacy** — Langfuse data includes full prompts. The metrics signal should only include aggregated numbers, not prompt content.
+5. **Governance model coupling** — The self-reflection pipeline must remain governance-agnostic. It produces `GOVERNANCE_EVENT` signals. The `GovernancePlugin` interface handles everything downstream. Never hardcode S3 consent patterns, Chain of Command approval flows, or any model-specific behavior into the metrics or skill layers.
