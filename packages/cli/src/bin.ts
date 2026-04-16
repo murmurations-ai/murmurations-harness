@@ -169,7 +169,7 @@ const showStatus = async (rootDir: string): Promise<void> => {
 };
 
 interface StartArgs {
-  readonly rootDir: string | undefined;
+  readonly rootDir: string;
   readonly agentDir: string | undefined;
   readonly dryRun: boolean;
   readonly once: boolean;
@@ -234,9 +234,22 @@ const parseStartArgs = (rest: readonly string[]): StartArgs => {
       throw new Error(`unknown argument: ${arg ?? "(undefined)"}`);
     }
   }
-  // Auto-detect: if no --root and current directory has murmuration/, use cwd
-  if (!rootDir && existsSync(resolve(process.cwd(), "murmuration"))) {
-    rootDir = process.cwd();
+  // If --root was given, use it (and verify murmuration/ exists there)
+  if (rootDir) {
+    if (!existsSync(resolve(rootDir, "murmuration"))) {
+      throw new Error(`Not a murmuration: ${rootDir} (no murmuration/ directory found)`);
+    }
+  } else {
+    // Auto-detect: if current directory has murmuration/, use cwd
+    if (existsSync(resolve(process.cwd(), "murmuration"))) {
+      rootDir = process.cwd();
+    } else {
+      throw new Error(
+        "No murmuration found. Either:\n" +
+          "  - cd to a directory containing a murmuration/ folder, or\n" +
+          "  - use --root <path> to specify the murmuration location",
+      );
+    }
   }
 
   return { rootDir, agentDir, dryRun, once, now, governancePath, collaboration, logLevel };
@@ -298,7 +311,7 @@ const main = async (): Promise<void> => {
     case "start": {
       const args = parseStartArgs(argv.slice(1));
       await bootDaemon({
-        ...(args.rootDir !== undefined ? { rootDir: args.rootDir } : {}),
+        rootDir: args.rootDir,
         ...(args.agentDir !== undefined ? { agentDir: args.agentDir } : {}),
         ...(args.dryRun ? { dryRun: true } : {}),
         ...(args.once ? { once: true } : {}),
