@@ -22,6 +22,30 @@ This works well for open-source murmurations, but couples the harness to GitHub.
 
 The ADR-0020 migration proved the "borrow infrastructure, build differentiators" pattern: abstract the _what_ we need, let the ecosystem provide the _how_. The same principle applies here — GitHub is the default tool, not the only tool.
 
+## Key Insight: Murmuration Repo vs Product Repos
+
+Every murmuration has a two-tier repo architecture:
+
+**Murmuration repo (ONE, private by default):** The murmuration's home — governance, operations, agent identity, meetings, signals, and runtime state. This is where the `CollaborationProvider` writes by default.
+
+**Product repos (MANY, public or private):** What the murmuration _builds_ — code, content, documentation, courses, designs. Agents access these via MCP tools or explicit write scopes for committing artifacts.
+
+```
+my-murmuration/                    ← murmuration repo (private)
+├── agents/                        ← identity docs
+├── governance/                    ← consent rounds, decisions, circles
+├── notes/                         ← meeting minutes, daily notes
+└── .murmuration/                  ← runtime state
+
+org/product-a/                     ← product repo (public)
+├── packages/                      ← code
+└── docs/                          ← technical docs
+
+org/product-b/                     ← another product repo
+```
+
+A murmuration may work on many products simultaneously, but its governance and operations are unified in one place. Internal meeting discussions, role amendments, and governance tensions must not pollute public product repos.
+
 ## Decision
 
 ### §1 — Define a `CollaborationProvider` interface
@@ -78,15 +102,22 @@ interface CollaborationProvider {
 
 The existing `@murmurations-ai/github` package becomes the implementation of `CollaborationProvider` for GitHub. No breaking changes — `createGithubClient()` stays, the provider wraps it.
 
-### §3 — Provider is selected at boot
+### §3 — Provider is selected at boot, targeting the murmuration repo
 
 ```yaml
-# murmuration/harness.yaml (or CLI flag)
+# murmuration/harness.yaml
 collaboration:
-  provider: "github" # default
-  # provider: "local"  # local markdown files
-  # provider: "gitlab"
+  provider: "github" # or "local", "gitlab"
+  repo: "xeeban/emergent-praxis" # the murmuration's governance home
+
+products: # repos the murmuration works on
+  - name: harness
+    repo: "murmurations-ai/murmurations-harness"
+  - name: website
+    repo: "xeeban/emergent-praxis-site"
 ```
+
+The `CollaborationProvider` targets the murmuration repo by default for all governance, signals, and operational coordination. Product repos are accessed by agents via MCP tools or explicit `branch_commits` write scopes for committing code/content artifacts.
 
 Or via CLI: `murmuration start --collaboration local`
 
