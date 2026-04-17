@@ -391,3 +391,96 @@ describe("DefaultSignalAggregator", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Collaboration provider integration (ADR-0021)
+// ---------------------------------------------------------------------------
+
+describe("DefaultSignalAggregator + collaborationProvider", () => {
+  it("includes signals from collaboration provider", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "sig-collab-"));
+    try {
+      await mkdir(join(rootDir, "notes", "private"), { recursive: true });
+      await mkdir(join(rootDir, "notes", "inbox"), { recursive: true });
+
+      const mockProvider = {
+        collectSignals: () =>
+          Promise.resolve([
+            {
+              kind: "custom" as const,
+              id: "local-item-abc",
+              trust: "trusted" as const,
+              fetchedAt: new Date(),
+              sourceId: "local-item",
+              data: {
+                id: "abc",
+                title: "Test directive",
+                body: "Do something",
+                labels: ["source-directive"],
+              },
+            },
+          ]),
+      };
+
+      const agg = new DefaultSignalAggregator({
+        rootDir,
+        collaborationProvider: mockProvider,
+      });
+
+      const result = await agg.aggregate(mkContext("the-researcher"));
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const localItems = result.bundle.signals.filter(
+          (s) => s.kind === "custom" && (s as { sourceId?: string }).sourceId === "local-item",
+        );
+        expect(localItems.length).toBeGreaterThanOrEqual(1);
+      }
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("works without collaboration provider (returns only filesystem signals)", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "sig-no-collab-"));
+    try {
+      await mkdir(join(rootDir, "notes", "private"), { recursive: true });
+      await mkdir(join(rootDir, "notes", "inbox"), { recursive: true });
+
+      const agg = new DefaultSignalAggregator({ rootDir });
+      const result = await agg.aggregate(mkContext("the-researcher"));
+      expect(result.ok).toBe(true);
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handles collaboration provider errors gracefully", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "sig-collab-err-"));
+    try {
+      await mkdir(join(rootDir, "notes", "private"), { recursive: true });
+      await mkdir(join(rootDir, "notes", "inbox"), { recursive: true });
+
+      const failingProvider = {
+        collectSignals: () => Promise.reject(new Error("provider crashed")),
+      };
+
+      const agg = new DefaultSignalAggregator({
+        rootDir,
+        collaborationProvider: failingProvider,
+      });
+
+      const result = await agg.aggregate(mkContext("the-researcher"));
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // The #collectCollaborationItems method catches errors internally
+        // and returns [], so it resolves (not rejects). No warning — graceful.
+        const localItems = result.bundle.signals.filter(
+          (s) => s.kind === "custom" && (s as { sourceId?: string }).sourceId === "local-item",
+        );
+        expect(localItems).toHaveLength(0); // error was swallowed, no items
+      }
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
+});
