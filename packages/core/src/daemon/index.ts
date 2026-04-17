@@ -66,14 +66,11 @@ const CIRCUIT_BREAKER_THRESHOLD = 3;
  * everything the daemon needs to build an {@link AgentSpawnContext}
  * for this agent without re-reading the repo on every wake.
  *
- * Two construction paths:
- *
- * 1. Manual construction — used by the hello-world Phase 1A path
- *    where content is inline placeholder strings (see
- *    `packages/cli/src/boot.ts`).
- * 2. {@link registeredAgentFromLoadedIdentity} — construct from an
- *    `IdentityLoader.load()` result plus a wake trigger. Use this in
- *    Phase 1B+ production paths where identity is read from disk.
+ * In production, instances are built by
+ * {@link registeredAgentFromLoadedIdentity} from an
+ * `IdentityLoader.load()` result plus a wake trigger (see
+ * `packages/cli/src/boot.ts`). Tests construct instances directly with
+ * an inline `IdentityChain`.
  */
 export interface RegisteredAgent {
   readonly agentId: string;
@@ -1110,12 +1107,7 @@ const buildSpawnContext = async (
       wakeId: event.wakeId,
       agentId,
       agentDir: agent.agentId,
-      frontmatter: {
-        agentId,
-        name: agent.displayName,
-        modelTier: agent.modelTier,
-        groupMemberships: groupIds,
-      },
+      frontmatter: identity.frontmatter,
       groupMemberships: groupIds,
       wakeReason: event.wakeReason,
       now: new Date(),
