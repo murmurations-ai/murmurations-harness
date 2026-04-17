@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { makeAgentId, makeGroupId } from "../execution/index.js";
 import { SubprocessExecutor } from "../execution/subprocess.js";
 import { makeSecretKey, makeSecretValue } from "../secrets/index.js";
 import type {
@@ -36,6 +37,9 @@ const makeCapturingLogger = (): { logger: DaemonLogger; logs: CapturedLog[] } =>
   return { logger, logs };
 };
 
+const helloWorldId = makeAgentId("hello-world");
+const engineeringGroupId = makeGroupId("engineering");
+
 const helloWorld: RegisteredAgent = {
   agentId: "hello-world",
   displayName: "Hello World Agent",
@@ -43,14 +47,33 @@ const helloWorld: RegisteredAgent = {
   groupMemberships: ["engineering"],
   modelTier: "fast",
   maxWallClockMs: 5000,
-  identityContent: {
-    murmurationSoul: "test soul",
-    agentSoul: "test agent soul",
-    agentRole: "test role",
-    groupContexts: [
+  identity: {
+    agentId: helloWorldId,
+    frontmatter: {
+      agentId: helloWorldId,
+      name: "Hello World Agent",
+      modelTier: "fast",
+      groupMemberships: [engineeringGroupId],
+    },
+    layers: [
+      { kind: "murmuration-soul", content: "test soul", sourcePath: "<test>" },
       {
-        groupId: "engineering",
+        kind: "agent-soul",
+        agentId: helloWorldId,
+        content: "test agent soul",
+        sourcePath: "<test>",
+      },
+      {
+        kind: "agent-role",
+        agentId: helloWorldId,
+        content: "test role",
+        sourcePath: "<test>",
+      },
+      {
+        kind: "group-context",
+        groupId: engineeringGroupId,
         content: "engineering ctx",
+        sourcePath: "<test>",
       },
     ],
   },
