@@ -18,11 +18,37 @@ import { createInterface, type Interface } from "node:readline";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 
+import { initSpiritSession, SpiritUnavailableError, type SpiritSession } from "./spirit/index.js";
+
 interface SocketResponse {
   readonly id: string;
   readonly result?: unknown;
   readonly error?: string;
 }
+
+/** Bare verbs that dispatch to command handlers (no `:` prefix needed). */
+const KNOWN_VERBS = new Set([
+  "",
+  "s",
+  "status",
+  "d",
+  "directive",
+  "wake",
+  "convene",
+  "switch",
+  "agents",
+  "groups",
+  "events",
+  "cost",
+  "edit",
+  "open",
+  "q",
+  "quit",
+  "detach",
+  "stop",
+  "?",
+  "help",
+]);
 
 interface SocketEvent {
   readonly event: string;
@@ -175,11 +201,64 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   rl.setPrompt(prompt);
   rl.prompt();
 
+  let spiritSession: SpiritSession | null = null;
+  let spiritUnavailableReason: string | null = null;
+
+  const ensureSpirit = async (): Promise<SpiritSession | null> => {
+    if (spiritSession) return spiritSession;
+    if (spiritUnavailableReason) return null;
+    try {
+      spiritSession = await initSpiritSession({ rootDir, send });
+      return spiritSession;
+    } catch (err) {
+      if (err instanceof SpiritUnavailableError) {
+        spiritUnavailableReason = err.message;
+      } else {
+        spiritUnavailableReason = err instanceof Error ? err.message : String(err);
+      }
+      return null;
+    }
+  };
+
+  const handleSpiritTurn = async (message: string): Promise<void> => {
+    const session = await ensureSpirit();
+    if (!session) {
+      console.log(`(Spirit unavailable: ${spiritUnavailableReason ?? "unknown"})`);
+      console.log(`Use :help for commands or prefix explicit commands with ':'.`);
+      rl.prompt();
+      return;
+    }
+    try {
+      const result = await session.turn(message);
+      console.log(result.content);
+      const tokens = `${String(result.inputTokens)} in / ${String(result.outputTokens)} out`;
+      const cost = `$${result.estimatedCostUsd.toFixed(4)}`;
+      const tools = result.toolCallCount > 0 ? `, ${String(result.toolCallCount)} tool calls` : "";
+      console.log(`  \x1b[2m[${tokens}${tools} · ~${cost}]\x1b[0m`);
+    } catch (err) {
+      console.log(`(Spirit error: ${err instanceof Error ? err.message : String(err)})`);
+    }
+    rl.prompt();
+  };
+
   rl.on("line", (line) => {
-    let cmd = line.trim();
-    // Support both `:command` (new) and bare `command` (backward compat)
-    if (cmd.startsWith(":")) cmd = cmd.slice(1);
-    void handleCommand(cmd, send, name, rl, conn, agentIds, rootDir);
+    const input = line.trim();
+
+    // Explicit command prefix — always dispatch as a command.
+    if (input.startsWith(":")) {
+      void handleCommand(input.slice(1), send, name, rl, conn, agentIds, rootDir);
+      return;
+    }
+
+    // Bare known verb — back-compat command dispatch.
+    const firstToken = input.split(/\s+/)[0] ?? "";
+    if (KNOWN_VERBS.has(firstToken)) {
+      void handleCommand(input, send, name, rl, conn, agentIds, rootDir);
+      return;
+    }
+
+    // Otherwise route to the Spirit.
+    void handleSpiritTurn(input);
   });
 
   rl.on("close", () => {
