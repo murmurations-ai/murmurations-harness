@@ -747,6 +747,25 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   }
 
   // -------------------------------------------------------------------
+  // Extension loading (ADR-0023)
+  // -------------------------------------------------------------------
+
+  const { loadExtensions } = await import("@murmurations-ai/core");
+  const extensionsDir = join(exampleRoot, "extensions");
+  const loadedExtensions = await loadExtensions(extensionsDir, exampleRoot);
+  if (loadedExtensions.length > 0) {
+    const toolCount = loadedExtensions.reduce((n, ext) => n + ext.tools.length, 0);
+    logger.info("daemon.extensions.loaded", {
+      count: loadedExtensions.length,
+      tools: toolCount,
+      ids: loadedExtensions.map((e) => e.id),
+    });
+  }
+
+  // Collect all extension tools into a flat array for the runner
+  const extensionTools = loadedExtensions.flatMap((ext) => ext.tools);
+
+  // -------------------------------------------------------------------
   // Per-agent composition (Phase 2D3)
   //
   // For each registered agent: instantiate the LLM client pinned by
@@ -892,7 +911,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               return createDefaultRunner(
                 capturedAgentDir,
                 [],
-                {},
+                extensionTools.length > 0 ? { extensionTools } : {},
                 exampleRoot,
               ) as unknown as AgentRunner<InProcessRunnerClients>;
             }

@@ -35,6 +35,8 @@ import { scanSkills, formatSkillsPromptBlock } from "../skills/index.js";
 export interface DefaultRunnerOptions {
   /** Paths to commit output to (e.g. "drafts/articles"). */
   readonly commitPathPrefix?: string;
+  /** Extension tools available to all agents (ADR-0023). */
+  readonly extensionTools?: readonly RunnerToolDefinition[];
 }
 
 /** Tool definition compatible with LLM tool calling (ADR-0020 Phase 2). */
@@ -298,12 +300,22 @@ GOVERNANCE_EVENT: none — OR one of:
 If you were asked to draft a proposal (e.g. an action item saying "draft proposal for X"), file it as PROPOSAL: <your proposal>
 `;
 
-    // 9. Load MCP tools (ADR-0020 Phase 3)
-    const mcpConfigs = spawn.mcpServerConfigs ?? [];
-    let tools: RunnerToolDefinition[] | undefined;
-    if (clients.mcpToolLoader && mcpConfigs.length > 0) {
-      tools = await clients.mcpToolLoader.loadTools(mcpConfigs, spawn.environment);
+    // 9. Load tools: extensions (ADR-0023) + MCP (ADR-0020 Phase 3)
+    const allTools: RunnerToolDefinition[] = [];
+
+    // Extension tools (loaded at boot, available to all agents)
+    if (options.extensionTools && options.extensionTools.length > 0) {
+      allTools.push(...options.extensionTools);
     }
+
+    // MCP tools (per-agent, loaded at wake time)
+    const mcpConfigs = spawn.mcpServerConfigs ?? [];
+    if (clients.mcpToolLoader && mcpConfigs.length > 0) {
+      const mcpTools = await clients.mcpToolLoader.loadTools(mcpConfigs, spawn.environment);
+      allTools.push(...mcpTools);
+    }
+
+    const tools: RunnerToolDefinition[] | undefined = allTools.length > 0 ? allTools : undefined;
 
     // 10. Call LLM
     const llmModel =
