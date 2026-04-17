@@ -75,20 +75,22 @@ const ChainOfCommandPlugin = {
     return [DIRECTIVE_GRAPH, REPORT_GRAPH];
   },
 
-  async onEventsEmitted(batch, store) {
+  async onEventsEmitted(batch, _reader) {
     const decisions = [];
     for (const event of batch.events) {
       switch (event.kind) {
         case CC_DIRECTIVE:
         case CC_REPORT:
         case "agent-governance-event": {
-          store.create(
-            event.kind === CC_DIRECTIVE ? "directive" : "report",
-            batch.agentId,
-            event.payload,
-          );
           // Everything goes to Source (the authority)
-          decisions.push({ event, routes: [{ target: "source" }] });
+          decisions.push({
+            event,
+            routes: [{ target: "source" }],
+            create: {
+              kind: event.kind === CC_DIRECTIVE ? "directive" : "report",
+              payload: event.payload,
+            },
+          });
           break;
         }
         case CC_ESCALATION: {
@@ -102,7 +104,7 @@ const ChainOfCommandPlugin = {
     return decisions;
   },
 
-  async evaluateAction(agentId, action, context, store) {
+  async evaluateAction(agentId, action, context, store /* GovernanceStateReader */) {
     const ctx = typeof context === "object" && context !== null ? context : {};
     const tier = /** @type {string|undefined} */ (/** @type {any} */ (ctx).tier);
 

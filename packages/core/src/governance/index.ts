@@ -183,10 +183,28 @@ export interface GovernanceItemFilter {
  * Durable when `persistDir` is set (production daemon restarts).
  */
 
-/** Interface for governance state storage — enables GitHub-backed or SSE implementations. */
-export interface IGovernanceStateStore {
-  registerGraph(graph: GovernanceStateGraph): void;
+/**
+ * Read-only view of governance state, handed to {@link GovernancePlugin}
+ * lifecycle hooks. Plugins are decision-makers, not state mutators —
+ * they inspect current state and return {@link GovernanceRoutingDecision}s
+ * that describe what should happen. The daemon applies mutations on the
+ * plugin's behalf.
+ *
+ * Isolating reads from writes at the type level prevents a buggy or
+ * adversarial plugin from corrupting items it does not own, bypassing
+ * state-graph validation, or mutating history.
+ */
+export interface GovernanceStateReader {
   graphs(): readonly GovernanceStateGraph[];
+  get(itemId: string): GovernanceItem | undefined;
+  query(filter?: GovernanceItemFilter): readonly GovernanceItem[];
+  buildDecisionRecord(itemId: string, summary: string): GovernanceDecisionRecord;
+  size(): number;
+}
+
+/** Interface for governance state storage — enables GitHub-backed or SSE implementations. */
+export interface IGovernanceStateStore extends GovernanceStateReader {
+  registerGraph(graph: GovernanceStateGraph): void;
   create(
     kind: string,
     createdBy: AgentId,
@@ -195,10 +213,6 @@ export interface IGovernanceStateStore {
   ): GovernanceItem;
   transition(itemId: string, to: string, triggeredBy: string, reason?: string): GovernanceItem;
   setGithubIssueUrl(itemId: string, url: string): void;
-  get(itemId: string): GovernanceItem | undefined;
-  query(filter?: GovernanceItemFilter): readonly GovernanceItem[];
-  buildDecisionRecord(itemId: string, summary: string): GovernanceDecisionRecord;
-  size(): number;
   load(): Promise<number>;
   flush(): Promise<void>;
 }
@@ -488,10 +502,24 @@ export type GovernanceRouteTarget =
   | { readonly target: "external"; readonly channel: string; readonly ref: string }
   | { readonly target: "discard" };
 
+/**
+ * A plugin-requested governance item creation. Returned as part of
+ * {@link GovernanceRoutingDecision} so the daemon — not the plugin —
+ * writes to the state store. The daemon sets `createdBy` from the
+ * triggering batch; the plugin has no way to forge it.
+ */
+export interface GovernanceItemCreateRequest {
+  readonly kind: string;
+  readonly payload: unknown;
+  readonly reviewAt?: Date;
+}
+
 /** Pairs one governance event with its routing decision(s). */
 export interface GovernanceRoutingDecision {
   readonly event: EmittedGovernanceEvent;
   readonly routes: readonly GovernanceRouteTarget[];
+  /** Optional: ask the daemon to create a governance item tied to this event. */
+  readonly create?: GovernanceItemCreateRequest;
 }
 
 // ---------------------------------------------------------------------------
@@ -569,24 +597,27 @@ export interface GovernancePlugin {
 
   /**
    * Called after every wake that produces governance events. The
-   * plugin inspects the events and returns routing instructions.
-   * It may also create or advance governance items in the store.
+   * plugin inspects the events (with read-only state access) and
+   * returns routing decisions. If the plugin wants to record a new
+   * governance item, it attaches a `create` request to the decision
+   * and the daemon performs the write.
    */
   onEventsEmitted(
     batch: GovernanceEventBatch,
-    store: GovernanceStateStore,
+    reader: GovernanceStateReader,
   ): Promise<readonly GovernanceRoutingDecision[]>;
 
   /**
-   * Go/no-go ruling before a consequential action. The plugin may
-   * consult the state store (e.g. "is there an approved governance
-   * item for this action?") or apply model-specific logic.
+   * Go/no-go ruling before a consequential action. Read-only — plugins
+   * consult current state (e.g. "is there an approved governance item
+   * for this action?") but cannot mutate it. Returning `{ allow: false }`
+   * is the only way to influence execution.
    */
   evaluateAction(
     agentId: AgentId,
     action: string,
     context: unknown,
-    store: GovernanceStateStore,
+    reader: GovernanceStateReader,
   ): Promise<GovernanceDecision>;
 
   /**
@@ -624,7 +655,7 @@ export class NoOpGovernancePlugin implements GovernancePlugin {
   // eslint-disable-next-line @typescript-eslint/require-await
   public async onEventsEmitted(
     _batch: GovernanceEventBatch,
-    _store: GovernanceStateStore,
+    _reader: GovernanceStateReader,
   ): Promise<readonly GovernanceRoutingDecision[]> {
     return [];
   }
@@ -634,7 +665,7 @@ export class NoOpGovernancePlugin implements GovernancePlugin {
     _agentId: AgentId,
     _action: string,
     _context: unknown,
-    _store: GovernanceStateStore,
+    _reader: GovernanceStateReader,
   ): Promise<GovernanceDecision> {
     return { allow: true };
   }
