@@ -550,8 +550,19 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const governancePath = config.governance.plugin;
   let governancePlugin: import("@murmurations-ai/core").GovernancePlugin | undefined;
   if (governancePath) {
-    const pluginUrl = pathToFileURL(resolve(governancePath)).href;
-    const mod = (await import(pluginUrl)) as { default?: unknown };
+    // Try as npm package first (e.g. "@murmurations-ai/governance-s3"),
+    // then as file path relative to murmuration root, then cwd.
+    let mod: { default?: unknown };
+    try {
+      mod = (await import(governancePath)) as { default?: unknown };
+    } catch {
+      // Not an npm package — try as file path
+      const resolved = resolve(exampleRoot, governancePath);
+      const pluginUrl = pathToFileURL(
+        existsSync(resolved) ? resolved : resolve(governancePath),
+      ).href;
+      mod = (await import(pluginUrl)) as { default?: unknown };
+    }
     const candidate: unknown = mod.default;
     if (
       typeof candidate !== "object" ||
