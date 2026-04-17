@@ -66,14 +66,11 @@ const CIRCUIT_BREAKER_THRESHOLD = 3;
  * everything the daemon needs to build an {@link AgentSpawnContext}
  * for this agent without re-reading the repo on every wake.
  *
- * Two construction paths:
- *
- * 1. Manual construction — used by the hello-world Phase 1A path
- *    where content is inline placeholder strings (see
- *    `packages/cli/src/boot.ts`).
- * 2. {@link registeredAgentFromLoadedIdentity} — construct from an
- *    `IdentityLoader.load()` result plus a wake trigger. Use this in
- *    Phase 1B+ production paths where identity is read from disk.
+ * In production, instances are built by
+ * {@link registeredAgentFromLoadedIdentity} from an
+ * `IdentityLoader.load()` result plus a wake trigger (see
+ * `packages/cli/src/boot.ts`). Tests construct instances directly with
+ * an inline `IdentityChain`.
  */
 export interface RegisteredAgent {
   readonly agentId: string;
@@ -82,19 +79,12 @@ export interface RegisteredAgent {
   readonly groupMemberships: readonly string[];
   readonly modelTier: "fast" | "balanced" | "deep";
   /**
-   * The identity content layers to thread through to the executor.
-   * Populated either inline (Phase 1A) or by
-   * {@link registeredAgentFromLoadedIdentity} (Phase 1B+).
+   * The full ordered identity chain handed to the executor on spawn.
+   * Built once by {@link registeredAgentFromLoadedIdentity} (or provided
+   * directly by tests) and passed through verbatim — subsystems read typed
+   * layers (`sourcePath`, `kind`, `groupId`) without re-parsing flat strings.
    */
-  readonly identityContent: {
-    readonly murmurationSoul: string;
-    readonly agentSoul: string;
-    readonly agentRole: string;
-    readonly groupContexts: readonly {
-      readonly groupId: string;
-      readonly content: string;
-    }[];
-  };
+  readonly identity: IdentityChain;
   /**
    * Maximum wall-clock budget per wake (ms). Phase 1A default is 15s;
    * Phase 1B reads from frontmatter.
@@ -206,16 +196,6 @@ export const registeredAgentFromLoadedIdentity = (
   options: { readonly rolePath?: string } = {},
 ): RegisteredAgent => {
   const { chain, frontmatter } = loaded;
-  const groupContexts = chain.layers
-    .filter(
-      (l): l is Extract<(typeof chain.layers)[number], { kind: "group-context" }> =>
-        l.kind === "group-context",
-    )
-    .map((l) => ({ groupId: l.groupId.value, content: l.content }));
-
-  const murmurationSoul = chain.layers.find((l) => l.kind === "murmuration-soul")?.content ?? "";
-  const agentSoul = chain.layers.find((l) => l.kind === "agent-soul")?.content ?? "";
-  const agentRole = chain.layers.find((l) => l.kind === "agent-role")?.content ?? "";
 
   // ADR-0016: map snake_case YAML fields to camelCase runtime fields.
   const llm = frontmatter.llm
@@ -284,12 +264,7 @@ export const registeredAgentFromLoadedIdentity = (
     trigger,
     groupMemberships: frontmatter.group_memberships,
     modelTier: frontmatter.model_tier,
-    identityContent: {
-      murmurationSoul,
-      agentSoul,
-      agentRole,
-      groupContexts,
-    },
+    identity: chain,
     maxWallClockMs: frontmatter.max_wall_clock_ms,
     ...(llm !== undefined ? { llm } : {}),
     signalScopes,
@@ -1124,40 +1099,7 @@ const buildSpawnContext = async (
     maxCostMicros: 0,
   };
 
-  const identity: IdentityChain = {
-    agentId,
-    frontmatter: {
-      agentId,
-      name: agent.displayName,
-      modelTier: agent.modelTier,
-      groupMemberships: groupIds,
-    },
-    layers: [
-      {
-        kind: "murmuration-soul",
-        content: agent.identityContent.murmurationSoul,
-        sourcePath: "<phase-1a-placeholder>",
-      },
-      {
-        kind: "agent-soul",
-        agentId,
-        content: agent.identityContent.agentSoul,
-        sourcePath: "<phase-1a-placeholder>",
-      },
-      {
-        kind: "agent-role",
-        agentId,
-        content: agent.identityContent.agentRole,
-        sourcePath: "<phase-1a-placeholder>",
-      },
-      ...agent.identityContent.groupContexts.map((ctx) => ({
-        kind: "group-context" as const,
-        groupId: makeGroupId(ctx.groupId),
-        content: ctx.content,
-        sourcePath: "<phase-1a-placeholder>",
-      })),
-    ],
-  };
+  const identity = agent.identity;
 
   let signals: SignalBundle;
   if (aggregator) {
@@ -1165,12 +1107,7 @@ const buildSpawnContext = async (
       wakeId: event.wakeId,
       agentId,
       agentDir: agent.agentId,
-      frontmatter: {
-        agentId,
-        name: agent.displayName,
-        modelTier: agent.modelTier,
-        groupMemberships: groupIds,
-      },
+      frontmatter: identity.frontmatter,
       groupMemberships: groupIds,
       wakeReason: event.wakeReason,
       now: new Date(),

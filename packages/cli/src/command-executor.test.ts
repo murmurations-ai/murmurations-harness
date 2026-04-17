@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 import {
   AgentStateStore,
   DaemonEventBus,
+  makeAgentId,
+  makeGroupId,
   type DaemonEvent,
   type RegisteredAgent,
 } from "@murmurations-ai/core";
@@ -44,28 +46,39 @@ const makeTmpRoot = (): string => {
   return dir;
 };
 
-const makeRegisteredAgent = (id: string, groups: string[] = []): RegisteredAgent => ({
-  agentId: id,
-  displayName: id,
-  trigger: { kind: "delay-once", delayMs: 100 },
-  groupMemberships: groups,
-  modelTier: "fast" as const,
-  maxWallClockMs: 5000,
-  identityContent: {
-    murmurationSoul: "test",
-    agentSoul: "test",
-    agentRole: "test",
-    groupContexts: [],
-  },
-  githubWriteScopes: { issueComments: [], branchCommits: [], labels: [], issues: [] },
-  signalScopes: {
-    sources: ["github-issue"],
-    githubScopes: [{ owner: "test", repo: "repo", filter: { state: "open" as const } }],
-  },
-  budget: { maxCostMicros: 100000, maxGithubApiCalls: 10, onBreach: "warn" as const },
-  secrets: { required: [], optional: [] },
-  tools: { mcp: [], cli: [] },
-});
+const makeRegisteredAgent = (id: string, groups: string[] = []): RegisteredAgent => {
+  const agentId = makeAgentId(id);
+  return {
+    agentId: id,
+    displayName: id,
+    trigger: { kind: "delay-once", delayMs: 100 },
+    groupMemberships: groups,
+    modelTier: "fast" as const,
+    maxWallClockMs: 5000,
+    identity: {
+      agentId,
+      frontmatter: {
+        agentId,
+        name: id,
+        modelTier: "fast",
+        groupMemberships: groups.map((g) => makeGroupId(g)),
+      },
+      layers: [
+        { kind: "murmuration-soul", content: "test", sourcePath: "<test>" },
+        { kind: "agent-soul", agentId, content: "test", sourcePath: "<test>" },
+        { kind: "agent-role", agentId, content: "test", sourcePath: "<test>" },
+      ],
+    },
+    githubWriteScopes: { issueComments: [], branchCommits: [], labels: [], issues: [] },
+    signalScopes: {
+      sources: ["github-issue"],
+      githubScopes: [{ owner: "test", repo: "repo", filter: { state: "open" as const } }],
+    },
+    budget: { maxCostMicros: 100000, maxGithubApiCalls: 10, onBreach: "warn" as const },
+    secrets: { required: [], optional: [] },
+    tools: { mcp: [], cli: [] },
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Tests
