@@ -74,6 +74,8 @@ export interface GroupWakeContext {
   readonly retrospectiveMetrics?: RetrospectiveMetrics;
   /** Open issues / backlog context for agenda generation. */
   readonly backlogContext?: string;
+  /** Member identity summaries for peer review meetings. Map of agentId → role excerpt. */
+  readonly memberIdentities?: ReadonlyMap<string, string>;
 }
 
 /** A single agenda item for a circle meeting. */
@@ -445,11 +447,19 @@ export const runGroupWake = async (
           ? DEFAULT_RETRO_MEMBER_INSTRUCTIONS
           : buildOperationalMemberInstructions(agenda);
 
+    // Inject peer identity docs when available (for peer review meetings)
+    const identityBlock =
+      context.memberIdentities && context.memberIdentities.size > 0
+        ? `\n\n## Circle Members (identity summaries)\n\n${[...context.memberIdentities.entries()]
+            .map(([id, summary]) => `### ${id}\n${summary}`)
+            .join("\n\n")}\n`
+        : "";
+
     const userPrompt = `${meetingHeader}
 
 ## Meeting Agenda
 
-${agendaBlock}${priorContributions}
+${agendaBlock}${identityBlock}${priorContributions}
 
 ---
 
