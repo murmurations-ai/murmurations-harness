@@ -1,6 +1,6 @@
 {
   "name": "@murmurations-ai/core",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Core runtime for the Murmuration Harness — scheduler, signal aggregator, plugin registry, and executor interface.",
   "license": "MIT",
   "author": "Emergent Praxis murmuration",

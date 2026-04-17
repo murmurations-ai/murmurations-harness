@@ -98,6 +98,10 @@ export interface CommandExecutorDeps {
   readonly eventBus?: DaemonEventBus | undefined;
   readonly githubClient?: MeetingGithubClient | undefined;
   readonly repoCoordinate?: { owner: string; repo: string } | undefined;
+  /** CollaborationProvider for directive list/delete (ADR-0021). */
+  readonly collaborationProvider?:
+    | import("../collaboration/types.js").CollaborationProvider
+    | undefined;
   // Command handlers injected by CLI layer (keeps core free of CLI imports)
   readonly onDirective?: DirectiveHandler | undefined;
   readonly onGroupWake?: GroupWakeHandler | undefined;
@@ -137,6 +141,14 @@ export class DaemonCommandExecutor {
     switch (method) {
       case "directive":
         return this.#handleDirective(params);
+      case "directive.list":
+        return this.#handleDirectiveList();
+      case "directive.close":
+        return this.#handleDirectiveClose(params);
+      case "directive.delete":
+        return this.#handleDirectiveDelete(params);
+      case "directive.path":
+        return this.#handleDirectivePath(params);
       case "group-wake":
         return this.#handleGroupWake(params);
       case "wake-now":
@@ -628,6 +640,13 @@ export class DaemonCommandExecutor {
     if (!agentId) throw new Error("wake-now requires agentId");
     if (!this.#deps.onWakeNow) throw new Error("wake-now handler not configured");
 
+    // Validate agent exists
+    const known = this.#deps.allRegistered.find((a) => a.agentId === agentId);
+    if (!known) {
+      const available = this.#deps.allRegistered.map((a) => a.agentId).join(", ");
+      throw new Error(`Unknown agent "${agentId}". Available: ${available}`);
+    }
+
     const result = await this.#deps.onWakeNow(this.#deps.rootDir, agentId);
 
     // Track the process (Engineering Standard #7 — track what you spawn)
@@ -808,5 +827,71 @@ export class DaemonCommandExecutor {
         recentDecisions: [],
       };
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Directive list/delete (ADR-0021)
+  // -----------------------------------------------------------------------
+
+  async #handleDirectiveList(): Promise<unknown> {
+    if (!this.#deps.collaborationProvider) {
+      throw new Error("No collaboration provider configured");
+    }
+    const result = await this.#deps.collaborationProvider.listItems({
+      labels: ["source-directive"],
+      state: "open",
+    });
+    if (!result.ok) throw new Error(result.error.message);
+    return {
+      items: result.value.map((item) => ({
+        id: item.ref.id,
+        title: item.title,
+        state: item.state,
+        labels: item.labels,
+        url: item.ref.url,
+      })),
+    };
+  }
+
+  async #handleDirectiveClose(params: Record<string, unknown>): Promise<unknown> {
+    if (!this.#deps.collaborationProvider) {
+      throw new Error("No collaboration provider configured");
+    }
+    const id = params.id as string | undefined;
+    if (!id) throw new Error("directive.close requires an id");
+
+    const result = await this.#deps.collaborationProvider.updateItemState({ id }, "closed");
+    if (!result.ok) throw new Error(result.error.message);
+    return { closed: true, id };
+  }
+
+  async #handleDirectiveDelete(params: Record<string, unknown>): Promise<unknown> {
+    const id = params.id as string | undefined;
+    if (!id) throw new Error("directive.delete requires an id");
+
+    // For local provider: delete the file. For GitHub: close the issue.
+    const itemsDir = join(this.#deps.rootDir, ".murmuration", "items");
+    const filePath = join(itemsDir, `${id}.json`);
+    try {
+      const { unlink } = await import("node:fs/promises");
+      await unlink(filePath);
+      return { deleted: true, id };
+    } catch {
+      // Fall back to closing if file delete fails (e.g. GitHub provider)
+      if (this.#deps.collaborationProvider) {
+        const result = await this.#deps.collaborationProvider.updateItemState({ id }, "closed");
+        if (!result.ok) throw new Error(result.error.message);
+        return { deleted: true, id, method: "closed" };
+      }
+      throw new Error(`Could not delete directive ${id}`);
+    }
+  }
+
+  #handleDirectivePath(params: Record<string, unknown>): unknown {
+    const id = params.id as string | undefined;
+    if (!id) throw new Error("directive.path requires an id");
+
+    const filePath = join(this.#deps.rootDir, ".murmuration", "items", `${id}.json`);
+    return { path: filePath };
   }
 }

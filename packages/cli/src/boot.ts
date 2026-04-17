@@ -871,17 +871,31 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               throw new Error(`resolveRunner: unknown agent ${agentId}`);
             }
             const runnerPath = resolve(exampleRoot, "agents", capturedAgentDir, "runner.mjs");
-            const mod = (await import(pathToFileURL(runnerPath).href)) as {
-              default?: unknown;
-              runWake?: unknown;
-            };
-            const candidate: unknown = mod.default ?? mod.runWake;
-            if (typeof candidate !== "function") {
-              throw new Error(
-                `runner at ${runnerPath} must export a default function or a named \`runWake\` function`,
-              );
+            // Try custom runner.mjs first; fall back to default runner
+            try {
+              const { statSync: statF } = await import("node:fs");
+              statF(runnerPath); // throws if missing
+              const mod = (await import(pathToFileURL(runnerPath).href)) as {
+                default?: unknown;
+                runWake?: unknown;
+              };
+              const candidate: unknown = mod.default ?? mod.runWake;
+              if (typeof candidate !== "function") {
+                throw new Error(
+                  `runner at ${runnerPath} must export a default function or a named \`runWake\` function`,
+                );
+              }
+              return candidate as AgentRunner<InProcessRunnerClients>;
+            } catch {
+              // No custom runner — use the built-in default runner
+              const { createDefaultRunner } = await import("@murmurations-ai/core");
+              return createDefaultRunner(
+                capturedAgentDir,
+                [],
+                {},
+                exampleRoot,
+              ) as unknown as AgentRunner<InProcessRunnerClients>;
             }
-            return candidate as AgentRunner<InProcessRunnerClients>;
           },
           resolveClients: ({ costBuilder }) => {
             const wakeClients = buildAgentClients({
@@ -1209,6 +1223,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         }
       : {}),
     eventBus,
+    ...(localCollaborationProvider ? { collaborationProvider: localCollaborationProvider } : {}),
     ...(githubClient && repoCoord
       ? {
           repoCoordinate: repoCoord,

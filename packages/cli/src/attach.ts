@@ -43,6 +43,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   const prompt = config.ui.prompt.replace("{name}", name);
 
   let agentIds: readonly string[] = [];
+  let groupIds: readonly string[] = [];
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -69,9 +70,18 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
         ];
         return [commands.filter((c) => c.startsWith(cmd)), line];
       }
-      if (cmd === ":wake" || cmd === ":edit") {
+      if (cmd === ":wake" || cmd === ":edit" || cmd === "wake" || cmd === "edit") {
         const partial = parts[1] ?? "";
         return [agentIds.filter((a) => a.startsWith(partial)), partial];
+      }
+      if (cmd === ":convene" || cmd === "convene") {
+        const partial = parts[1] ?? "";
+        return [groupIds.filter((g) => g.startsWith(partial)), partial];
+      }
+      if (cmd === ":directive" || cmd === "directive" || cmd === ":d" || cmd === "d") {
+        const partial = parts[1] ?? "";
+        const subs = ["list", "close", "delete", "edit"];
+        return [subs.filter((s) => s.startsWith(partial)), partial];
       }
       return [[], line];
     },
@@ -104,17 +114,35 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     }
   });
 
+  let connected = true;
+
   conn.on("error", (err) => {
-    console.error(`\nSocket error: ${err.message}`);
-    process.exit(1);
+    connected = false;
+    console.error(`\nDaemon connection lost: ${err.message}`);
+    console.log(
+      "The REPL is still running. Use :quit to exit or restart the daemon and re-attach.",
+    );
+    rl.setPrompt("(disconnected)> ");
+    rl.prompt();
   });
 
   conn.on("close", () => {
+    connected = false;
     console.log("\nDaemon disconnected.");
-    process.exit(0);
+    console.log(
+      "The REPL is still running. Use :quit to exit or restart the daemon and re-attach.",
+    );
+    rl.setPrompt("(disconnected)> ");
+    rl.prompt();
   });
 
   const send = (method: string, params?: Record<string, unknown>): Promise<SocketResponse> => {
+    if (!connected) {
+      return Promise.resolve({
+        id: "0",
+        error: "Not connected to daemon. Restart it and re-attach.",
+      });
+    }
     const id = String(++requestId);
     return new Promise((r) => {
       pending.set(id, r);
@@ -142,6 +170,8 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
   // Cache agent lists for :edit validation and tab completion
   agentIds = statusResult?.agents.map((a) => a.agentId) ?? [];
+  groupIds =
+    (statusResult as { groups?: { groupId: string }[] }).groups?.map((g) => g.groupId) ?? [];
   rl.setPrompt(prompt);
   rl.prompt();
 
@@ -149,7 +179,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     let cmd = line.trim();
     // Support both `:command` (new) and bare `command` (backward compat)
     if (cmd.startsWith(":")) cmd = cmd.slice(1);
-    void handleCommand(cmd, send, name, rl, conn, agentIds);
+    void handleCommand(cmd, send, name, rl, conn, agentIds, rootDir);
   });
 
   rl.on("close", () => {
@@ -165,6 +195,7 @@ const handleCommand = async (
   rl: Interface,
   conn: Socket,
   agentIds: readonly string[],
+  rootDir: string,
 ): Promise<void> => {
   const parts = cmd.split(/\s+/);
   const verb = parts[0] ?? "";
@@ -201,30 +232,107 @@ const handleCommand = async (
       }
     }
   } else if (verb === "d" || verb === "directive") {
-    // directive <message> OR prompt for it
-    let message = parts.slice(1).join(" ").trim();
-    if (!message) {
-      message = await question(rl, "  Directive message: ");
-    }
-    if (!message) {
-      console.log("  (cancelled)");
-    } else {
-      const scope = await question(rl, "  Scope (all/agent <id>/group <id>) [all]: ");
-      const scopeParts = scope.trim().split(/\s+/);
-      let params: Record<string, unknown>;
-      if (scopeParts[0] === "agent" && scopeParts[1]) {
-        params = { scope: "--agent", target: scopeParts[1], message };
-      } else if (scopeParts[0] === "group" && scopeParts[1]) {
-        params = { scope: "--group", target: scopeParts[1], message };
-      } else {
-        params = { scope: "--all", message };
-      }
-      console.log("  Sending directive...");
-      const resp = await send("directive", params);
+    const sub = parts[1];
+
+    // :directive --list — show pending directives
+    if (sub === "--list" || sub === "list") {
+      const resp = await send("directive.list", {});
       if (resp.error) {
         console.log(`  Error: ${resp.error}`);
       } else {
-        console.log("  Directive sent.");
+        const items =
+          (
+            resp.result as {
+              items?: { id: string; title: string; state: string; labels: string[] }[];
+            }
+          ).items ?? [];
+        if (items.length === 0) {
+          console.log("  No directives found.");
+        } else {
+          for (const item of items) {
+            const scope = item.labels.find((l: string) => l.startsWith("scope:")) ?? "";
+            console.log(
+              `  ${item.id.padEnd(10)} ${item.state.padEnd(8)} ${scope.padEnd(20)} ${item.title.slice(0, 60)}`,
+            );
+          }
+        }
+      }
+
+      // :directive close <id> — close a directive (mark resolved)
+    } else if (sub === "close") {
+      const itemId = parts[2];
+      if (!itemId) {
+        console.log("  Usage: :directive close <id>");
+      } else {
+        const resp = await send("directive.close", { id: itemId });
+        if (resp.error) {
+          console.log(`  Error: ${resp.error}`);
+        } else {
+          console.log(`  Directive ${itemId} closed.`);
+        }
+      }
+
+      // :directive delete <id> — permanently delete a directive
+    } else if (sub === "delete" || sub === "--delete") {
+      const itemId = parts[2];
+      if (!itemId) {
+        console.log("  Usage: :directive delete <id>");
+      } else {
+        const resp = await send("directive.delete", { id: itemId });
+        if (resp.error) {
+          console.log(`  Error: ${resp.error}`);
+        } else {
+          console.log(`  Directive ${itemId} deleted.`);
+        }
+      }
+
+      // :directive edit <id> — open in $EDITOR
+    } else if (sub === "edit") {
+      const itemId = parts[2];
+      if (!itemId) {
+        console.log("  Usage: :directive edit <id>");
+      } else {
+        const resp = await send("directive.path", { id: itemId });
+        if (resp.error) {
+          console.log(`  Error: ${resp.error}`);
+        } else {
+          const filePath = (resp.result as { path?: string }).path;
+          if (!filePath) {
+            console.log("  Error: no file path (edit only works with local provider)");
+          } else {
+            const editor = process.env.EDITOR ?? "vi";
+            const { execSync } = await import("node:child_process");
+            execSync(`${editor} ${filePath}`, { stdio: "inherit" });
+          }
+        }
+      }
+
+      // :directive <message> — create a new directive
+    } else {
+      let message = parts.slice(1).join(" ").trim();
+      if (!message) {
+        message = await question(rl, "  Directive message: ");
+      }
+      if (!message) {
+        console.log("  (cancelled)");
+      } else {
+        const scope = await question(rl, "  Scope (all/agent <id>/group <id>) [all]: ");
+        const scopeParts = scope.trim().split(/\s+/);
+        let params: Record<string, unknown>;
+        if (scopeParts[0] === "agent" && scopeParts[1]) {
+          params = { scope: "--agent", target: scopeParts[1], message };
+        } else if (scopeParts[0] === "group" && scopeParts[1]) {
+          params = { scope: "--group", target: scopeParts[1], message };
+        } else {
+          params = { scope: "--all", message };
+        }
+        console.log("  Sending directive...");
+        const resp = await send("directive", params);
+        if (resp.error) {
+          console.log(`  Error: ${resp.error}`);
+        } else {
+          console.log("  Directive sent.");
+        }
       }
     }
   } else if (verb === "wake") {
@@ -237,7 +345,76 @@ const handleCommand = async (
       if (resp.error) {
         console.log(`  Error: ${resp.error}`);
       } else {
-        console.log(`  Wake triggered for ${agentId}.`);
+        console.log(`  Wake triggered for ${agentId}. Waiting for result...`);
+        // Poll the wake log for completion
+        const pathMod = await import("node:path");
+        const logPath = pathMod.join(rootDir, ".murmuration", `wake-${agentId}.log`);
+        const startTime = Date.now();
+        const maxWaitMs = 120_000; // 2 min
+        const pollMs = 2000;
+
+        // Record log size at trigger time so we only look at NEW entries
+        let logOffset = 0;
+        try {
+          const { stat: statF } = await import("node:fs/promises");
+          logOffset = (await statF(logPath)).size;
+        } catch {
+          /* file doesn't exist yet */
+        }
+
+        const pollForResult = (): void => {
+          if (Date.now() - startTime > maxWaitMs) {
+            console.log("  (timed out waiting for wake result — check .murmuration/ log)");
+            rl.prompt();
+            return;
+          }
+          import("node:fs/promises")
+            .then(({ readFile: readF }) =>
+              readF(logPath, "utf8")
+                .then((content) => {
+                  // Only look at content AFTER the offset (new entries since we triggered)
+                  const newContent = content.slice(logOffset);
+                  for (const line of newContent.split("\n")) {
+                    if (!line.trim()) continue;
+                    try {
+                      const evt = JSON.parse(line) as {
+                        event?: string;
+                        outcome?: string;
+                        wakeSummary?: string;
+                        errorMessage?: string;
+                      };
+                      if (evt.event === "daemon.wake.completed") {
+                        console.log(`  Wake completed (${evt.outcome ?? "unknown"})`);
+                        const summary = evt.wakeSummary ?? "";
+                        for (const sl of summary.split("\n").slice(0, 15)) {
+                          console.log(`  ${sl}`);
+                        }
+                        rl.prompt();
+                        return;
+                      }
+                      if (evt.event === "daemon.wake.failed") {
+                        console.log(`  Wake failed: ${evt.errorMessage ?? "unknown error"}`);
+                        rl.prompt();
+                        return;
+                      }
+                    } catch {
+                      /* not JSON */
+                    }
+                  }
+                  // Not done yet — poll again
+                  setTimeout(pollForResult, pollMs);
+                })
+                .catch(() => {
+                  setTimeout(pollForResult, pollMs);
+                }),
+            )
+            .catch(() => {
+              setTimeout(pollForResult, pollMs);
+            });
+        };
+
+        // Start polling after a brief delay
+        setTimeout(pollForResult, 1000);
       }
     }
   } else if (verb === "convene") {
@@ -260,12 +437,16 @@ const handleCommand = async (
       console.log("  Usage: switch <session-name>");
     } else {
       console.log(`  Switching to ${targetName}...`);
-      conn.destroy();
-      // Re-resolve and re-attach
-      const { resolveSessionRoot } = await import("./sessions.js");
-      const targetRoot = resolveSessionRoot(targetName);
-      await runAttach(targetRoot, targetName);
-      return; // don't prompt — runAttach takes over
+      try {
+        const { resolveSessionRoot } = await import("./sessions.js");
+        const targetRoot = resolveSessionRoot(targetName);
+        conn.destroy();
+        await runAttach(targetRoot, targetName);
+        return; // don't prompt — runAttach takes over
+      } catch (err) {
+        console.log(`  Could not switch: ${err instanceof Error ? err.message : String(err)}`);
+        console.log("  Is the daemon running?");
+      }
     }
   } else if (verb === "agents") {
     const { formatAgentsTable } = await import("./formatters.js");
@@ -400,6 +581,10 @@ const handleCommand = async (
   :events                           Recent meetings + in-flight
   :cost                             Cost summary per agent
   :directive (d) [message]          Send a Source directive
+  :directive list                   List open directives
+  :directive close <id>             Close/resolve a directive
+  :directive delete <id>            Permanently delete a directive
+  :directive edit <id>              Open in $EDITOR (local provider only)
   :wake <agent-id>                  Wake an agent now
   :convene <group-id> [kind]        Convene a group meeting
   :edit <agent-id>                  Open agent's role.md in $EDITOR

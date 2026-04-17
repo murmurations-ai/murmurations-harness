@@ -231,9 +231,8 @@ export function createDefaultRunner(
     try {
       wakePrompt = await readFile(promptPath, "utf8");
     } catch {
-      return {
-        wakeSummary: `[${agentId}] wake ${wakeId}\n  status: failed — could not load ${promptPath}`,
-      };
+      // No wake prompt file — use a sensible default
+      wakePrompt = `You are ${agentId}. Your identity chain is loaded above. Scan your signal bundle, address any directives or action items, and produce your output. If no signals require action, report your current status.`;
     }
 
     // 3. Render signals
