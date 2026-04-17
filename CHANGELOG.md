@@ -3,6 +3,44 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.5] - 2026-04-17
+
+### Added
+
+- **Extension system** (ADR-0023) — OpenClaw-compatible plugin loading from `extensions/` directory with `openclaw.plugin.json` manifests. Extensions register tools via `MurmurationPluginApi`.
+- **Built-in web search extension** — `web_search` (Tavily if `TAVILY_API_KEY` set, DuckDuckGo keyless fallback) + `web_fetch` (read any URL, HTML-to-text). No API key needed for basic search.
+- **`harness.yaml` config file** — governance plugin, collaboration provider, log level persist in `murmuration/harness.yaml`. CLI flags override config.
+- **Auto-detect murmuration from cwd** — `cd my-murmuration && murmuration start` just works. Bare `murmuration` with no args auto-starts or shows registered sessions.
+- **REPL directive management** — `:directive list`, `:directive close <id>`, `:directive delete <id>`, `:directive edit <id>` (opens in \$EDITOR for local provider)
+- **REPL wake result display** — `:wake <agent>` shows completion/failure inline by polling the wake log
+- **REPL disconnect survival** — daemon dying shows "(disconnected)>" prompt instead of exiting
+- **Tab completion** — groups, directive subcommands, agent IDs in REPL
+- **Agent ID validation** — typo agent names get clear error with available list
+- **Langfuse trace enrichment** (ADR-0022 Phase 1) — agentId, wakeId, groupIds, wakeMode in telemetry metadata
+- **ADR-0022** proposed and accepted — Langfuse-powered agent self-reflection
+- **ADR-0023** proposed and consented (5/6 decisions) — extension system
+- **23 new tests** — extensions (10), harness config (10), signal collaboration (3)
+- **`@murmurations-ai/governance-s3`** published as npm package
+
+### Changed
+
+- Local collaboration items flow through signal aggregator (root cause fix, not runner hack)
+- Directives use `CollaborationProvider` — local mode works without GitHub
+- Default runner fallback when no `runner.mjs` exists
+- Default wake prompt when no `prompts/wake.md` exists
+- Governance plugin resolves as npm package or relative to murmuration root
+- `process.exit()` replaced with `throw` in directive.ts (daemon stays alive on errors)
+- Require `murmuration/` directory — clear error if not found
+- CI gate test uses `--once` + timeout
+
+### Fixed
+
+- DuckDuckGo search parser regex (href before class in HTML attributes)
+- Signal rendering for local items (SOURCE DIRECTIVE tag with full body)
+- REPL `:switch` stays in REPL on connection failure
+- Wake log polling uses offset to skip stale entries
+- CI build failure: missing `yaml` dependency in CLI package
+
 ## [0.3.4] - 2026-04-16
 
 ### Added
