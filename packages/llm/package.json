@@ -1,6 +1,6 @@
 {
   "name": "@murmurations-ai/llm",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Typed LLM client for the Murmuration Harness — four-provider, SecretValue auth, per-call cost hook.",
   "license": "MIT",
   "author": "Emergent Praxis murmuration",

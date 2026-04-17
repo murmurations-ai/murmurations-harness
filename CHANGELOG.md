@@ -3,6 +3,13 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.4] - 2026-04-16
+
+### Added
+
+- **Bare `murmuration` command** — typing `murmuration` with no arguments auto-starts if `murmuration/` directory found in cwd, otherwise shows registered murmurations with live status + help
+- **Langfuse trace enrichment** (ADR-0022 Phase 1) — `CallOptions.telemetryContext` tags every LLM trace with agentId, wakeId, groupIds, and wakeMode for per-agent Langfuse queries
+
 ## [0.3.3] - 2026-04-16
 
 ### Added
