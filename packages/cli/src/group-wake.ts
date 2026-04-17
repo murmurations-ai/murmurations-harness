@@ -16,6 +16,7 @@ import {
   makeSecretKey,
   IdentityLoader,
   runGroupWake,
+  type CollaborationProvider,
   type GroupConfig,
   type GroupWakeContext,
   type GroupWakeKind,
@@ -25,15 +26,10 @@ import {
   type GovernanceTally,
   GovernanceStateStore,
 } from "@murmurations-ai/core";
-import {
-  createGithubClient,
-  makeRepoCoordinate,
-  makeIssueNumber,
-  type GithubClient,
-  type RepoCoordinate,
-} from "@murmurations-ai/github";
 import { createLLMClient, type LLMClient } from "@murmurations-ai/llm";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
+
+import { buildCollaborationProvider, CollaborationBuildError } from "./collaboration-factory.js";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
@@ -103,28 +99,14 @@ const getDefaultModel = (provider: string): string => {
   }
 };
 
-/** Fetch the group's GitHub issues backlog (by label). */
-const fetchGroupBacklog = async (
-  rootDir: string,
-  _groupId: string,
-  repoInfo: { owner: string; repo: string },
-): Promise<string> => {
+/** Fetch the group's open items backlog via the collaboration provider. */
+const fetchGroupBacklog = async (provider: CollaborationProvider): Promise<string> => {
   try {
-    const envPath = join(rootDir, ".env");
-    if (!existsSync(envPath)) return "(no .env — cannot fetch backlog)";
-    const { DotenvSecretsProvider } = await import("@murmurations-ai/secrets-dotenv");
-    const provider = new DotenvSecretsProvider({ envPath });
-    await provider.load({ required: [makeSecretKey("GITHUB_TOKEN")], optional: [] });
-    const { createGithubClient, makeRepoCoordinate } = await import("@murmurations-ai/github");
-    const gh = createGithubClient({ token: provider.get(makeSecretKey("GITHUB_TOKEN")) });
-    const repo = makeRepoCoordinate(repoInfo.owner, repoInfo.repo);
-    const result = await gh.listIssues(repo, { state: "open", perPage: 30 });
+    const result = await provider.listItems({ state: "open", limit: 30 });
     if (!result.ok) return `(backlog fetch failed: ${result.error.code})`;
-    const issues = result.value;
-    if (issues.length === 0) return "(no open issues)";
-    return issues
-      .map((i) => `- #${String(i.number.value)} ${i.title} [${i.labels.join(", ")}]`)
-      .join("\n");
+    const items = result.value;
+    if (items.length === 0) return "(no open items)";
+    return items.map((i) => `- ${i.ref.id} ${i.title} [${i.labels.join(", ")}]`).join("\n");
   } catch (err) {
     return `(backlog fetch error: ${err instanceof Error ? err.message : String(err)})`;
   }
@@ -159,8 +141,7 @@ const parseGroupConfig = (groupId: string, content: string): GroupConfig => {
 
 const executeActions = async (
   actions: readonly MeetingAction[],
-  gh: GithubClient,
-  repo: RepoCoordinate,
+  provider: CollaborationProvider,
 ): Promise<ActionReceipt[]> => {
   const receipts: ActionReceipt[] = [];
 
@@ -172,13 +153,11 @@ const executeActions = async (
             receipts.push({ action, success: false, error: "missing issueNumber or label" });
             break;
           }
-          // Remove old label first if this is a label swap
+          const ref = { id: String(action.issueNumber) };
           if (action.removeLabel) {
-            await gh.removeLabel(repo, makeIssueNumber(action.issueNumber), action.removeLabel);
+            await provider.removeLabel(ref, action.removeLabel);
           }
-          const result = await gh.addLabels(repo, makeIssueNumber(action.issueNumber), [
-            action.label,
-          ]);
+          const result = await provider.addLabels(ref, [action.label]);
           if (result.ok) {
             const swap = action.removeLabel ? ` (-${action.removeLabel})` : "";
             console.log(
@@ -198,17 +177,21 @@ const executeActions = async (
             receipts.push({ action, success: false, error: "missing title" });
             break;
           }
-          const issueInput: Record<string, unknown> = { title: action.title };
-          if (action.body) issueInput.body = action.body;
-          if (action.labels && action.labels.length > 0) issueInput.labels = [...action.labels];
-          const result = await gh.createIssue(
-            repo,
-            issueInput as { title: string; body?: string; labels?: string[] },
-          );
+          const input: { title: string; body: string; labels?: readonly string[] } = {
+            title: action.title,
+            body: action.body ?? "",
+          };
+          if (action.labels && action.labels.length > 0) input.labels = action.labels;
+          const result = await provider.createItem(input);
           if (result.ok) {
-            const num = result.value.number.value;
-            console.log(`    \x1b[32m✓\x1b[0m create-issue #${String(num)}: ${action.title}`);
-            receipts.push({ action, success: true, issueNumber: num });
+            const parsed = Number(result.value.id);
+            const id = Number.isFinite(parsed) ? parsed : undefined;
+            console.log(`    \x1b[32m✓\x1b[0m create-issue ${result.value.id}: ${action.title}`);
+            receipts.push({
+              action,
+              success: true,
+              ...(id !== undefined ? { issueNumber: id } : {}),
+            });
           } else {
             console.log(`    \x1b[31m✗\x1b[0m create-issue: ${result.error.code}`);
             receipts.push({ action, success: false, error: result.error.code });
@@ -220,9 +203,8 @@ const executeActions = async (
             receipts.push({ action, success: false, error: "missing issueNumber" });
             break;
           }
-          const result = await gh.updateIssueState(
-            repo,
-            makeIssueNumber(action.issueNumber),
+          const result = await provider.updateItemState(
+            { id: String(action.issueNumber) },
             "closed",
           );
           if (result.ok) {
@@ -241,9 +223,10 @@ const executeActions = async (
             receipts.push({ action, success: false, error: "missing issueNumber or body" });
             break;
           }
-          const result = await gh.createIssueComment(repo, makeIssueNumber(action.issueNumber), {
-            body: action.body,
-          });
+          const result = await provider.postComment(
+            { id: String(action.issueNumber) },
+            action.body,
+          );
           if (result.ok) {
             console.log(`    \x1b[32m✓\x1b[0m comment-issue #${String(action.issueNumber)}`);
             receipts.push({ action, success: true });
@@ -432,18 +415,39 @@ export const runGroupWakeCommand = async (
     }
   }
 
-  // Fetch the group's GitHub issues backlog for context
-  const repoInfo = await findRepoFromAgents(root, config.members);
-  let backlogContext = "";
-  if (repoInfo) {
-    console.log(`  Fetching backlog from ${repoInfo.owner}/${repoInfo.repo}...`);
-    backlogContext = await fetchGroupBacklog(root, groupId, repoInfo);
+  // Build the collaboration provider once for this command (backlog
+  // fetch, meeting action execution, meeting minutes post).
+  let collaboration: CollaborationProvider | undefined;
+  let repoInfo: { owner: string; repo: string } | undefined;
+  try {
+    const built = await buildCollaborationProvider(root);
+    collaboration = built.provider;
+    if (built.repo) repoInfo = built.repo;
+  } catch (err) {
+    if (err instanceof CollaborationBuildError) {
+      console.log(`  (collaboration provider unavailable: ${err.message})`);
+    } else {
+      console.log(
+        `  (collaboration provider error: ${err instanceof Error ? err.message : String(err)})`,
+      );
+    }
+  }
+  if (!repoInfo) {
+    // Fall back to agent-scope lookup for display purposes only.
+    const fallback = await findRepoFromAgents(root, config.members);
+    if (fallback) repoInfo = fallback;
   }
 
-  // Backlog is now passed as separate context for agenda generation (not merged with directive)
+  let backlogContext = "";
+  if (collaboration) {
+    const source = repoInfo ? `${repoInfo.owner}/${repoInfo.repo}` : collaboration.displayName;
+    console.log(`  Fetching backlog from ${source}...`);
+    backlogContext = await fetchGroupBacklog(collaboration);
+  }
+
   const backlogForAgenda =
-    repoInfo && backlogContext
-      ? `## Open Issues (${repoInfo.owner}/${repoInfo.repo})\n\n${backlogContext}`
+    collaboration && backlogContext
+      ? `## Open Items (${repoInfo ? `${repoInfo.owner}/${repoInfo.repo}` : collaboration.displayName})\n\n${backlogContext}`
       : undefined;
 
   // Load retrospective metrics if this is a retrospective
@@ -547,25 +551,15 @@ export const runGroupWakeCommand = async (
 
   // Execute structured actions from the facilitator
   let receipts: ActionReceipt[] = [];
-  if (result.actions.length > 0 && repoInfo && secretsProvider?.has(GITHUB_TOKEN)) {
+  if (result.actions.length > 0 && collaboration) {
     console.log(`\n--- Executing ${String(result.actions.length)} action(s) ---\n`);
-    const actionGh = createGithubClient({
-      token: secretsProvider.get(GITHUB_TOKEN),
-      writeScopes: {
-        issueComments: [`${repoInfo.owner}/${repoInfo.repo}`],
-        branchCommits: [],
-        labels: [`${repoInfo.owner}/${repoInfo.repo}`],
-        issues: [`${repoInfo.owner}/${repoInfo.repo}`],
-      },
-    });
-    const actionRepo = makeRepoCoordinate(repoInfo.owner, repoInfo.repo);
-    receipts = await executeActions(result.actions, actionGh, actionRepo);
+    receipts = await executeActions(result.actions, collaboration);
     const succeeded = receipts.filter((r) => r.success).length;
     const failed = receipts.filter((r) => !r.success).length;
     console.log(`\n  ${String(succeeded)} succeeded, ${String(failed)} failed`);
   } else if (result.actions.length > 0) {
     console.log(
-      `\n--- ${String(result.actions.length)} action(s) proposed but no GitHub access — skipped ---`,
+      `\n--- ${String(result.actions.length)} action(s) proposed but no collaboration provider — skipped ---`,
     );
   }
 
@@ -647,45 +641,8 @@ export const runGroupWakeCommand = async (
   ].join("\n");
 
   const meetingLabel = kind === "governance" ? "governance-meeting" : "group-meeting";
-  const repoOwner = repoInfo?.owner ?? "unknown";
-  const repoName = repoInfo?.repo ?? "unknown";
 
-  try {
-    if (!secretsProvider?.has(GITHUB_TOKEN)) throw new Error("no GITHUB_TOKEN");
-    const { makeRepoCoordinate, createGithubClient: createGH } =
-      await import("@murmurations-ai/github");
-    const meetingGh = createGH({
-      token: secretsProvider.get(GITHUB_TOKEN),
-      writeScopes: {
-        issueComments: [`${repoOwner}/${repoName}`],
-        branchCommits: [],
-        labels: [],
-        issues: [`${repoOwner}/${repoName}`],
-      },
-    });
-    const issueResult = await meetingGh.createIssue(makeRepoCoordinate(repoOwner, repoName), {
-      title: `[${kind.toUpperCase()} MEETING] ${config.name} — ${dayUtc}`,
-      labels: [meetingLabel, `group:${groupId}`],
-      body: minutes,
-    });
-    if (issueResult.ok) {
-      meetingMinutesUrl = issueResult.value.htmlUrl;
-      console.log(`\nMeeting minutes: ${issueResult.value.htmlUrl}`);
-    } else {
-      console.log(`\nFailed to create meeting issue: ${issueResult.error.code}`);
-      // Fallback: write locally
-      const { writeFile: wf, mkdir } = await import("node:fs/promises");
-      const meetingDir = join(root, ".murmuration", "runs", `group-${groupId}`, dayUtc);
-      await mkdir(meetingDir, { recursive: true });
-      await wf(
-        join(meetingDir, `meeting-${randomUUID().slice(0, 8)}.md`),
-        `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`,
-        "utf8",
-      );
-      console.log(`  (saved locally as fallback)`);
-    }
-  } catch {
-    // Fallback: write locally if GitHub fails
+  const writeFallback = async (): Promise<void> => {
     const { writeFile: wf, mkdir } = await import("node:fs/promises");
     const meetingDir = join(root, ".murmuration", "runs", `group-${groupId}`, dayUtc);
     await mkdir(meetingDir, { recursive: true });
@@ -694,7 +651,25 @@ export const runGroupWakeCommand = async (
       `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`,
       "utf8",
     );
-    console.log(`\nMeeting minutes saved locally (GitHub unavailable).`);
+  };
+
+  if (collaboration) {
+    const itemResult = await collaboration.createItem({
+      title: `[${kind.toUpperCase()} MEETING] ${config.name} — ${dayUtc}`,
+      labels: [meetingLabel, `group:${groupId}`],
+      body: minutes,
+    });
+    if (itemResult.ok) {
+      meetingMinutesUrl = itemResult.value.url ?? itemResult.value.id;
+      console.log(`\nMeeting minutes: ${meetingMinutesUrl}`);
+    } else {
+      console.log(`\nFailed to create meeting item: ${itemResult.error.code}`);
+      await writeFallback();
+      console.log(`  (saved locally as fallback)`);
+    }
+  } else {
+    await writeFallback();
+    console.log(`\nMeeting minutes saved locally (no collaboration provider).`);
   }
 
   return {

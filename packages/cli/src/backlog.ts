@@ -1,5 +1,6 @@
 /**
- * `murmuration backlog` — view and manage a group's GitHub work queue.
+ * `murmuration backlog` — view and manage a group's work queue via the
+ * configured {@link CollaborationProvider} (GitHub issues or local items).
  *
  * Usage:
  *   murmuration backlog --root ../my-murmuration --group content
@@ -10,14 +11,10 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 
-import { makeSecretKey } from "@murmurations-ai/core";
-import { createGithubClient, makeRepoCoordinate } from "@murmurations-ai/github";
-import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
-
-const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
+import { buildCollaborationProvider, CollaborationBuildError } from "./collaboration-factory.js";
 
 export interface BacklogItem {
-  readonly number: number;
+  readonly number: string;
   readonly title: string;
   readonly labels: readonly string[];
   readonly state: "open" | "closed";
@@ -36,73 +33,57 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
     process.exit(2);
   }
 
-  const repoIdx = args.indexOf("--repo");
-  const repoArg = repoIdx >= 0 ? args[repoIdx + 1] : undefined;
-
   const doRefresh = args.includes("--refresh");
   const backlogDir = join(root, ".murmuration", "backlogs");
   const backlogFile = join(backlogDir, `${groupId}.json`);
 
-  // Load group config to get backlog label + repo
+  // Load group config to get backlog label
   const groupDocPath = join(root, "governance", "groups", `${groupId}.md`);
   let backlogLabel = `group:${groupId}`;
-  let backlogRepo = repoArg ?? "";
 
   if (existsSync(groupDocPath)) {
     const content = await readFile(groupDocPath, "utf8");
     const labelMatch = /backlog_label:\s*"?([^"\n]+)"?/i.exec(content);
-    if (labelMatch) backlogLabel = labelMatch[1]!.trim();
-    const repoMatch = /backlog_repo:\s*"?([^"\n]+)"?/i.exec(content);
-    if (repoMatch) backlogRepo = repoMatch[1]!.trim();
-  }
-
-  if (doRefresh && !backlogRepo) {
-    console.error(
-      "murmuration backlog: no repo configured. Use --repo owner/repo or set backlog_repo: in the group doc.",
-    );
-    process.exit(2);
+    if (labelMatch?.[1]) backlogLabel = labelMatch[1].trim();
   }
 
   if (doRefresh) {
-    // Fetch from GitHub
-    const envPath = join(root, ".env");
-    if (!existsSync(envPath)) {
-      console.error("murmuration backlog: .env not found (need GITHUB_TOKEN for --refresh)");
-      process.exit(1);
-    }
-    const provider = new DotenvSecretsProvider({ envPath });
-    await provider.load({ required: [GITHUB_TOKEN], optional: [] });
-
-    const [owner, repo] = backlogRepo.split("/");
-    if (!owner || !repo) {
-      console.error(`murmuration backlog: invalid repo "${backlogRepo}"`);
-      process.exit(1);
+    let provider;
+    try {
+      ({ provider } = await buildCollaborationProvider(root));
+    } catch (err) {
+      if (err instanceof CollaborationBuildError) {
+        console.error(`murmuration backlog: ${err.message}`);
+        process.exit(1);
+      }
+      throw err;
     }
 
-    const gh = createGithubClient({ token: provider.get(GITHUB_TOKEN) });
-    const repoCoord = makeRepoCoordinate(owner, repo);
+    console.log(
+      `Refreshing ${groupId} backlog via ${provider.displayName} (label: "${backlogLabel}")...`,
+    );
 
-    console.log(`Refreshing ${groupId} backlog from ${backlogRepo} (label: "${backlogLabel}")...`);
-
-    const result = await gh.listIssues(repoCoord, {
+    const result = await provider.listItems({
       state: "open",
       labels: [backlogLabel],
-      perPage: 30,
+      limit: 30,
     });
 
     if (!result.ok) {
-      console.error(`GitHub error: ${result.error.code} — ${result.error.message}`);
+      console.error(
+        `${provider.displayName} error: ${result.error.code} — ${result.error.message}`,
+      );
       process.exit(1);
     }
 
-    const items: BacklogItem[] = result.value.map((issue) => ({
-      number: issue.number.value,
-      title: issue.title,
-      labels: issue.labels,
-      state: issue.state,
-      url: issue.htmlUrl,
-      createdAt: issue.createdAt.toISOString(),
-      updatedAt: issue.updatedAt.toISOString(),
+    const items: BacklogItem[] = result.value.map((item) => ({
+      number: item.ref.id,
+      title: item.title,
+      labels: item.labels,
+      state: item.state,
+      url: item.ref.url ?? "",
+      createdAt: item.createdAt.toISOString(),
+      updatedAt: item.updatedAt.toISOString(),
     }));
 
     await mkdir(backlogDir, { recursive: true });
@@ -116,7 +97,7 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
     const content = await readFile(backlogFile, "utf8");
     items = JSON.parse(content) as BacklogItem[];
   } catch {
-    console.log(`No backlog cached for ${groupId}. Run with --refresh to fetch from GitHub.`);
+    console.log(`No backlog cached for ${groupId}. Run with --refresh to fetch.`);
     return;
   }
 
@@ -130,7 +111,7 @@ export const runBacklog = async (args: readonly string[], rootDir: string): Prom
     const labels = item.labels.filter((l) => l !== backlogLabel).join(", ");
     const labelStr = labels ? ` [${labels}]` : "";
     console.log(
-      `  ${String(idx + 1).padStart(2)}. #${String(item.number).padEnd(5)} ${item.title.slice(0, 60)}${labelStr}`,
+      `  ${String(idx + 1).padStart(2)}. ${item.number.padEnd(6)} ${item.title.slice(0, 60)}${labelStr}`,
     );
   }
 };
