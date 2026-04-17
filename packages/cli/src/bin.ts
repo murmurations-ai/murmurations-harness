@@ -300,10 +300,11 @@ Topics:
   murmuration help protocol                                  # show daemon protocol + parity matrix
 
 Examples:
-  murmuration start                                          # hello-world only
-  murmuration start --root ../my-murmuration                 # all agents
-  murmuration start --root ../my-murmuration --agent my-bot  # one agent
-  murmuration start --root ../my-murmuration --dry-run       # all, no writes
+  murmuration                                                # auto-detect from cwd or show help
+  murmuration start                                          # start from cwd (requires murmuration/)
+  murmuration start --root ../my-murmuration                 # start from a specific directory
+  murmuration start --root ../my-murmuration --agent my-bot  # start one agent only
+  murmuration start --collaboration local                    # offline mode (no GitHub)
 `.trimStart();
 
 const main = async (): Promise<void> => {
@@ -322,7 +323,25 @@ const main = async (): Promise<void> => {
       });
       break;
     }
-    case undefined:
+    case undefined: {
+      // Bare `murmuration` with no command:
+      // - If cwd has murmuration/, start the daemon (same as `murmuration start`)
+      // - Otherwise, show registered murmurations and help
+      if (existsSync(resolve(process.cwd(), "murmuration"))) {
+        console.log("Murmuration detected in current directory. Starting...\n");
+        const startArgs = parseStartArgs([]);
+        await bootDaemon({
+          rootDir: startArgs.rootDir,
+          logLevel: startArgs.logLevel,
+        });
+      } else {
+        // Show registered murmurations then help
+        await listSessions();
+        console.log("");
+        process.stdout.write(usage());
+      }
+      break;
+    }
     case "-h":
     case "--help":
     case "help": {
