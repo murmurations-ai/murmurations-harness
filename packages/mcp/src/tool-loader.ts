@@ -141,7 +141,7 @@ export class McpToolLoader {
 
     const client = new Client({
       name: "murmurations-harness",
-      version: "0.3.2",
+      version: "0.3.3",
     });
 
     await client.connect(transport);

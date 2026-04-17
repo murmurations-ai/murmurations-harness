@@ -4,7 +4,7 @@
 
 The Murmuration Harness is an open-source TypeScript runtime that lets a single human — the **Source** — coordinate a murmuration of AI agents to do real work. It is not an autonomous agent framework. It is a tool that amplifies human agency.
 
-> **v0.3.1** — Vercel AI SDK, MCP tools, AgentSkills.io, Langfuse observability. 8 packages on npm, 441 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
+> **v0.3.3** — Vercel AI SDK, MCP tools, AgentSkills.io, Langfuse observability, pluggable CollaborationProvider, `harness.yaml` config. 8 packages on npm, 463 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
 
 ## Philosophy: Source as a human role
 
@@ -44,9 +44,17 @@ cd my-murmuration
 
 # Add API keys to .env:
 #   GEMINI_API_KEY=...    (or ANTHROPIC_API_KEY, OPENAI_API_KEY)
-#   GITHUB_TOKEN=...
+#   GITHUB_TOKEN=...      (optional — use --collaboration local for offline)
 
 murmuration start
+```
+
+That's it. The harness auto-detects the `murmuration/` directory and loads all configuration from `murmuration/harness.yaml`. No flags needed for governance, collaboration, or log level — they're all in the config file.
+
+For offline development (no GitHub):
+
+```bash
+murmuration start --collaboration local
 ```
 
 Or install from source:
@@ -58,7 +66,8 @@ pnpm install && pnpm build
 
 alias murmuration="node $(pwd)/packages/cli/dist/bin.js"
 murmuration init ../my-murmuration
-murmuration start --root ../my-murmuration
+cd ../my-murmuration
+murmuration start
 ```
 
 See [docs/GETTING-STARTED.md](./docs/GETTING-STARTED.md) for the full walkthrough.
@@ -123,7 +132,29 @@ my-murmuration/
 
 ### Observability (Langfuse)
 
-Set `LANGFUSE_SECRET_KEY` and `LANGFUSE_PUBLIC_KEY` in your environment. The harness automatically reports LLM spans to [Langfuse](https://langfuse.com/) via OpenTelemetry — token usage, latency, model info, and cost per wake. If the keys are absent, observability is a silent no-op.
+Set `LANGFUSE_SECRET_KEY` and `LANGFUSE_PUBLIC_KEY` in your environment. The harness automatically reports LLM spans to [Langfuse](https://langfuse.com/) via OpenTelemetry — token usage, latency, model info, and cost per wake. If the keys are absent, observability is a silent no-op. See [docs/OBSERVABILITY.md](./docs/OBSERVABILITY.md) for the full setup guide.
+
+### Configuration (`harness.yaml`)
+
+Settings that rarely change live in `murmuration/harness.yaml`:
+
+```yaml
+governance:
+  plugin: "./governance-s3/index.mjs"
+
+collaboration:
+  provider: "github" # or "local" for offline
+  repo: "my-org/my-murmuration" # governance repo (private)
+
+products:
+  - name: my-product
+    repo: "my-org/my-product" # product repo (separate)
+
+logging:
+  level: "info"
+```
+
+CLI flags override the config file when set. The murmuration is self-contained — all configuration, identity, and runtime state live in one directory.
 
 ## Repository layout
 
@@ -209,7 +240,7 @@ pnpm build                # build all 8 packages
 pnpm typecheck            # tsc --noEmit across all packages
 pnpm lint                 # eslint (strict-type-checked)
 pnpm format:check         # prettier check
-pnpm test                 # vitest (441 tests, 37 files)
+pnpm test                 # vitest (463 tests, 38 files)
 pnpm check                # all of the above (CI locally)
 ```
 

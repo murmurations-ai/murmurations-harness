@@ -83,7 +83,8 @@ Each release targets a GitHub Milestone. Issues are assigned to milestones durin
 | v0.2.0  | tmux CLI       | ADR-0018: protocol.ts, parity matrix, batch verbs, REPL                      | **Released** |
 | v0.3.0  | Vercel + MCP   | ADR-0020: Vercel AI SDK, tool calling, MCP, Langfuse (8 packages, 427 tests) | **Released** |
 | v0.3.1  | AgentSkills    | Three-Tier Progressive Disclosure, SKILL.md scanner (441 tests)              | **Released** |
-| v0.4.0  | CollabProvider | ADR-0021: pluggable CollaborationProvider + multi-instance                   | Planning     |
+| v0.3.3  | CollabProvider | ADR-0021: CollaborationProvider, harness.yaml, cwd auto-detect (463 tests)   | **Released** |
+| v0.4.0  | Multi-instance | Multiple daemons, one repo                                                   | Planning     |
 | v1.0.0  | Stable API     | Public API freeze, migration guide, Docker                                   | Planning     |
 
 ## Changelog

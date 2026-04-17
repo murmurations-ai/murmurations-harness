@@ -3,6 +3,31 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.3.3] - 2026-04-16
+
+### Added
+
+- **CollaborationProvider interface** (ADR-0021) — pluggable abstraction for coordination, artifacts, and signals. `GitHubCollaborationProvider` wraps existing client; `LocalCollaborationProvider` uses filesystem for offline/testing. 22 contract tests.
+- **`harness.yaml` config file** — governance plugin, collaboration provider, and log level persist in `murmuration/harness.yaml`. CLI flags override config. No more repeating `--governance` every start.
+- **Auto-detect murmuration from cwd** — `cd my-murmuration && murmuration start` just works. No `--root` needed if current directory has a `murmuration/` folder.
+- **Require `murmuration/` directory** — clear error if no murmuration found, instead of silently falling back to hello-world example.
+- **ADR-0022 proposed and accepted** — Langfuse-powered agent self-reflection (governance-agnostic).
+- **Engineering Circle** — 7 agents (#22-#28) created, 4 meetings convened, both ADRs consented.
+
+### Changed
+
+- Governance sync accepts `CollaborationProvider` (preferred) or legacy `GovernanceSyncGitHub` (backwards compat)
+- Runner prefers `collaborationProvider.commitArtifact()` over legacy two-step GitHub commit
+- S3 three-phase meeting architecture — facilitator generates agenda, Source directive overrides
+- `--collaboration local` flag for filesystem-based governance (no GitHub token needed)
+- `--agenda` alias for `--directive` in group-wake
+- CI gate test uses `--once` + timeout instead of sleep+kill
+
+### Fixed
+
+- CI build failure: missing `yaml` dependency in CLI package
+- CI gate test hanging: daemon wasn't terminating in CI environment
+
 ## [0.3.2] - 2026-04-16
 
 ### Added
