@@ -116,34 +116,33 @@ const S3GovernancePlugin = {
     return [TENSION_GRAPH, PROPOSAL_GRAPH];
   },
 
-  async onEventsEmitted(batch, store) {
+  async onEventsEmitted(batch, _reader) {
     const decisions = [];
 
     for (const event of batch.events) {
       switch (event.kind) {
         case "agent-governance-event":
         case S3_TENSION: {
-          // Create a tracked tension item in the store.
-          const item = store.create("tension", batch.agentId, event.payload);
-
           // Route to Source for visibility + to any targeted agent.
           /** @type {import('@murmurations-ai/core').GovernanceRouteTarget[]} */
           const routes = [{ target: "source" }];
           if (event.targetAgentId) {
             routes.push({ target: "agent", agentId: event.targetAgentId });
           }
-          decisions.push({ event, routes });
+          decisions.push({
+            event,
+            routes,
+            create: { kind: "tension", payload: event.payload },
+          });
           break;
         }
 
         case S3_PROPOSAL: {
-          // Create a tracked proposal item.
-          store.create("proposal", batch.agentId, event.payload);
-
           // Proposals route to Source for consent round initiation.
           decisions.push({
             event,
             routes: [{ target: "source" }],
+            create: { kind: "proposal", payload: event.payload },
           });
           break;
         }
@@ -193,7 +192,7 @@ const S3GovernancePlugin = {
     return decisions;
   },
 
-  async evaluateAction(agentId, action, context, store) {
+  async evaluateAction(agentId, action, context, store /* GovernanceStateReader */) {
     // S3 authorization: check whether a ratified governance item
     // covers the requested action.
     //

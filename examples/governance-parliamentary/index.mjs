@@ -101,32 +101,33 @@ const ParliamentaryGovernancePlugin = {
     return [MOTION_GRAPH, AMENDMENT_GRAPH];
   },
 
-  async onEventsEmitted(batch, store) {
+  async onEventsEmitted(batch, _reader) {
     const decisions = [];
 
     for (const event of batch.events) {
       switch (event.kind) {
         case PARL_MOTION:
         case "agent-governance-event": {
-          // Create a tracked motion in the store
-          const item = store.create("motion", batch.agentId, event.payload);
-
           // Motions go to the chair (Source) for scheduling
           /** @type {import('@murmurations-ai/core').GovernanceRouteTarget[]} */
           const routes = [{ target: "source" }];
           if (event.targetAgentId) {
             routes.push({ target: "agent", agentId: event.targetAgentId });
           }
-          decisions.push({ event, routes });
+          decisions.push({
+            event,
+            routes,
+            create: { kind: "motion", payload: event.payload },
+          });
           break;
         }
 
         case PARL_AMENDMENT: {
           // Amendments attach to a motion
-          store.create("amendment", batch.agentId, event.payload);
           decisions.push({
             event,
             routes: [{ target: "source" }],
+            create: { kind: "amendment", payload: event.payload },
           });
           break;
         }
@@ -158,7 +159,7 @@ const ParliamentaryGovernancePlugin = {
     return decisions;
   },
 
-  async evaluateAction(agentId, action, context, store) {
+  async evaluateAction(agentId, action, context, store /* GovernanceStateReader */) {
     // Parliamentary authorization:
     //   - Actions covered by a passed motion → allow
     //   - Actions requiring a vote → deny until motion passes

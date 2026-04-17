@@ -74,24 +74,30 @@ const MeritocraticPlugin = {
     return [FLAG_GRAPH, STANDARD_GRAPH];
   },
 
-  async onEventsEmitted(batch, store) {
+  async onEventsEmitted(batch, _reader) {
     const decisions = [];
     for (const event of batch.events) {
       switch (event.kind) {
         case MERIT_FLAG:
         case "agent-governance-event": {
-          store.create("flag", batch.agentId, event.payload);
           // Flags route to the guild lead + Source
           const routes = [{ target: "source" }];
           if (event.targetAgentId) {
             routes.push({ target: "agent", agentId: event.targetAgentId });
           }
-          decisions.push({ event, routes });
+          decisions.push({
+            event,
+            routes,
+            create: { kind: "flag", payload: event.payload },
+          });
           break;
         }
         case MERIT_STANDARD: {
-          store.create("standard", batch.agentId, event.payload);
-          decisions.push({ event, routes: [{ target: "source" }] });
+          decisions.push({
+            event,
+            routes: [{ target: "source" }],
+            create: { kind: "standard", payload: event.payload },
+          });
           break;
         }
         case MERIT_ENDORSEMENT: {
@@ -110,7 +116,7 @@ const MeritocraticPlugin = {
     return decisions;
   },
 
-  async evaluateAction(agentId, action, context, store) {
+  async evaluateAction(agentId, action, context, store /* GovernanceStateReader */) {
     const ctx = typeof context === "object" && context !== null ? context : {};
     const tier = /** @type {string|undefined} */ (/** @type {any} */ (ctx).tier);
 

@@ -51,6 +51,7 @@ import type { SignalAggregator } from "../signals/index.js";
 import {
   GovernanceStateStore,
   NoOpGovernancePlugin,
+  makeGovernanceStateReader,
   type GovernancePlugin,
 } from "../governance/index.js";
 
@@ -774,9 +775,31 @@ export class Daemon {
               agentId: result.agentId,
               events: result.governanceEvents,
             },
-            this.#governanceStore,
+            makeGovernanceStateReader(this.#governanceStore),
           );
           for (const decision of decisions) {
+            if (decision.create) {
+              // Plugin requested an item creation. The daemon applies
+              // it so plugins never touch the write surface — `createdBy`
+              // is derived from the triggering batch, not the plugin.
+              try {
+                this.#governanceStore.create(
+                  decision.create.kind,
+                  result.agentId,
+                  decision.create.payload,
+                  decision.create.reviewAt !== undefined
+                    ? { reviewAt: decision.create.reviewAt }
+                    : {},
+                );
+              } catch (err) {
+                this.#logger.warn("daemon.governance.create.failed", {
+                  wakeId: result.wakeId.value,
+                  agentId: result.agentId.value,
+                  kind: decision.create.kind,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
             for (const route of decision.routes) {
               this.#dispatchGovernanceRoute(result, decision.event, route);
             }

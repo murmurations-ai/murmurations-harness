@@ -8,6 +8,7 @@ import { makeAgentId } from "../execution/index.js";
 import {
   GovernanceStateStore,
   NoOpGovernancePlugin,
+  makeGovernanceStateReader,
   type GovernancePlugin,
   type GovernanceStateGraph,
   type GovernanceItem,
@@ -305,32 +306,56 @@ describe("GovernancePlugin + Daemon dispatch contract", () => {
     expect(result.allow).toBe(true);
   });
 
-  it("GovernancePlugin onEventsEmitted receives batch and can create items", async () => {
-    // Simulates what a real plugin would do: receive events, create governance items
+  it("GovernancePlugin onEventsEmitted requests creates via decision.create", async () => {
+    // Plugins cannot mutate the store directly — they attach a `create`
+    // field to their routing decision and the daemon performs the write.
     const store = new GovernanceStateStore();
     store.registerGraph(S3_TENSION);
 
     const plugin = new NoOpGovernancePlugin();
-    // Override to actually create an item from an event
-    plugin.onEventsEmitted = (batch, s) => {
-      for (const event of batch.events) {
-        if (event.kind === "tension") {
-          s.create("tension", batch.agentId, event.payload as Record<string, unknown>);
-        }
-      }
-      return Promise.resolve([]);
+    plugin.onEventsEmitted = (batch, _reader) => {
+      const decisions = batch.events
+        .filter((event) => event.kind === "tension")
+        .map((event) => ({
+          event,
+          routes: [{ target: "source" as const }],
+          create: { kind: "tension", payload: event.payload },
+        }));
+      return Promise.resolve(decisions);
     };
 
-    await plugin.onEventsEmitted(
-      {
-        wakeId: { kind: "wake-id", value: "w1" },
-        agentId: makeAgentId("01-research"),
-        events: [{ kind: "tension", payload: { topic: "pricing" } }],
-      },
-      store,
-    );
+    const batch = {
+      wakeId: { kind: "wake-id" as const, value: "w1" },
+      agentId: makeAgentId("01-research"),
+      events: [{ kind: "tension", payload: { topic: "pricing" } }],
+    };
+    const decisions = await plugin.onEventsEmitted(batch, store);
 
+    // Simulate the daemon applying the plugin's create requests.
+    for (const decision of decisions) {
+      if (decision.create) {
+        store.create(decision.create.kind, batch.agentId, decision.create.payload);
+      }
+    }
     expect(store.query({ kind: "tension" })).toHaveLength(1);
+  });
+
+  it("makeGovernanceStateReader withholds write methods at runtime", () => {
+    const store = new GovernanceStateStore();
+    store.registerGraph(S3_TENSION);
+    const reader = makeGovernanceStateReader(store);
+
+    // Read methods are present and functional.
+    expect(typeof reader.graphs).toBe("function");
+    expect(typeof reader.query).toBe("function");
+    expect(reader.size()).toBe(0);
+
+    // Write methods are absent — a .mjs plugin casting back cannot
+    // mutate the store through this handle.
+    expect("create" in reader).toBe(false);
+    expect("transition" in reader).toBe(false);
+    expect("setGithubIssueUrl" in reader).toBe(false);
+    expect("registerGraph" in reader).toBe(false);
   });
 });
 

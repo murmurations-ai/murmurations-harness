@@ -89,24 +89,30 @@ const ConsensusPlugin = {
     return [PROPOSAL_GRAPH, CONCERN_GRAPH];
   },
 
-  async onEventsEmitted(batch, store) {
+  async onEventsEmitted(batch, _reader) {
     const decisions = [];
     for (const event of batch.events) {
       switch (event.kind) {
         case CONS_PROPOSAL:
         case "agent-governance-event": {
-          store.create("proposal", batch.agentId, event.payload);
           // Proposals go to the full assembly
           const routes = [{ target: "source" }];
           if (event.targetAgentId) {
             routes.push({ target: "agent", agentId: event.targetAgentId });
           }
-          decisions.push({ event, routes });
+          decisions.push({
+            event,
+            routes,
+            create: { kind: "proposal", payload: event.payload },
+          });
           break;
         }
         case CONS_CONCERN: {
-          store.create("concern", batch.agentId, event.payload);
-          decisions.push({ event, routes: [{ target: "source" }] });
+          decisions.push({
+            event,
+            routes: [{ target: "source" }],
+            create: { kind: "concern", payload: event.payload },
+          });
           break;
         }
         case CONS_BLOCK: {
@@ -126,7 +132,7 @@ const ConsensusPlugin = {
     return decisions;
   },
 
-  async evaluateAction(agentId, action, context, store) {
+  async evaluateAction(agentId, action, context, store /* GovernanceStateReader */) {
     const ctx = typeof context === "object" && context !== null ? context : {};
     const tier = /** @type {string|undefined} */ (/** @type {any} */ (ctx).tier);
 
