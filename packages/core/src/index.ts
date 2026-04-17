@@ -40,4 +40,5 @@ export * from "./strategy/index.js";
 export * from "./runner/index.js";
 export * from "./skills/index.js";
 export * from "./collaboration/index.js";
+export * from "./extensions/index.js";
 export * from "./daemon/command-executor.js";

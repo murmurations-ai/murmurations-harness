@@ -1,0 +1,7 @@
+{
+  "id": "web-search",
+  "providerAuthEnvVars": {},
+  "contracts": {
+    "tools": ["web_search", "web_fetch"]
+  }
+}
