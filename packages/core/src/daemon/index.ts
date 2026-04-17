@@ -51,6 +51,7 @@ import type { SignalAggregator } from "../signals/index.js";
 import {
   GovernanceStateStore,
   NoOpGovernancePlugin,
+  makeGovernanceStateReader,
   type GovernancePlugin,
 } from "../governance/index.js";
 
@@ -799,7 +800,7 @@ export class Daemon {
               agentId: result.agentId,
               events: result.governanceEvents,
             },
-            this.#governanceStore,
+            makeGovernanceStateReader(this.#governanceStore),
           );
           for (const decision of decisions) {
             if (decision.create) {

@@ -202,6 +202,24 @@ export interface GovernanceStateReader {
   size(): number;
 }
 
+/**
+ * Build a runtime read-only proxy of a {@link GovernanceStateReader}.
+ *
+ * TypeScript narrows the plugin interface to the reader surface, but a
+ * JavaScript/`.mjs` plugin can runtime-cast its parameter back to the
+ * full store. This proxy closes that gap: the returned object carries
+ * *only* the reader methods, delegating each to the underlying store.
+ * Casting it back to `GovernanceStateStore` still yields `undefined`
+ * for `create`/`transition`/`setGithubIssueUrl` at runtime.
+ */
+export const makeGovernanceStateReader = (store: GovernanceStateReader): GovernanceStateReader => ({
+  graphs: () => store.graphs(),
+  get: (itemId) => store.get(itemId),
+  query: (filter) => store.query(filter),
+  buildDecisionRecord: (itemId, summary) => store.buildDecisionRecord(itemId, summary),
+  size: () => store.size(),
+});
+
 /** Interface for governance state storage — enables GitHub-backed or SSE implementations. */
 export interface IGovernanceStateStore extends GovernanceStateReader {
   registerGraph(graph: GovernanceStateGraph): void;
@@ -628,7 +646,16 @@ export interface GovernancePlugin {
    */
   onTransition?(item: GovernanceItem, transition: GovernanceStateTransition): void;
 
-  /** Optional hook called once when the daemon starts. */
+  /**
+   * Optional hook called once when the daemon starts. Unlike
+   * {@link onEventsEmitted} and {@link evaluateAction}, this receives the
+   * full mutable store so the plugin can register state graphs via
+   * {@link GovernanceStateStore.registerGraph}. Plugins **should not**
+   * create or transition items here — that belongs in `onEventsEmitted`
+   * via the {@link GovernanceRoutingDecision.create} channel. Runtime
+   * isolation is relaxed for this hook because plugin code is
+   * operator-trusted at startup.
+   */
   onDaemonStart?(store: GovernanceStateStore): Promise<void>;
 
   /** Optional hook called once when the daemon stops. */

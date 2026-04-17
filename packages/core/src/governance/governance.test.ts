@@ -8,6 +8,7 @@ import { makeAgentId } from "../execution/index.js";
 import {
   GovernanceStateStore,
   NoOpGovernancePlugin,
+  makeGovernanceStateReader,
   type GovernancePlugin,
   type GovernanceStateGraph,
   type GovernanceItem,
@@ -337,6 +338,25 @@ describe("GovernancePlugin + Daemon dispatch contract", () => {
       }
     }
     expect(store.query({ kind: "tension" })).toHaveLength(1);
+  });
+
+  it("makeGovernanceStateReader withholds write methods at runtime", () => {
+    const store = new GovernanceStateStore();
+    store.registerGraph(S3_TENSION);
+    const reader = makeGovernanceStateReader(store);
+
+    // Read methods are present and functional.
+    expect(typeof reader.graphs).toBe("function");
+    expect(typeof reader.query).toBe("function");
+    expect(reader.size()).toBe(0);
+
+    // Write methods are absent — a .mjs plugin casting back cannot
+    // mutate the store through this handle.
+    const proxy = reader as unknown as Record<string, unknown>;
+    expect(proxy["create"]).toBeUndefined();
+    expect(proxy["transition"]).toBeUndefined();
+    expect(proxy["setGithubIssueUrl"]).toBeUndefined();
+    expect(proxy["registerGraph"]).toBeUndefined();
   });
 });
 
