@@ -2,21 +2,30 @@
  * Spirit client — loads an LLM session, runs a turn against the
  * operator's input, and surfaces the response plus a cost annotation.
  *
- * Phase 1: non-streaming (fine for REPL latency with Sonnet). Session
- * state is in-process only; REPL detach drops it.
+ * The Spirit inherits the murmuration's default LLM from
+ * `harness.yaml` (`llm.provider` + optional `llm.model`). A future
+ * Phase 2 `spirit.md` file may override this per-murmuration.
+ *
+ * Phase 1: non-streaming. Session state is in-process only; REPL
+ * detach drops it.
  */
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { makeSecretKey, makeSecretValue, type SecretValue } from "@murmurations-ai/core";
-import { createLLMClient, type LLMClient, type LLMMessage } from "@murmurations-ai/llm";
+import {
+  createLLMClient,
+  providerEnvKeyName,
+  type LLMClient,
+  type LLMClientConfig,
+  type LLMMessage,
+} from "@murmurations-ai/llm";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
+import { loadHarnessConfig, type HarnessLLMConfig, type LLMProvider } from "../harness-config.js";
 import { buildSpiritSystemPrompt } from "./system-prompt.js";
 import { buildSpiritTools } from "./tools.js";
-
-const ANTHROPIC_API_KEY = makeSecretKey("ANTHROPIC_API_KEY");
 
 interface SocketResponse {
   readonly id: string;
@@ -28,6 +37,8 @@ type Send = (method: string, params?: Record<string, unknown>) => Promise<Socket
 
 export interface SpiritSession {
   turn(message: string): Promise<SpiritTurnResult>;
+  readonly provider: LLMProvider;
+  readonly model: string;
 }
 
 export interface SpiritTurnResult {
@@ -50,59 +61,101 @@ export class SpiritUnavailableError extends Error {
   }
 }
 
-// Sonnet 4.6 approximate pricing per million tokens (USD). Spirit
-// conversations are small; this is sufficient for a UI annotation.
-const INPUT_PRICE_PER_MTOK = 3.0;
-const OUTPUT_PRICE_PER_MTOK = 15.0;
+/** Balanced-tier models per provider when the harness config does not pin a
+ *  specific model. Matches `@murmurations-ai/llm` tiers table. */
+const DEFAULT_MODEL: Record<LLMProvider, string> = {
+  anthropic: "claude-sonnet-4-5-20250929",
+  gemini: "gemini-2.5-pro",
+  openai: "gpt-4o",
+  ollama: "llama3.2",
+};
+
+/** Rough per-provider pricing ($ per million tokens, input / output). Used
+ *  only for the REPL cost annotation — not authoritative. */
+const PRICING: Record<LLMProvider, { readonly input: number; readonly output: number }> = {
+  anthropic: { input: 3.0, output: 15.0 },
+  gemini: { input: 1.25, output: 5.0 },
+  openai: { input: 2.5, output: 10.0 },
+  ollama: { input: 0, output: 0 },
+};
+
+/** Resolve the API key for a provider. Reads `<rootDir>/.env` first,
+ *  falls back to `process.env`. Returns `null` for Ollama (no key). */
+const resolveProviderToken = async (
+  provider: LLMProvider,
+  rootDir: string,
+): Promise<SecretValue | null | undefined> => {
+  const keyName = providerEnvKeyName(provider);
+  if (!keyName) return null; // Ollama and anything else keyless
+
+  const secretKey = makeSecretKey(keyName);
+  const envPath = join(rootDir, ".env");
+
+  if (existsSync(envPath)) {
+    const providerSecrets = new DotenvSecretsProvider({ envPath });
+    try {
+      await providerSecrets.load({ required: [], optional: [secretKey] });
+      if (providerSecrets.has(secretKey)) return providerSecrets.get(secretKey);
+    } catch {
+      /* malformed .env or permission issue — fall through */
+    }
+  }
+
+  const fromEnv = process.env[keyName];
+  if (fromEnv) return makeSecretValue(fromEnv);
+  return undefined;
+};
+
+/** Build the LLMClientConfig for a resolved provider + token. */
+const buildLLMConfig = (
+  llm: HarnessLLMConfig,
+  token: SecretValue | null,
+  model: string,
+): LLMClientConfig => {
+  if (llm.provider === "ollama") return { provider: "ollama", token: null, model };
+  if (!token) {
+    const keyName = providerEnvKeyName(llm.provider) ?? "an LLM API key";
+    throw new SpiritUnavailableError(
+      `Spirit needs ${keyName} in .env or the environment for provider "${llm.provider}".`,
+    );
+  }
+  return { provider: llm.provider, token, model };
+};
 
 /**
  * Initialise a Spirit session for the current REPL attach.
  *
- * Reads `ANTHROPIC_API_KEY` from `<rootDir>/.env` if present; otherwise
- * falls back to the process environment. Throws
- * {@link SpiritUnavailableError} if no key is available.
+ * Reads `harness.yaml` for the default provider and model. Resolves the
+ * provider's API key from `<rootDir>/.env` (preferred) or the process
+ * environment. Throws {@link SpiritUnavailableError} on any shortfall.
  */
 export const initSpiritSession = async (opts: SpiritInitOptions): Promise<SpiritSession> => {
   const { rootDir, send } = opts;
 
-  // Resolve the API key — .env first, env var second.
-  const envPath = join(rootDir, ".env");
-  let token: SecretValue | undefined;
-  if (existsSync(envPath)) {
-    const provider = new DotenvSecretsProvider({ envPath });
-    try {
-      await provider.load({ required: [], optional: [ANTHROPIC_API_KEY] });
-      if (provider.has(ANTHROPIC_API_KEY)) token = provider.get(ANTHROPIC_API_KEY);
-    } catch {
-      /* malformed .env or permission issue — fall through to env var */
-    }
-  }
-  if (!token) {
-    const envValue = process.env.ANTHROPIC_API_KEY;
-    if (envValue) token = makeSecretValue(envValue);
-  }
-  if (!token) {
+  const harness = await loadHarnessConfig(rootDir);
+  const model = harness.llm.model ?? DEFAULT_MODEL[harness.llm.provider];
+
+  const token = await resolveProviderToken(harness.llm.provider, rootDir);
+  if (token === undefined) {
+    const keyName = providerEnvKeyName(harness.llm.provider) ?? "an LLM API key";
     throw new SpiritUnavailableError(
-      "Spirit needs ANTHROPIC_API_KEY — set it in .env or the environment.",
+      `Spirit needs ${keyName} for provider "${harness.llm.provider}" — set it in .env or the environment.`,
     );
   }
 
-  const client: LLMClient = createLLMClient({
-    provider: "anthropic",
-    token,
-    model: "claude-sonnet-4-5",
-  });
+  const client: LLMClient = createLLMClient(buildLLMConfig(harness.llm, token, model));
 
   const systemPrompt = await buildSpiritSystemPrompt();
   const tools = buildSpiritTools({ rootDir, send });
 
   const history: LLMMessage[] = [];
+  const pricing = PRICING[harness.llm.provider];
 
   const turn = async (message: string): Promise<SpiritTurnResult> => {
     history.push({ role: "user", content: message });
 
     const result = await client.complete({
-      model: "claude-sonnet-4-5",
+      model,
       messages: history,
       systemPromptOverride: systemPrompt,
       maxOutputTokens: 4096,
@@ -112,8 +165,6 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     });
 
     if (!result.ok) {
-      // Roll back the user message so the next turn doesn't stack on a
-      // failed context.
       history.pop();
       throw new Error(`Spirit LLM error: ${result.error.code} — ${result.error.message}`);
     }
@@ -123,7 +174,7 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     const inputTokens = result.value.inputTokens;
     const outputTokens = result.value.outputTokens;
     const estimatedCostUsd =
-      (inputTokens * INPUT_PRICE_PER_MTOK + outputTokens * OUTPUT_PRICE_PER_MTOK) / 1_000_000;
+      (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
 
     return {
       content: result.value.content,
@@ -134,5 +185,5 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     };
   };
 
-  return { turn };
+  return { turn, provider: harness.llm.provider, model };
 };

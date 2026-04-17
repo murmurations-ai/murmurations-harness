@@ -8,6 +8,27 @@ import type { LanguageModel } from "ai";
 import type { SecretValue } from "@murmurations-ai/core";
 import type { ProviderId } from "../types.js";
 
+/**
+ * The environment variable name each provider expects its API key
+ * under. Callers that need to resolve a secret for a given provider
+ * should use this map rather than inlining the string — it keeps
+ * provider-specific conventions (and any future additions) in one
+ * place. Returns `undefined` for providers that don't require a key
+ * (e.g. Ollama, which runs locally).
+ */
+export const providerEnvKeyName = (provider: ProviderId): string | undefined => {
+  switch (provider) {
+    case "gemini":
+      return "GEMINI_API_KEY";
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "ollama":
+      return undefined;
+  }
+};
+
 export interface ProviderRegistryConfig {
   readonly provider: ProviderId;
   readonly model: string;
