@@ -1,6 +1,6 @@
 {
   "name": "@murmurations-ai/dashboard-tui",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Terminal dashboard for the Murmuration Harness — pipeline state, agent activity, governance rounds, cost tracking.",
   "license": "MIT",
   "author": "Emergent Praxis murmuration",

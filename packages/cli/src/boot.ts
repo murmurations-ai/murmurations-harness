@@ -554,14 +554,24 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     // then as file path relative to murmuration root, then cwd.
     let mod: { default?: unknown };
     try {
-      mod = (await import(governancePath)) as { default?: unknown };
+      // Try as npm package — resolve from the murmuration's node_modules first,
+      // then from the CLI's node_modules (global install).
+      const { createRequire } = await import("node:module");
+      const localRequire = createRequire(join(exampleRoot, "package.json"));
+      const resolved = localRequire.resolve(governancePath);
+      mod = (await import(pathToFileURL(resolved).href)) as { default?: unknown };
     } catch {
-      // Not an npm package — try as file path
-      const resolved = resolve(exampleRoot, governancePath);
-      const pluginUrl = pathToFileURL(
-        existsSync(resolved) ? resolved : resolve(governancePath),
-      ).href;
-      mod = (await import(pluginUrl)) as { default?: unknown };
+      try {
+        // Try direct import (works if plugin is globally installed or in CLI's node_modules)
+        mod = (await import(governancePath)) as { default?: unknown };
+      } catch {
+        // Last resort: file path relative to murmuration root, then cwd
+        const resolved = resolve(exampleRoot, governancePath);
+        const pluginUrl = pathToFileURL(
+          existsSync(resolved) ? resolved : resolve(governancePath),
+        ).href;
+        mod = (await import(pluginUrl)) as { default?: unknown };
+      }
     }
     const candidate: unknown = mod.default;
     if (
