@@ -29,9 +29,11 @@ import {
 import { createLLMClient, type LLMClient } from "@murmurations-ai/llm";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
-import { buildCollaborationProvider, CollaborationBuildError } from "./collaboration-factory.js";
-
-const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
+import {
+  buildCollaborationProvider,
+  CollaborationBuildError,
+  findDefaultRepo,
+} from "./collaboration-factory.js";
 
 /** Map LLM provider names to their env key names. */
 const PROVIDER_SECRET_KEY: Record<string, string | null> = {
@@ -39,31 +41,6 @@ const PROVIDER_SECRET_KEY: Record<string, string | null> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
   ollama: null,
-};
-
-/** Find the GitHub repo from the first available agent's signal scopes via IdentityLoader. */
-const findRepoFromAgents = async (
-  rootDir: string,
-  memberIds: readonly string[],
-): Promise<{ owner: string; repo: string } | null> => {
-  try {
-    const loader = new IdentityLoader({ rootDir });
-    for (const memberId of memberIds) {
-      try {
-        const identity = await loader.load(memberId);
-        const scopes = identity.frontmatter.signals.github_scopes;
-        if (scopes && scopes.length > 0) {
-          const scope = scopes[0]!;
-          return { owner: scope.owner, repo: scope.repo };
-        }
-      } catch {
-        /* skip */
-      }
-    }
-  } catch {
-    /* skip */
-  }
-  return null;
 };
 
 /** Resolve LLM provider + model from the facilitator's role.md. */
@@ -341,8 +318,7 @@ export const runGroupWakeCommand = async (
   const secretKeyName = PROVIDER_SECRET_KEY[llmConfig.provider];
   if (existsSync(envPath)) {
     secretsProvider = new DotenvSecretsProvider({ envPath });
-    const optionalKeys = [GITHUB_TOKEN];
-    if (secretKeyName) optionalKeys.push(makeSecretKey(secretKeyName));
+    const optionalKeys = secretKeyName ? [makeSecretKey(secretKeyName)] : [];
     await secretsProvider.load({ required: [], optional: optionalKeys });
     const tokenKey = secretKeyName ? makeSecretKey(secretKeyName) : null;
     if (llmConfig.provider === "ollama") {
@@ -434,7 +410,7 @@ export const runGroupWakeCommand = async (
   }
   if (!repoInfo) {
     // Fall back to agent-scope lookup for display purposes only.
-    const fallback = await findRepoFromAgents(root, config.members);
+    const fallback = await findDefaultRepo(root);
     if (fallback) repoInfo = fallback;
   }
 

@@ -38,15 +38,20 @@ export interface GitHubClientLike {
 
   listIssues(
     repo: unknown,
-    filter?: { state?: string; labels?: string[]; since?: Date; perPage?: number },
+    filter?: {
+      state?: "open" | "closed" | "all";
+      labels?: readonly string[];
+      since?: Date;
+      perPage?: number;
+    },
   ): Promise<{
     ok: boolean;
     value?: readonly {
       number: { value: number };
       title: string;
-      body: string;
-      state: string;
-      labels: string[];
+      body: string | null;
+      state: "open" | "closed";
+      labels: readonly string[];
       htmlUrl: string;
       createdAt: Date;
       updatedAt: Date;
@@ -149,11 +154,16 @@ export class GitHubCollaborationProvider implements CollaborationProvider {
   }
 
   async listItems(filter?: ItemFilter): Promise<CollabResult<readonly CollaborationItem[]>> {
-    const listFilter: { state?: string; labels?: string[]; since?: Date; perPage?: number } = {
+    const listFilter: {
+      state?: "open" | "closed" | "all";
+      labels?: readonly string[];
+      since?: Date;
+      perPage?: number;
+    } = {
       state: filter?.state === "all" ? "all" : (filter?.state ?? "open"),
       perPage: filter?.limit ?? 30,
     };
-    if (filter?.labels) listFilter.labels = [...filter.labels];
+    if (filter?.labels) listFilter.labels = filter.labels;
     if (filter?.since) listFilter.since = filter.since;
     const result = await this.#client.listIssues(this.#repo, listFilter);
     if (!result.ok) return { ok: false, error: this.#mapError(result.error) };
@@ -162,8 +172,8 @@ export class GitHubCollaborationProvider implements CollaborationProvider {
       value: result.value!.map((issue) => ({
         ref: { id: String(issue.number.value), url: issue.htmlUrl },
         title: issue.title,
-        body: issue.body,
-        state: (issue.state === "open" ? "open" : "closed") as ItemState,
+        body: issue.body ?? "",
+        state: issue.state,
         labels: issue.labels,
         createdAt: issue.createdAt,
         updatedAt: issue.updatedAt,

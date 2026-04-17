@@ -145,12 +145,7 @@ export const buildCollaborationProvider = async (
   });
 
   const provider = new GitHubCollaborationProvider({
-    // The harness GitHub client has a narrower `state` type than the
-    // provider's structural wrapper; the cast is safe because the narrower
-    // type is a subset of the structural one.
-    client: client as unknown as ConstructorParameters<
-      typeof GitHubCollaborationProvider
-    >[0]["client"],
+    client,
     repo: makeRepoCoordinate(repo.owner, repo.repo),
   });
 
