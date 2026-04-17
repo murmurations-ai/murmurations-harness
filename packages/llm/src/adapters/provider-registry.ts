@@ -1,33 +1,21 @@
 /**
- * Vercel AI SDK provider registry — creates provider model instances
- * from harness config. Each provider's API key is revealed exactly
- * once here (grep-checkable per ADR-0014).
+ * Back-compat shims over the new {@link ProviderRegistry} (ADR-0025).
+ *
+ * Historically this file held the provider-factory switch and the
+ * provider → env-var map. Both have moved to `providers.ts` where each
+ * `ProviderDefinition` owns its own factory and env-key convention.
+ * The exports below remain for callers that pre-date the registry;
+ * they consult the process-wide default registry under the hood.
+ *
+ * New code should take a `ProviderRegistry` instance explicitly and
+ * call `.get(id)?.create({ token, model })` directly.
  */
 
 import type { LanguageModel } from "ai";
 import type { SecretValue } from "@murmurations-ai/core";
-import type { ProviderId } from "../types.js";
 
-/**
- * The environment variable name each provider expects its API key
- * under. Callers that need to resolve a secret for a given provider
- * should use this map rather than inlining the string — it keeps
- * provider-specific conventions (and any future additions) in one
- * place. Returns `undefined` for providers that don't require a key
- * (e.g. Ollama, which runs locally).
- */
-export const providerEnvKeyName = (provider: ProviderId): string | undefined => {
-  switch (provider) {
-    case "gemini":
-      return "GEMINI_API_KEY";
-    case "anthropic":
-      return "ANTHROPIC_API_KEY";
-    case "openai":
-      return "OPENAI_API_KEY";
-    case "ollama":
-      return undefined;
-  }
-};
+import { defaultRegistry } from "../providers.js";
+import type { ProviderId } from "../types.js";
 
 export interface ProviderRegistryConfig {
   readonly provider: ProviderId;
@@ -37,43 +25,34 @@ export interface ProviderRegistryConfig {
 }
 
 /**
- * Create a Vercel AI SDK LanguageModel from harness config.
- * reveal() is called exactly once per provider construction.
+ * Create a Vercel AI SDK `LanguageModel` for the given provider.
+ * Deprecated in favor of {@link ProviderRegistry.get}`(id).create(...)`.
  */
 export const createVercelModel = async (config: ProviderRegistryConfig): Promise<LanguageModel> => {
-  switch (config.provider) {
-    case "gemini": {
-      const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
-      const google = createGoogleGenerativeAI({
-        apiKey: config.token?.reveal() ?? "",
-        ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
-      });
-      return google(config.model);
-    }
-    case "anthropic": {
-      const { createAnthropic } = await import("@ai-sdk/anthropic");
-      const anthropic = createAnthropic({
-        apiKey: config.token?.reveal() ?? "",
-        ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
-      });
-      return anthropic(config.model);
-    }
-    case "openai": {
-      const { createOpenAI } = await import("@ai-sdk/openai");
-      const openai = createOpenAI({
-        apiKey: config.token?.reveal() ?? "",
-        ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
-      });
-      return openai(config.model);
-    }
-    case "ollama": {
-      // Ollama exposes an OpenAI-compatible API at /v1
-      const { createOpenAI } = await import("@ai-sdk/openai");
-      const ollama = createOpenAI({
-        baseURL: config.baseUrl ?? "http://localhost:11434/v1",
-        apiKey: "ollama", // required by SDK but not validated by Ollama
-      });
-      return ollama(config.model);
-    }
+  const def = defaultRegistry().get(config.provider);
+  if (!def) {
+    throw new Error(
+      `createVercelModel: provider "${config.provider}" is not registered (register it on a ProviderRegistry or drop an extension that registers it)`,
+    );
   }
+  return def.create({
+    token: config.token,
+    model: config.model,
+    ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
+  });
+};
+
+/**
+ * Env-var name each provider expects its API key under.
+ *
+ * Deprecated free-function form. Prefer `registry.envKeyName(id)` on
+ * a `ProviderRegistry` you own — that way extension-registered
+ * providers are reachable. This shim consults the default registry,
+ * which only contains the four built-ins.
+ */
+export const providerEnvKeyName = (provider: ProviderId): string | undefined => {
+  const name = defaultRegistry().envKeyName(provider);
+  // `null` (keyless providers like Ollama) and `undefined` (unknown) both
+  // collapse to `undefined` here for parity with the pre-registry signature.
+  return name ?? undefined;
 };

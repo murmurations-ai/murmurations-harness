@@ -26,7 +26,7 @@ import {
   type GovernanceTally,
   GovernanceStateStore,
 } from "@murmurations-ai/core";
-import { createLLMClient, type LLMClient } from "@murmurations-ai/llm";
+import { createLLMClient, providerEnvKeyName, type LLMClient } from "@murmurations-ai/llm";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
 import {
@@ -35,13 +35,8 @@ import {
   findDefaultRepo,
 } from "./collaboration-factory.js";
 
-/** Map LLM provider names to their env key names. */
-const PROVIDER_SECRET_KEY: Record<string, string | null> = {
-  gemini: "GEMINI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-  ollama: null,
-};
+// Per ADR-0025: provider → env-key mapping lives on the LLM package's
+// ProviderRegistry. `providerEnvKeyName` consults the default registry.
 
 /** Resolve LLM provider + model from the facilitator's role.md. */
 const resolveLLMConfig = async (
@@ -315,7 +310,7 @@ export const runGroupWakeCommand = async (
   const envPath = join(root, ".env");
   let llmClient: LLMClient | undefined;
   let secretsProvider: DotenvSecretsProvider | undefined;
-  const secretKeyName = PROVIDER_SECRET_KEY[llmConfig.provider];
+  const secretKeyName = providerEnvKeyName(llmConfig.provider);
   if (existsSync(envPath)) {
     secretsProvider = new DotenvSecretsProvider({ envPath });
     const optionalKeys = secretKeyName ? [makeSecretKey(secretKeyName)] : [];
@@ -328,7 +323,7 @@ export const runGroupWakeCommand = async (
         model: llmConfig.model,
       });
     } else if (tokenKey && secretsProvider.has(tokenKey)) {
-      const provider = llmConfig.provider as "gemini" | "anthropic" | "openai";
+      const provider = llmConfig.provider;
       llmClient = createLLMClient({
         provider,
         token: secretsProvider.get(tokenKey),

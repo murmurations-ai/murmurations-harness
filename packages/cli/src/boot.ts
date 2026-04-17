@@ -61,25 +61,26 @@ import {
   type GithubWriteScopes,
   type RepoCoordinate,
 } from "@murmurations-ai/github";
-import { createLLMClient, type LLMClient, type LLMCostHook } from "@murmurations-ai/llm";
+import {
+  createLLMClient,
+  providerEnvKeyName,
+  type LLMClient,
+  type LLMCostHook,
+} from "@murmurations-ai/llm";
 import { resolveLLMCost } from "@murmurations-ai/llm/pricing";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
-/**
- * Map each LLM provider to the dotenv key expected for its API token.
- * Ollama needs no key (`null`). These are used by the boot path to
- * union the correct optional keys into the daemon's SecretDeclaration
- * based on the registered agents' `llm` pins per ADR-0016.
- */
-const PROVIDER_SECRET_KEY: Record<"gemini" | "anthropic" | "openai" | "ollama", string | null> = {
-  gemini: "GEMINI_API_KEY",
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-  ollama: null,
-};
+// Per ADR-0025, the provider → env-key mapping lives on the
+// ProviderRegistry. `providerEnvKeyName` is a back-compat shim over
+// the default (built-in) registry. Returns `undefined` both for
+// keyless providers (e.g. Ollama) and for providers not registered
+// under the default set — boot treats both the same: no secret to
+// declare. Extension-registered providers land in Phase 2 when the
+// boot path constructs its own registry and lets extensions
+// contribute before sealing.
 
 /**
  * Per-wake adapter: turn the LLM client's token-count-only cost hook
@@ -214,8 +215,8 @@ const buildSecretDeclaration = (agents: readonly RegisteredAgent[]): SecretDecla
       if (!required.has(name)) optional.set(name, makeSecretKey(name));
     }
     if (agent.llm) {
-      const keyName = PROVIDER_SECRET_KEY[agent.llm.provider];
-      if (keyName !== null && !required.has(keyName)) {
+      const keyName = providerEnvKeyName(agent.llm.provider);
+      if (keyName !== undefined && !required.has(keyName)) {
         optional.set(keyName, makeSecretKey(keyName));
       }
     }
@@ -304,7 +305,7 @@ const buildAgentClients = ({
   } = {};
 
   if (agent.llm) {
-    const keyName = PROVIDER_SECRET_KEY[agent.llm.provider];
+    const keyName = providerEnvKeyName(agent.llm.provider);
     const costHook = costBuilder ? makeDaemonHook(costBuilder) : undefined;
     if (agent.llm.provider === "ollama") {
       result.llm = createLLMClient({
@@ -314,7 +315,7 @@ const buildAgentClients = ({
         ...(ollamaBaseUrl !== undefined ? { baseUrl: ollamaBaseUrl } : {}),
         ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
       });
-    } else if (keyName !== null && provider?.has(makeSecretKey(keyName)) === true) {
+    } else if (keyName !== undefined && provider?.has(makeSecretKey(keyName)) === true) {
       const token = provider.get(makeSecretKey(keyName));
       result.llm = createLLMClient({
         provider: agent.llm.provider,

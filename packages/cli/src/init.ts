@@ -26,6 +26,8 @@ import { mkdir, writeFile, chmod } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 
+import { providerEnvKeyName } from "@murmurations-ai/llm";
+
 // DO NOT create readline at module scope — it grabs stdin and corrupts
 // terminal mode for other commands (e.g., attach REPL double echo).
 let rl: Interface | null = null;
@@ -240,7 +242,7 @@ _Define the agent-specific bright lines beyond the murmuration soul._
     );
 
     // role.md
-    const secretName = agent.provider === "ollama" ? "" : `${agent.provider.toUpperCase()}_API_KEY`;
+    const secretName = providerEnvKeyName(agent.provider) ?? "";
     if (secretName) secretNames.add(secretName);
     const groupLine = agent.group ? `\n  - "${agent.group}"` : "";
     const ghScopes = githubOwner
