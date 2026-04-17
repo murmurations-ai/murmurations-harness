@@ -352,11 +352,10 @@ describe("GovernancePlugin + Daemon dispatch contract", () => {
 
     // Write methods are absent — a .mjs plugin casting back cannot
     // mutate the store through this handle.
-    const proxy = reader as unknown as Record<string, unknown>;
-    expect(proxy["create"]).toBeUndefined();
-    expect(proxy["transition"]).toBeUndefined();
-    expect(proxy["setGithubIssueUrl"]).toBeUndefined();
-    expect(proxy["registerGraph"]).toBeUndefined();
+    expect("create" in reader).toBe(false);
+    expect("transition" in reader).toBe(false);
+    expect("setGithubIssueUrl" in reader).toBe(false);
+    expect("registerGraph" in reader).toBe(false);
   });
 });
 
