@@ -683,11 +683,32 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const runArtifactWriter =
     writerMap.size === 1 ? [...writerMap.values()][0]! : new DispatchRunArtifactWriter(writerMap);
 
+  // -------------------------------------------------------------------
+  // Collaboration provider (ADR-0021)
+  //
+  // "local" creates a filesystem provider immediately.
+  // "github" (default) is wired later after agent registration, since
+  // the target repo comes from agent signal scopes. The legacy GitHub
+  // client path continues to work alongside the provider.
+  // -------------------------------------------------------------------
+
+  const collaborationMode = config.collaboration.provider;
+
+  const localCollaborationProvider =
+    collaborationMode === "local"
+      ? new (await import("@murmurations-ai/core")).LocalCollaborationProvider({
+          itemsDir: join(exampleRoot, ".murmuration", "items"),
+          artifactsDir: exampleRoot,
+        })
+      : undefined;
+
   // First pass: construct a daemon with the filesystem-only aggregator
-  // and load secrets. If GITHUB_TOKEN is present after load, rebuild
-  // with an upgraded aggregator that includes the github client.
+  // (+ local collaboration provider if in local mode) and load secrets.
+  // If GITHUB_TOKEN is present after load, rebuild with an upgraded
+  // aggregator that includes the github client.
   const filesystemOnlyAggregator: SignalAggregator = new DefaultSignalAggregator({
     rootDir: exampleRoot,
+    ...(localCollaborationProvider ? { collaborationProvider: localCollaborationProvider } : {}),
   });
 
   const firstPassDaemon = new Daemon({
@@ -722,25 +743,6 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       githubClient = createGithubClient({ token: provider.get(GITHUB_TOKEN) });
     }
   }
-
-  // -------------------------------------------------------------------
-  // Collaboration provider (ADR-0021)
-  //
-  // "local" creates a filesystem provider immediately.
-  // "github" (default) is wired later after agent registration, since
-  // the target repo comes from agent signal scopes. The legacy GitHub
-  // client path continues to work alongside the provider.
-  // -------------------------------------------------------------------
-
-  const collaborationMode = config.collaboration.provider;
-
-  const localCollaborationProvider =
-    collaborationMode === "local"
-      ? new (await import("@murmurations-ai/core")).LocalCollaborationProvider({
-          itemsDir: join(exampleRoot, ".murmuration", "items"),
-          artifactsDir: exampleRoot,
-        })
-      : undefined;
 
   if (localCollaborationProvider) {
     logger.info("daemon.collaboration.provider", { provider: "local" });

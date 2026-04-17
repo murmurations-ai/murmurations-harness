@@ -54,6 +54,14 @@ export const DEFAULT_AGGREGATOR_CAPS: AggregatorCaps = {
   inboxMessage: 10,
 };
 
+/** Minimal CollaborationProvider interface for signal collection (ADR-0021). */
+export interface SignalCollaborationProvider {
+  collectSignals(filter?: {
+    state?: string;
+    labels?: readonly string[];
+  }): Promise<readonly Signal[]>;
+}
+
 export interface DefaultSignalAggregatorConfig {
   readonly github?: GithubClient;
   readonly githubScopes?: readonly GithubSignalScope[];
@@ -61,6 +69,8 @@ export interface DefaultSignalAggregatorConfig {
   readonly caps?: Partial<AggregatorCaps>;
   readonly now?: () => Date;
   readonly trustedSenderAgentIds?: readonly string[];
+  /** CollaborationProvider for local item signals (ADR-0021). */
+  readonly collaborationProvider?: SignalCollaborationProvider;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,9 +128,15 @@ export class DefaultSignalAggregator implements SignalAggregator {
       this.#collectGithub(context, warnings),
       this.#collectPrivateNotes(context, warnings),
       this.#collectInboxMessages(context, warnings),
+      this.#collectCollaborationItems(),
     ]);
 
-    const names: readonly SignalSourceId[] = ["github-issue", "private-note", "inbox-message"];
+    const names: readonly SignalSourceId[] = [
+      "github-issue",
+      "private-note",
+      "inbox-message",
+      "local-item",
+    ];
     for (const [idx, r] of results.entries()) {
       if (r.status === "fulfilled") {
         signals.push(...r.value);
@@ -276,6 +292,20 @@ export class DefaultSignalAggregator implements SignalAggregator {
       }
     }
     return out;
+  }
+
+  // -------------------------------------------------------------------------
+  // Collaboration provider items (ADR-0021)
+  // -------------------------------------------------------------------------
+
+  async #collectCollaborationItems(): Promise<Signal[]> {
+    if (!this.#config.collaborationProvider) return [];
+    try {
+      const signals = await this.#config.collaborationProvider.collectSignals({ state: "open" });
+      return [...signals];
+    } catch {
+      return [];
+    }
   }
 }
 

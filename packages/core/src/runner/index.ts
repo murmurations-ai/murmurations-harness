@@ -149,6 +149,12 @@ const renderSignal = (s: Signal): string => {
       const data = custom.data as { kind?: string; payload?: unknown } | undefined;
       return `- [governance] kind=${data?.kind ?? "unknown"} payload=${JSON.stringify(data?.payload ?? null)}`;
     }
+    if (custom.sourceId === "local-item") {
+      const data = custom.data as
+        | { id?: string; title?: string; body?: string; labels?: string[] }
+        | undefined;
+      return `- [local-item ${data?.id ?? "?"}] ${data?.title ?? "(no title)"}\n  labels: ${data?.labels?.join(", ") ?? "(none)"}\n  body: ${data?.body ?? ""}`;
+    }
   }
   return `- [${s.kind}] ${JSON.stringify(s).slice(0, 120)}`;
 };
