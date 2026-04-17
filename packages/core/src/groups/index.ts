@@ -447,19 +447,11 @@ export const runGroupWake = async (
           ? DEFAULT_RETRO_MEMBER_INSTRUCTIONS
           : buildOperationalMemberInstructions(agenda);
 
-    // Inject peer identity docs when available (for peer review meetings)
-    const identityBlock =
-      context.memberIdentities && context.memberIdentities.size > 0
-        ? `\n\n## Circle Members (identity summaries)\n\n${[...context.memberIdentities.entries()]
-            .map(([id, summary]) => `### ${id}\n${summary}`)
-            .join("\n\n")}\n`
-        : "";
-
     const userPrompt = `${meetingHeader}
 
 ## Meeting Agenda
 
-${agendaBlock}${identityBlock}${priorContributions}
+${agendaBlock}${priorContributions}
 
 ---
 

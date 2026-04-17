@@ -474,27 +474,6 @@ export const runGroupWakeCommand = async (
   }
 
   // Build context
-  // Load member identity summaries for peer-aware meetings
-  const memberIdentities = new Map<string, string>();
-  try {
-    const { IdentityLoader } = await import("@murmurations-ai/core");
-    const identityLoader = new IdentityLoader({ rootDir: root });
-    for (const memberId of config.members) {
-      try {
-        const identity = await identityLoader.load(memberId);
-        const roleSummary = identity.chain.layers
-          .filter((l) => l.kind === "agent-role" || l.kind === "agent-soul")
-          .map((l) => l.content.trim().slice(0, 500))
-          .join("\n\n");
-        if (roleSummary) memberIdentities.set(memberId, roleSummary);
-      } catch {
-        /* skip agents that can't be loaded */
-      }
-    }
-  } catch {
-    /* identity loading not available */
-  }
-
   const context: GroupWakeContext = {
     groupId,
     kind,
@@ -505,7 +484,6 @@ export const runGroupWakeCommand = async (
     ...(directiveBody ? { directiveBody } : {}),
     ...(backlogForAgenda ? { backlogContext: backlogForAgenda } : {}),
     ...(retrospectiveMetrics ? { retrospectiveMetrics } : {}),
-    ...(memberIdentities.size > 0 ? { memberIdentities } : {}),
   };
 
   // Run the group wake
