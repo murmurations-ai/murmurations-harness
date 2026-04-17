@@ -84,6 +84,7 @@ Each release targets a GitHub Milestone. Issues are assigned to milestones durin
 | v0.3.0  | Vercel + MCP   | ADR-0020: Vercel AI SDK, tool calling, MCP, Langfuse (8 packages, 427 tests) | **Released** |
 | v0.3.1  | AgentSkills    | Three-Tier Progressive Disclosure, SKILL.md scanner (441 tests)              | **Released** |
 | v0.3.3  | CollabProvider | ADR-0021: CollaborationProvider, harness.yaml, cwd auto-detect (463 tests)   | **Released** |
+| v0.3.5  | Extensions     | ADR-0023: extension system, web search, REPL improvements (486 tests)        | **Released** |
 | v0.4.0  | Multi-instance | Multiple daemons, one repo                                                   | Planning     |
 | v1.0.0  | Stable API     | Public API freeze, migration guide, Docker                                   | Planning     |
 

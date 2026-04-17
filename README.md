@@ -4,7 +4,7 @@
 
 The Murmuration Harness is an open-source TypeScript runtime that lets a single human — the **Source** — coordinate a murmuration of AI agents to do real work. It is not an autonomous agent framework. It is a tool that amplifies human agency.
 
-> **v0.3.3** — Vercel AI SDK, MCP tools, AgentSkills.io, Langfuse observability, pluggable CollaborationProvider, `harness.yaml` config. 8 packages on npm, 463 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
+> **v0.3.5** — Extensions (OpenClaw-compatible), web search, `harness.yaml` config, local collaboration, `cd && murmuration`. 8 packages on npm, 486 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
 
 ## Philosophy: Source as a human role
 
@@ -130,6 +130,23 @@ my-murmuration/
 
 100% interoperable with OpenClaw and Claude Code skill format — any `SKILL.md` works without modification.
 
+### Extensions (OpenClaw-compatible)
+
+The harness supports an OpenClaw-compatible extension system. Place extensions in `extensions/` with an `openclaw.plugin.json` manifest:
+
+```
+my-murmuration/
+├── extensions/
+│   ├── web-search/
+│   │   ├── openclaw.plugin.json
+│   │   └── index.mjs
+│   └── my-custom-tool/
+│       ├── openclaw.plugin.json
+│       └── index.mjs
+```
+
+A built-in **web search** extension ships with the harness — `web_search` (DuckDuckGo keyless or Tavily with `TAVILY_API_KEY`) and `web_fetch` (read any URL). No configuration needed for basic web search.
+
 ### Observability (Langfuse)
 
 Set `LANGFUSE_SECRET_KEY` and `LANGFUSE_PUBLIC_KEY` in your environment. The harness automatically reports LLM spans to [Langfuse](https://langfuse.com/) via OpenTelemetry — token usage, latency, model info, and cost per wake. If the keys are absent, observability is a silent no-op. See [docs/OBSERVABILITY.md](./docs/OBSERVABILITY.md) for the full setup guide.
@@ -240,7 +257,7 @@ pnpm build                # build all 8 packages
 pnpm typecheck            # tsc --noEmit across all packages
 pnpm lint                 # eslint (strict-type-checked)
 pnpm format:check         # prettier check
-pnpm test                 # vitest (463 tests, 38 files)
+pnpm test                 # vitest (486 tests, 40 files)
 pnpm check                # all of the above (CI locally)
 ```
 
