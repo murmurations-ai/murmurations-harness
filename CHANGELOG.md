@@ -3,6 +3,44 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0] - 2026-04-17
+
+### Added
+
+- **Spirit of the Murmuration** (ADR-0024, Phase 1) — conversational LLM layer in the REPL. Input that doesn't start with `:` or match a known bare verb routes to a Claude / Gemini / OpenAI / Ollama session with 10 auto-allow tools (`status`, `agents`, `groups`, `events`, `read_file`, `list_dir`, `load_skill`, `wake`, `directive`, `convene`). Per-session conversation history; cost + token annotation per turn.
+- **4 shipped Spirit skills** — `daemon-lifecycle`, `agent-anatomy`, `governance-models`, `when-to-use-governance`. Loaded on demand via `load_skill(name)`; `SKILLS.md` index is always in the system prompt.
+- **Harness-level LLM default** — `harness.yaml` gains an `llm:` section (`provider` + optional `model`). Agents inherit unless they override in their `role.md` frontmatter. The Spirit also inherits the harness default.
+- **Path-safety for Spirit filesystem tools** — `read_file` / `list_dir` refuse paths escaping the murmuration root or matching `*.env*`.
+- **`providerEnvKeyName`** helper in `@murmurations-ai/llm` — single source of truth for provider → env-var-name mapping (replaces duplicated maps across CLI files).
+- **ADR-0024** — Spirit of the Murmuration architecture (phased plan: MVP → memory + writes → dreaming).
+- **ADR-0025** — Pluggable LLM provider registry (draft; on `spec/0025-pluggable-llm-providers` branch).
+
+### Changed
+
+- **`RegisteredAgent` holds `IdentityChain` directly** (issue #53) — dropped the flatten→inflate roundtrip that fabricated `"<phase-1a-placeholder>"` source paths. Unblocks Phase 4 dashboard + Phase 5 multi-instance.
+- **Governance plugin isolation** (issue #43) — `GovernanceStateReader` interface separates reads from writes. Plugins receive a runtime reader proxy (via `makeGovernanceStateReader`), so `.mjs` plugins cannot cast back to the full store and call `create` / `transition`. Plugin-requested item creation goes through `GovernanceRoutingDecision.create`; the daemon applies it with `createdBy` derived from the triggering batch.
+- **CLI commands adopt `CollaborationProvider`** (issue #90) — `directive`, `backlog`, `group-wake` now route through the collaboration factory (local or GitHub) instead of constructing `GithubClient` inline. Local mode works across all CLI commands; `group-wake.ts` consolidates three previously-duplicated client constructions.
+- **`GitHubClientLike` structural type tightened** — `state: "open" | "closed" | "all"`, `labels: readonly string[]`, `body: string | null`. Drops a cross-package `as unknown as` cast.
+- **`murmuration init`** asks for the harness-level default LLM provider first; per-agent questions default to it (still overridable per agent). Writes the `llm:` section into the generated `harness.yaml`.
+- **500 tests** (up from 487): 13 new Spirit tests covering path safety, skill loading, and socket RPC wrappers.
+
+### Fixed
+
+- Stale docstring on `RegisteredAgent` that referenced a non-existent "Phase 1A inline" construction path.
+- Frontmatter duplication in `buildSpawnContext` — aggregator calls now use `agent.identity.frontmatter` directly instead of rebuilding from scalar fields.
+
+### Security
+
+- **Runtime plugin isolation** — `GovernanceStateReader` proxy closes a bypass where a JavaScript plugin could runtime-cast the narrowed reader back to the full mutable store. Unit test asserts the proxy's runtime shape.
+- **Spirit filesystem tools blocked** from reading `.env*` files or escaping the murmuration root.
+
+### Deferred to Phase 2 (ADR-0024)
+
+- Spirit memory storage (three-type index: operator / murmuration / reference)
+- Confirm-before-acting tools (daemon lifecycle, file writes with diff preview)
+- Operator-authored overlay skills at `<root>/spirit/skills/`
+- `spirit.md` identity file + `murmuration spirit` CLI subcommands
+
 ## [0.3.5] - 2026-04-17
 
 ### Added
