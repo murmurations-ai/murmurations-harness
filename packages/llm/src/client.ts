@@ -25,6 +25,13 @@ export interface CallOptions {
   readonly signal?: AbortSignal;
   readonly costHook?: LLMCostHook;
   readonly idempotencyKey?: string;
+  /** Agent context for Langfuse telemetry enrichment (ADR-0022 §1). */
+  readonly telemetryContext?: {
+    readonly agentId: string;
+    readonly wakeId: string;
+    readonly groupIds: readonly string[];
+    readonly wakeMode: string;
+  };
 }
 
 export interface LLMClient {
@@ -106,6 +113,7 @@ class LLMClientImpl implements LLMClient {
     return adapter.complete(request, {
       ...(costHook ? { costHook } : {}),
       ...(signal ? { signal } : {}),
+      ...(options?.telemetryContext ? { telemetryContext: options.telemetryContext } : {}),
     });
   }
 

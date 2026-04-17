@@ -175,10 +175,20 @@ export class VercelAdapter implements LLMAdapter {
         ...(request.maxSteps !== undefined && request.maxSteps > 1
           ? { stopWhen: stepCountIs(request.maxSteps) }
           : {}),
-        // ADR-0020 Phase 4: OTEL telemetry (Langfuse picks up if initialized)
+        // ADR-0020 Phase 4 + ADR-0022 §1: OTEL telemetry with agent context
         experimental_telemetry: {
           isEnabled: true,
           functionId: `${this.providerId}/${this.modelUsed}`,
+          ...(options.telemetryContext
+            ? {
+                metadata: {
+                  agentId: options.telemetryContext.agentId,
+                  wakeId: options.telemetryContext.wakeId,
+                  groupIds: options.telemetryContext.groupIds.join(","),
+                  wakeMode: options.telemetryContext.wakeMode,
+                },
+              }
+            : {}),
         },
         // Per-step cost tracking for multi-step tool loops
         onStepFinish: (step) => {
