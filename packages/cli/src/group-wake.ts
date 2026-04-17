@@ -487,6 +487,17 @@ export const runGroupWakeCommand = async (
   };
 
   // Run the group wake
+  // Load extension tools so agents can use them in meetings (same as solo wakes)
+  const { loadExtensions } = await import("@murmurations-ai/core");
+  const extensionsDir = join(root, "extensions");
+  const loadedExtensions = await loadExtensions(extensionsDir, root);
+  const extensionTools = loadedExtensions.flatMap((ext) => ext.tools);
+  if (extensionTools.length > 0) {
+    console.log(
+      `  Extensions: ${String(loadedExtensions.length)} loaded (${String(extensionTools.length)} tools)`,
+    );
+  }
+
   const client = llmClient;
   const model = llmConfig.model;
   const result = await runGroupWake(context, {
@@ -498,6 +509,7 @@ export const runGroupWakeCommand = async (
         systemPromptOverride: systemPrompt,
         maxOutputTokens: 16000,
         temperature: 0.3,
+        ...(extensionTools.length > 0 ? { tools: extensionTools, maxSteps: 5 } : {}),
       });
       if (!r.ok) throw new Error(`LLM failed for ${agentId}: ${r.error.code}`);
       return {

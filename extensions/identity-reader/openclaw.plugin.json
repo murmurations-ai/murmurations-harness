@@ -1,0 +1,7 @@
+{
+  "id": "identity-reader",
+  "skills": ["./skills"],
+  "contracts": {
+    "tools": ["read_identity", "list_agents"]
+  }
+}
