@@ -52,69 +52,51 @@ An explicit `:spirit <message>` escape is also provided for disambiguation (e.g.
 
 The command grammar tightens: bare commands remain supported for muscle memory, but any input that isn't a strict match falls through to the Spirit. This gives the REPL a dual-mode behavior — machine-precise commands when wanted, conversational assistance otherwise — without a mode switch.
 
-### §3 — Tool surface (four rings of escalating risk)
+### §3 — Tool surface
 
-The Spirit acts through tools. Tools are organized into four rings. Each ring has a different safety policy.
+The Spirit acts through tools with two safety policies: **auto** for read operations and reversible daemon RPCs the operator already has as REPL verbs, and **confirm** for anything that mutates state the operator would want to review. File writes additionally show a unified diff before confirmation; that's a rendering detail, not a separate policy.
 
-#### Ring 1 — Read (auto-allow)
+#### Auto-allow tools
 
-No side effects. Cost: a few dollars at most across a long session.
+| Tool                                | Purpose                                        |
+| ----------------------------------- | ---------------------------------------------- |
+| `status()`                          | Daemon status (same as `:status`)              |
+| `agents()`                          | List agents with state summary                 |
+| `groups()`                          | List groups with member count                  |
+| `events(limit)`                     | Recent daemon events                           |
+| `cost(period)`                      | Cost summary                                   |
+| `governance_state()`                | Pending items, recent decisions                |
+| `read_file(path)`                   | Read any file in murmuration root              |
+| `list_dir(path)`                    | Enumerate a directory                          |
+| `load_skill(name)`                  | Load a Spirit skill file (see §4)              |
+| `recall(query)`                     | Search Spirit memory (see §5, Phase 2)         |
+| `wake(agent_id)`                    | Trigger a wake — equivalent to `:wake <agent>` |
+| `directive(scope, target, message)` | Send a Source directive — same as `:directive` |
+| `convene(group_id, kind)`           | Convene a group meeting — same as `:convene`   |
 
-| Tool                 | Purpose                           |
-| -------------------- | --------------------------------- |
-| `status()`           | Daemon status (same as `:status`) |
-| `agents()`           | List agents with state summary    |
-| `groups()`           | List groups with member count     |
-| `events(limit)`      | Recent daemon events              |
-| `cost(period)`       | Cost summary                      |
-| `governance_state()` | Pending items, recent decisions   |
-| `read_file(path)`    | Read any file in murmuration root |
-| `list_dir(path)`     | Enumerate a directory             |
-| `load_skill(name)`   | Load a Spirit skill file (see §4) |
-| `recall(query)`      | Search Spirit memory (see §5)     |
+#### Confirm-before-acting tools
 
-#### Ring 2 — Daemon RPC (auto-allow; reversible)
+Prompt operator with `[y/N]` in the REPL. File writes additionally show a unified diff and produce a `.bak` file; an `:undo` REPL command restores the most recent `.bak`.
 
-Operator already has these as REPL verbs; exposing them to the Spirit is equivalent to the Spirit typing the verb on the operator's behalf.
-
-| Tool                                | Purpose                 |
-| ----------------------------------- | ----------------------- |
-| `wake(agent_id)`                    | Trigger a wake          |
-| `directive(scope, target, message)` | Send a Source directive |
-| `convene(group_id, kind)`           | Convene a group meeting |
-
-#### Ring 3 — Lifecycle (confirm before acting)
-
-Prompt operator with `[y/N]` in the REPL before executing.
-
-| Tool               | Purpose              |
-| ------------------ | -------------------- |
-| `start_daemon()`   | Boot the daemon      |
-| `stop_daemon()`    | Shut down the daemon |
-| `restart_daemon()` | Stop + start         |
-
-#### Ring 4 — Filesystem writes (diff + confirm)
-
-Show a unified diff, require `[y/N]` before writing.
-
-| Tool                                             | Purpose                         |
-| ------------------------------------------------ | ------------------------------- |
-| `write_file(path, content)`                      | Create or overwrite a file      |
-| `edit_file(path, find, replace)`                 | Surgical replacement            |
-| `create_agent(spec)`                             | Scaffold a new agent directory  |
-| `edit_soul(agent_id, new_text)`                  | Modify an agent's soul          |
-| `edit_role(agent_id, new_frontmatter, new_body)` | Modify an agent's role          |
-| `remember(type, key, body)`                      | Write a Spirit memory (see §5)  |
-| `draft_skill(name, body)`                        | Propose a new Spirit skill file |
-
-All Ring 4 writes produce a `.bak` file before overwriting. An `:undo` REPL command restores the most recent `.bak`.
+| Tool                                             | Purpose                                     |
+| ------------------------------------------------ | ------------------------------------------- |
+| `start_daemon()`                                 | Boot the daemon                             |
+| `stop_daemon()`                                  | Shut down the daemon                        |
+| `restart_daemon()`                               | Stop + start                                |
+| `write_file(path, content)`                      | Create or overwrite a file (diff shown)     |
+| `edit_file(path, find, replace)`                 | Surgical replacement (diff shown)           |
+| `create_agent(spec)`                             | Scaffold a new agent directory              |
+| `edit_soul(agent_id, new_text)`                  | Modify an agent's soul (diff shown)         |
+| `edit_role(agent_id, new_frontmatter, new_body)` | Modify an agent's role (diff shown)         |
+| `remember(type, key, body)`                      | Write a Spirit memory (Phase 2; diff shown) |
+| `draft_skill(name, body)`                        | Propose a new Spirit skill file (Phase 2)   |
 
 #### Explicitly blocked
 
 - Arbitrary shell execution (no `exec`, no `spawn`)
 - Reading `.env` or any path matching `*.env*`
 - Paths that escape the murmuration root (no `..` traversal)
-- Network calls beyond what Ring 1/2 exposes
+- Network calls beyond what the auto-allowed tools expose
 - Writes outside the murmuration root
 
 ### §4 — Skill files
@@ -211,18 +193,15 @@ Conversation resets per session. Session logs are write-only from the Spirit; re
 
 #### Memory types
 
-Six types, each a discrete reason to remember:
+Start narrow. Three types cover the minimum useful taxonomy; adding types later is cheap (just a new `type:` value), removing them after operators have written files is expensive:
 
-| Type           | Captures                                                        | Example                                                                   |
-| -------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `operator`     | Who is this Source? Role, preferences, working style, goals     | "Operator prefers 'Spirit' over 'Ghost'."                                 |
-| `feedback`     | Corrections and confirmations — what to keep doing, what not to | "Don't auto-start daemons without confirming."                            |
-| `relationship` | Significant interactions, turning points, shared understanding  | "2026-04-17: designed Spirit architecture together."                      |
-| `murmuration`  | State of the murmuration — active work, decisions, incidents    | "Engineering Circle ratified ADR-0024 on 2026-04-20."                     |
-| `reference`    | External pointers — where to find things                        | "Governance issues live in `murmurations-ai/harness`."                    |
-| `doctrine`     | Principles the operator has stated or reinforced                | "Source can act directly; governance is a delegation, not a requirement." |
+| Type          | Captures                                                                | Example                                                |
+| ------------- | ----------------------------------------------------------------------- | ------------------------------------------------------ |
+| `operator`    | Who Source is — role, preferences, working style, corrections, doctrine | "Operator prefers 'Spirit' over 'Ghost'."              |
+| `murmuration` | State of the murmuration — active work, decisions, incidents            | "Engineering Circle ratified ADR-0024 on 2026-04-20."  |
+| `reference`   | External pointers — where to find things                                | "Governance issues live in `murmurations-ai/harness`." |
 
-These are parallel to — but distinct from — my own global auto-memory types. They are scoped to the operator/murmuration relationship, not the operator generally.
+The taxonomy may grow as genuine new categories emerge — `feedback`, `relationship`, `doctrine` were candidates considered and folded into `operator` for MVP. Revisit the split after real usage, not before.
 
 #### Memory file format
 
@@ -352,55 +331,22 @@ write, show a diff and wait for confirmation.
 
 `murmuration init` drops a default version. Operators override per-murmuration.
 
-### §8 — CLI surface
-
-New commands (beyond REPL dispatch):
-
-```
-murmuration spirit init              # scaffold spirit.md + empty memory/ + empty skills/
-murmuration spirit skills list       # show all (baseline + overlay) skills
-murmuration spirit skills show <n>   # print a skill
-murmuration spirit memory list       # show all memories with types
-murmuration spirit memory show <n>   # print a memory
-murmuration spirit dream             # Phase 2 — run a consolidation pass
-```
+### §8 — REPL surface (Phase 1)
 
 In-REPL:
 
 ```
-:spirit <message>                    # explicit invocation
-:spirit memory                       # list memories
-:spirit skill <name>                 # inspect a skill
-:undo                                # revert the last Ring 3/4 action
+:spirit <message>                    # explicit invocation (else auto-routed)
+:undo                                # revert the last confirmed mutation
 ```
 
-### §9 — Phase 2: Dreaming
+CLI subcommands (`murmuration spirit …`) land with Phase 2 alongside memory — there's no overlay or memory for them to inspect until then.
 
-Memories grow without bound unless actively curated. The Spirit's memory will drift toward noise without a consolidation mechanism. Rather than a passive TTL, we propose **dreaming**: a scheduled or explicit pass that reads recent sessions + existing memories and produces a consolidated, classified, compacted set.
+### §9 — Phase 3: Dreaming (forward reference)
 
-The biological metaphor is sleep consolidation — experiences transit from episodic memory (session logs) to semantic memory (distilled files) during an offline pass.
+Memories grow without bound unless actively curated. A future pass — provisionally called **dreaming** — will consolidate, classify, and compact session logs + memories into a denser, more useful set. Biological metaphor: sleep consolidation transits episodic memory to semantic memory offline. The design constraint is that dreaming must be a **two-stage** process — the Spirit proposes a consolidated memory diff; the operator confirms. The Spirit never silently rewrites its own memory.
 
-#### Dreaming algorithm (Phase 2 sketch — not locked yet)
-
-1. **Gather** — read session logs from the dream window (default: last 7 days) + all existing memories.
-2. **Extract candidates** — pass sessions to an LLM with a structured prompt that asks: _"What is worth remembering from this session? Classify by type; propose name + description + body for each candidate."_
-3. **Cluster** — group candidates with existing memories by topic similarity (embedding or LLM-judged).
-4. **Consolidate** — within each cluster: merge duplicates, reinforce confirmed memories, supersede outdated ones, deprecate contradicted ones.
-5. **Classify** — confirm each memory's type; reclassify if warranted.
-6. **Compact** — old session logs older than the dream window are archived (gzipped) or deleted per config. Index regenerated.
-7. **Review** — dreaming produces a diff against `spirit/memory/`. Operator can accept the whole dream, accept selectively, or reject.
-
-Dreaming is explicitly a **two-stage** process: the Spirit proposes a consolidated memory state; the operator confirms. The Spirit does not silently rewrite its own memory.
-
-#### Scheduling dreaming
-
-Three modes:
-
-- `murmuration spirit dream` — manual
-- `harness.yaml: spirit.dream.cron: "0 3 * * 0"` — weekly at 3am Sunday
-- Auto-trigger when `sessions/*.jsonl` exceeds a threshold size
-
-Phase 2 design to be captured in a follow-on ADR before implementation.
+Until dreaming is needed in practice, `find spirit/memory -mtime +90 -delete` is a perfectly good interim policy. Design to be captured in a follow-on ADR when real memory bloat appears.
 
 ## Consequences
 
@@ -410,15 +356,15 @@ Phase 2 design to be captured in a follow-on ADR before implementation.
 - Skills keep the Spirit's knowledge versioned with the code; no stale training cutoffs.
 - Memory gives the Spirit relationship continuity — something no current agent has.
 - The Spirit can work when the daemon is down, which is exactly when it's often needed.
-- The four-ring tool model gives clear, predictable safety semantics.
+- Two-policy tool model is simple: auto-allow or confirm.
 - Skill and memory authoring turn one-off operator wisdom into durable artifacts.
 
 **Negative:**
 
 - Another LLM-consuming surface; cost observability becomes more important.
 - Skill and memory files proliferate; the overlay needs curation discipline.
-- Prompt-injection surface widens (Spirit reads many operator-authored files); Ring 4 confirmations are the primary mitigation.
-- Dreaming is nontrivial design work deferred to Phase 2; memory without dreaming will eventually bloat.
+- Prompt-injection surface widens (Spirit reads many operator-authored files); confirm-before-writing is the primary mitigation.
+- Memory without dreaming will eventually bloat — interim `find -mtime +90 -delete` covers it until dreaming lands.
 
 **Neutral:**
 
@@ -443,31 +389,32 @@ Three phases.
 
 ### Phase 1 — MVP (ship-in-days scope)
 
-- `packages/cli/src/spirit/` module: `client.ts`, `dispatch.ts`, `tools/` (Ring 1 + Ring 2 only)
+- `packages/cli/src/spirit/` module: `client.ts`, `dispatch.ts`, `tools/` (auto-allow tools only)
 - REPL gate in `attach.ts`: non-`:`, non-bare-verb → Spirit
 - Streaming response with inline tool annotations
 - Per-session conversation state (no persistence)
-- `spirit.md` identity file (auto-created by `murmuration init`)
+- Hardcoded default system prompt (no `spirit.md` yet)
 - 4 shipped skills: `daemon-lifecycle.md`, `agent-anatomy.md`, `governance-models.md`, `when-to-use-governance.md`
-- `load_skill(name)` tool + auto-generated SKILLS.md index
+- `load_skill(name)` tool + static (hand-maintained) `SKILLS.md` index
 - Cost annotation per turn
 
-**Explicitly out of Phase 1:** memory, Ring 3/4 tools, dreaming, overlay skills, GitHub-stored memory.
+**Explicitly out of Phase 1:** memory, confirm-to-mutate tools, dreaming, overlay skills, GitHub-stored memory, `spirit.md` identity file, `murmuration spirit` CLI subcommands, auto-generated skill index.
 
 ### Phase 2 — Memory + writes
 
 - `<root>/spirit/memory/` storage + `INDEX.md`
-- Six memory types with schema validation
+- Three memory types (`operator`, `murmuration`, `reference`) with schema validation
 - `remember`, `recall`, memory-edit tools
-- Ring 3 (lifecycle) + Ring 4 (writes) with diff + confirm
+- Confirm-before-acting tools (lifecycle + file writes with diff)
 - `:undo` REPL command + `.bak` mechanism
 - Operator-authored overlay skills (`<root>/spirit/skills/`)
 - `draft_skill` tool for skill compounding
-- `murmuration spirit` CLI subcommands
+- `spirit.md` identity file + `murmuration spirit init` scaffolder
+- Auto-generated `SKILLS.md` index
 
 ### Phase 3 — Dreaming + polish
 
-- Session log consolidation
+- Session log consolidation (design in a follow-on ADR before implementation)
 - `murmuration spirit dream` command
 - Cron-scheduled dreaming via `harness.yaml`
 - GitHub-stored memory option via CollaborationProvider
