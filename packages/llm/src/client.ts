@@ -12,7 +12,14 @@ import type { LLMCostHook } from "./cost-hook.js";
 import type { LLMClientError } from "./errors.js";
 import type { RetryPolicy } from "./retry.js";
 import { resolveModelForTier } from "./tiers.js";
-import type { LLMClientCapabilities, LLMRequest, LLMResponse, ModelTier, Result } from "./types.js";
+import type {
+  LLMClientCapabilities,
+  LLMRequest,
+  LLMResponse,
+  ModelTier,
+  ProviderId,
+  Result,
+} from "./types.js";
 import type { LLMAdapter } from "./adapters/adapter.js";
 import { VercelAdapter } from "./adapters/vercel-adapter.js";
 import { createVercelModel } from "./adapters/provider-registry.js";
@@ -56,11 +63,16 @@ interface BaseClientConfig {
   readonly now?: () => Date;
 }
 
-export type LLMClientConfig =
-  | (BaseClientConfig & { readonly provider: "gemini"; readonly token: SecretValue })
-  | (BaseClientConfig & { readonly provider: "anthropic"; readonly token: SecretValue })
-  | (BaseClientConfig & { readonly provider: "openai"; readonly token: SecretValue })
-  | (BaseClientConfig & { readonly provider: "ollama"; readonly token: null });
+/**
+ * Client configuration. Built-in providers have specific token
+ * contracts (Ollama: `null`; rest: `SecretValue`). Extension-registered
+ * providers (ADR-0025) may declare their own — the registry is
+ * the source of truth at runtime.
+ */
+export type LLMClientConfig = BaseClientConfig & {
+  readonly provider: ProviderId;
+  readonly token: SecretValue | null;
+};
 
 // ---------------------------------------------------------------------------
 // Factory (unchanged signature — lazy Vercel model creation)

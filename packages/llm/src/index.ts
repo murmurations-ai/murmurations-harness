@@ -1,8 +1,9 @@
 /**
  * @murmurations-ai/llm
  *
- * Four-provider LLM client for the Murmuration Harness. See
- * `docs/adr/0014-llm-client.md` for the full rationale.
+ * LLM client for the Murmuration Harness. See `docs/adr/0014-llm-client.md`
+ * for the core design and `docs/adr/0025-pluggable-llm-providers.md` for
+ * the extensible provider registry.
  */
 
 // Public factory + client interface
@@ -11,6 +12,7 @@ export type { CallOptions, LLMClient, LLMClientConfig } from "./client.js";
 
 // Domain types
 export type {
+  KnownProviderId,
   LLMClientCapabilities,
   LLMMessage,
   LLMRequest,
@@ -22,6 +24,7 @@ export type {
   ToolDefinition,
   ToolCallResult,
 } from "./types.js";
+export { KNOWN_PROVIDERS } from "./types.js";
 
 // Cost hook
 export type { LLMCostHook } from "./cost-hook.js";
@@ -30,10 +33,19 @@ export type { LLMCostHook } from "./cost-hook.js";
 export type { RetryPolicy } from "./retry.js";
 export { DEFAULT_RETRY_POLICY } from "./retry.js";
 
-// Model tier resolution
+// Provider registry (ADR-0025)
+export {
+  BUILT_IN_PROVIDERS,
+  ProviderRegistry,
+  createDefaultRegistry,
+  defaultRegistry,
+} from "./providers.js";
+export type { ProviderCreateOptions, ProviderDefinition } from "./providers.js";
+
+// Model tier resolution (back-compat shims over the default registry)
 export { MODEL_TIER_TABLE, resolveModelForTier } from "./tiers.js";
 
-// Provider env-key convention (single source of truth)
+// Provider env-key convention (back-compat shim; prefer ProviderRegistry.envKeyName)
 export { providerEnvKeyName } from "./adapters/provider-registry.js";
 
 // Observability (ADR-0020 Phase 4)

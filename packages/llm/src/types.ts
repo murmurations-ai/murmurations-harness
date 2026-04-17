@@ -6,8 +6,22 @@
 
 import type { ModelTier } from "@murmurations-ai/core";
 
-/** Discriminant for the four providers. */
-export type ProviderId = "gemini" | "anthropic" | "openai" | "ollama";
+/**
+ * Built-in provider identifiers. Extensions (ADR-0025) register
+ * additional providers at daemon boot; those get arbitrary string ids.
+ */
+export const KNOWN_PROVIDERS = ["gemini", "anthropic", "openai", "ollama"] as const;
+
+export type KnownProviderId = (typeof KNOWN_PROVIDERS)[number];
+
+/**
+ * Provider identifier. Kept as an open string to support
+ * extension-registered providers (Mistral, Groq, Bedrock, Vertex, …).
+ * Built-in ids stay auto-completable via the `KnownProviderId` union.
+ * The `& {}` trick widens the type without collapsing the known-set
+ * literal-ness for autocomplete.
+ */
+export type ProviderId = KnownProviderId | (string & {});
 
 /** Terminal state of a completion. Normalized across providers. */
 export type StopReason =
