@@ -114,13 +114,21 @@ async function duckduckgoSearch(input) {
 
   // Extract results from the lite HTML page
   const results = [];
-  const linkRegex = /<a[^>]+class="result-link"[^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/gi;
-  const snippetRegex = /<td[^>]+class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi;
+  // DuckDuckGo lite: href may come before or after class='result-link'
+  const linkRegex = /<a[^>]*href="([^"]*)"[^>]*class=['"]result-link['"][^>]*>([\s\S]*?)<\/a>/gi;
+  const snippetRegex = /<td[^>]+class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi;
 
   let linkMatch;
   const links = [];
   while ((linkMatch = linkRegex.exec(html)) !== null) {
-    links.push({ url: linkMatch[1], title: linkMatch[2] });
+    let url = linkMatch[1] || "";
+    const title = (linkMatch[2] || "").replace(/<[^>]*>/g, "").trim();
+    // Extract actual URL from DuckDuckGo redirect: //duckduckgo.com/l/?uddg=<encoded_url>&...
+    const uddgMatch = url.match(/uddg=([^&]*)/);
+    if (uddgMatch?.[1]) {
+      url = decodeURIComponent(uddgMatch[1]);
+    }
+    if (title) links.push({ url, title });
   }
 
   let snippetMatch;

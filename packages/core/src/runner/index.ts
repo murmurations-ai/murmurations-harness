@@ -153,7 +153,9 @@ const renderSignal = (s: Signal): string => {
       const data = custom.data as
         | { id?: string; title?: string; body?: string; labels?: string[] }
         | undefined;
-      return `- [local-item ${data?.id ?? "?"}] ${data?.title ?? "(no title)"}\n  labels: ${data?.labels?.join(", ") ?? "(none)"}\n  body: ${data?.body ?? ""}`;
+      const isDirective = data?.labels?.includes("source-directive") === true;
+      const tag = isDirective ? "SOURCE DIRECTIVE" : "item";
+      return `- [${tag} #${data?.id ?? "?"}] ${data?.title ?? "(no title)"}\n  labels: ${data?.labels?.join(", ") ?? "(none)"}\n\n${data?.body ?? ""}\n`;
     }
   }
   return `- [${s.kind}] ${JSON.stringify(s).slice(0, 120)}`;
