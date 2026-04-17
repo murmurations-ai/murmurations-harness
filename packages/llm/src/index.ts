@@ -33,6 +33,9 @@ export { DEFAULT_RETRY_POLICY } from "./retry.js";
 // Model tier resolution
 export { MODEL_TIER_TABLE, resolveModelForTier } from "./tiers.js";
 
+// Provider env-key convention (single source of truth)
+export { providerEnvKeyName } from "./adapters/provider-registry.js";
+
 // Observability (ADR-0020 Phase 4)
 export { initLlmTelemetry, shutdownLlmTelemetry } from "./telemetry.js";
 

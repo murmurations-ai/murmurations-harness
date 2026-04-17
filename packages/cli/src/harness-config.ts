@@ -16,7 +16,19 @@ import { parse as parseYaml } from "yaml";
 // Config shape
 // ---------------------------------------------------------------------------
 
+export type LLMProvider = "gemini" | "anthropic" | "openai" | "ollama";
+
+/** Harness-level default LLM config (ADR-0024). Individual agents may
+ *  override via their `role.md` `llm:` frontmatter. The Spirit of the
+ *  Murmuration inherits this default unless a Phase 2 `spirit.md` file
+ *  overrides it. */
+export interface HarnessLLMConfig {
+  readonly provider: LLMProvider;
+  readonly model: string | undefined;
+}
+
 export interface HarnessConfig {
+  readonly llm: HarnessLLMConfig;
   readonly governance: {
     readonly plugin: string | undefined;
   };
@@ -34,11 +46,15 @@ export interface HarnessConfig {
 }
 
 const DEFAULTS: HarnessConfig = {
+  llm: { provider: "gemini", model: undefined },
   governance: { plugin: undefined },
   collaboration: { provider: "github", repo: undefined },
   products: [],
   logging: { level: "info" },
 };
+
+const isLLMProvider = (v: unknown): v is LLMProvider =>
+  v === "gemini" || v === "anthropic" || v === "openai" || v === "ollama";
 
 // ---------------------------------------------------------------------------
 // Loader
@@ -62,6 +78,7 @@ export async function loadHarnessConfig(rootDir: string): Promise<HarnessConfig>
     return DEFAULTS;
   }
 
+  const llm = raw.llm as Record<string, unknown> | undefined;
   const gov = raw.governance as Record<string, unknown> | undefined;
   const collab = raw.collaboration as Record<string, unknown> | undefined;
   const products = raw.products as { name: string; repo: string }[] | undefined;
@@ -71,6 +88,10 @@ export async function loadHarnessConfig(rootDir: string): Promise<HarnessConfig>
   const logLevel = logging?.level;
 
   return {
+    llm: {
+      provider: isLLMProvider(llm?.provider) ? llm.provider : DEFAULTS.llm.provider,
+      model: typeof llm?.model === "string" ? llm.model : undefined,
+    },
     governance: {
       plugin: typeof gov?.plugin === "string" ? gov.plugin : undefined,
     },
@@ -113,6 +134,7 @@ export function mergeWithCliFlags(
   },
 ): HarnessConfig {
   return {
+    llm: config.llm,
     governance: {
       plugin: flags.governancePath ?? config.governance.plugin,
     },

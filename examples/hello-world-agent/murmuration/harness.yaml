@@ -1,0 +1,15 @@
+# Hello-world example — harness configuration.
+
+# Default LLM for agents and the Spirit of the Murmuration.
+# Agents may override via their role.md 'llm:' frontmatter.
+llm:
+  provider: "gemini"
+
+governance:
+  model: none
+
+collaboration:
+  provider: local
+
+logging:
+  level: info

@@ -50,7 +50,18 @@ interface AgentAnswers {
   readonly schedule: string;
 }
 
-const askAgentQuestions = async (isFirst: boolean): Promise<AgentAnswers> => {
+const VALID_PROVIDERS = new Set(["gemini", "anthropic", "openai", "ollama"]);
+
+const normalizeProvider = (input: string, fallback: string): string => {
+  const v = input.trim().toLowerCase();
+  if (!v) return fallback;
+  return VALID_PROVIDERS.has(v) ? v : fallback;
+};
+
+const askAgentQuestions = async (
+  isFirst: boolean,
+  defaultProvider: string,
+): Promise<AgentAnswers> => {
   const namePrompt = isFirst
     ? "Name your first agent (e.g. research, coordinator, builder): "
     : "Agent name: ";
@@ -58,9 +69,9 @@ const askAgentQuestions = async (isFirst: boolean): Promise<AgentAnswers> => {
   const dir = name.trim().toLowerCase().replace(/\s+/g, "-");
 
   const providerInput = await ask(
-    "  LLM provider (gemini / anthropic / openai / ollama) [gemini]: ",
+    `  LLM provider override (gemini / anthropic / openai / ollama) [${defaultProvider}]: `,
   );
-  const provider = providerInput.trim().toLowerCase() || "gemini";
+  const provider = normalizeProvider(providerInput, defaultProvider);
 
   const groupInput = await ask("  Group this agent belongs to (or Enter for none): ");
   const group = groupInput.trim().toLowerCase().replace(/\s+/g, "-") || "";
@@ -103,7 +114,14 @@ export const runInit = async (targetArg?: string): Promise<void> => {
   // 2. Murmuration purpose
   const purpose = await ask("What is this murmuration's purpose? (one sentence): ");
 
-  // 3. GitHub config (optional)
+  // 3. Default LLM provider (harness-level). Agents + the Spirit inherit this
+  //    unless an agent's role.md or a spirit.md (Phase 2) overrides.
+  const defaultProviderInput = await ask(
+    "Default LLM provider (gemini / anthropic / openai / ollama) [gemini]: ",
+  );
+  const defaultProvider = normalizeProvider(defaultProviderInput, "gemini");
+
+  // 4. GitHub config (optional)
   const githubInput = await ask("GitHub repo (e.g. org/repo, or Enter to skip): ");
   const githubRepo = githubInput.trim();
   let githubOwner = "";
@@ -114,13 +132,13 @@ export const runInit = async (targetArg?: string): Promise<void> => {
     githubRepoName = parts[1] ?? "";
   }
 
-  // 4. Agents
+  // 5. Agents
   const agents: AgentAnswers[] = [];
-  agents.push(await askAgentQuestions(true));
+  agents.push(await askAgentQuestions(true, defaultProvider));
 
   let addMore = await ask("\nAdd another agent? (y/N): ");
   while (addMore.trim().toLowerCase() === "y") {
-    agents.push(await askAgentQuestions(false));
+    agents.push(await askAgentQuestions(false, defaultProvider));
     addMore = await ask("\nAdd another agent? (y/N): ");
   }
 
@@ -183,12 +201,21 @@ _What does this murmuration optimize for?_
     parliamentary: "@murmurations-ai/governance-parliamentary",
   };
   const governancePlugin = governancePluginMap[governance];
+  const governanceBlock =
+    governance !== "none"
+      ? `governance:\n  model: "${governance}"\n  plugin: "${governancePlugin ?? governance}"`
+      : `governance:\n  model: none`;
   await writeFile(
     join(targetDir, "murmuration", "harness.yaml"),
     `# Murmuration Harness configuration
 # This file is read by the daemon at boot.
 
-${governance !== "none" ? `governance:\n  model: "${governance}"\n  plugin: "${governancePlugin ?? governance}"` : "governance:\n  model: none"}
+# Default LLM for agents and the Spirit of the Murmuration.
+# Agents may override via their role.md 'llm:' frontmatter.
+llm:
+  provider: "${defaultProvider}"
+
+${governanceBlock}
 `,
     "utf8",
   );

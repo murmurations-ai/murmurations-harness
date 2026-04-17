@@ -135,6 +135,7 @@ logging:
 describe("mergeWithCliFlags", () => {
   it("CLI flags override config values", () => {
     const config = {
+      llm: { provider: "gemini" as const, model: undefined },
       governance: { plugin: "from-config" },
       collaboration: { provider: "github" as const, repo: "org/repo" },
       products: [],
@@ -154,6 +155,7 @@ describe("mergeWithCliFlags", () => {
 
   it("config values preserved when CLI flags are not set", () => {
     const config = {
+      llm: { provider: "gemini" as const, model: undefined },
       governance: { plugin: "from-config" },
       collaboration: { provider: "local" as const, repo: "org/repo" },
       products: [],
@@ -169,6 +171,7 @@ describe("mergeWithCliFlags", () => {
 
   it("preserves products and collaboration.repo from config", () => {
     const config = {
+      llm: { provider: "gemini" as const, model: undefined },
       governance: { plugin: undefined },
       collaboration: { provider: "github" as const, repo: "my/repo" },
       products: [{ name: "p", repo: "o/r" }],
