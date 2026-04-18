@@ -9,7 +9,7 @@ Initialize a new murmuration by guiding the Source through the 5 core foundation
 
 ## Context
 
-A murmuration is a self-organizing team of AI agents that helps a Source (the human) run a knowledge business. This skill sets up the foundational governance architecture required for the agents to operate autonomously yet aligned with the Source's intent.
+A murmuration is a self-organizing team of AI agents that helps a Source (the human) execute a mission, run a business, or pursue a calling. This skill sets up the foundational governance architecture required for the agents to operate autonomously yet aligned with the Source's intent.
 
 ## Instructions
 
@@ -17,10 +17,10 @@ When the user invokes this skill, act as an interactive interview loop. Ask the 
 
 ### The Interview Loop
 
-1. **Vision:** "Let's start with your Vision. What topics or domains are you genuinely expert in? Who is your ideal reader, and what transformation do you offer them?"
-2. **Circles:** "Next, Circles. Circles are functional domains, like departments. Based on your vision, what 4-6 circles do we need? (e.g., Content, Intelligence, Community). What is the purpose of each?"
+1. **Vision:** "Let's start with your Vision. What are you being called to do in the world? What domains are you operating in, who are the people you serve, and what transformation or value are you trying to create?"
+2. **Circles:** "Next, Circles. Circles are functional domains, like departments. Based on your vision, what 3-6 circles do we need? (e.g., Operations, Research, Outreach, Product). What is the purpose of each?"
 3. **Agents:** "Now, Agents. What specific agents do you need within these circles? For each, what is their primary job, what outputs do they produce, and how often should they run?"
-4. **Soul:** "Fourth is the Agent Soul. What is the shared ethical and behavioral foundation that every agent in your murmuration will inherit? What do you believe, how do you treat the audience, and what are your bright lines (things you never do)?"
+4. **Soul:** "Fourth is the Agent Soul. What is the shared ethical and behavioral foundation that every agent in your murmuration will inherit? What do you believe, how do you treat the people you serve, and what are your bright lines (things you never do)?"
 5. **Domain:** "Finally, your Source Domain. What decisions and tasks do you keep exclusively for yourself, and what do you delegate to the agents (either autonomously, with notification, or requiring your consent)?"
 
 ### Document Generation
