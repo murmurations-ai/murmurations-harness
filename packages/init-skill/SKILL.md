@@ -27,7 +27,7 @@ When the user invokes this skill, act as an interactive interview loop. Ask the 
 
 Once the interview is complete, inform the user that you are synthesizing their answers into the foundational governance documents.
 
-Use the `write` tool to generate the following exact file structure (relative to the current workspace), which complies with the v0.1 Murmuration Harness specification (ADR 0026):
+Use the `write` tool to generate the following exact file structure (relative to the current workspace), which complies with the v0.1 Murmuration Harness specification:
 
 *   **`murmuration/soul.md`**: Synthesize the Vision, Soul, and Domain answers into this single, unified constitutional document. Write the Soul sections in the first-person plural ("We believe...").
 *   **`governance/circles/`**: Create individual Markdown files for each circle defined by the user.
@@ -46,7 +46,7 @@ Use the `write` tool to generate the following exact file structure (relative to
 
 **Formatting Guidelines for Generated Files:**
 *   Use clear Markdown with headers, bullet points, and bold text.
-*   Ensure the directory structure exactly matches the v0.1 Harness specification (`murmuration/`, `agents/`, `governance/circles/`). DO NOT generate legacy files like `SOURCE-VISION.md` or `AGENT-ROSTER.md`.
+*   Ensure the directory structure exactly matches the v0.1 Harness specification (`murmuration/`, `agents/`, `governance/circles/`).
 
 ## Rules
 *   **NEVER ask multiple questions at once.**
