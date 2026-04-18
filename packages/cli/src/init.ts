@@ -28,6 +28,8 @@ import { createInterface, type Interface } from "node:readline";
 
 import { providerEnvKeyName } from "@murmurations-ai/llm";
 
+import { seedBuiltinProviders } from "./builtin-providers/seed.js";
+
 // DO NOT create readline at module scope — it grabs stdin and corrupts
 // terminal mode for other commands (e.g., attach REPL double echo).
 let rl: Interface | null = null;
@@ -98,6 +100,7 @@ const formatScheduleYaml = (schedule: string): string => {
 // ---------------------------------------------------------------------------
 
 export const runInit = async (targetArg?: string): Promise<void> => {
+  seedBuiltinProviders();
   console.log("\nmurmuration init — create a new murmuration\n");
 
   // 1. Target directory

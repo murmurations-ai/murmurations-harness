@@ -47,6 +47,15 @@ importers:
 
   packages/cli:
     dependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^3.0.69
+        version: 3.0.69(zod@4.3.6)
+      '@ai-sdk/google':
+        specifier: ^3.0.63
+        version: 3.0.63(zod@4.3.6)
+      '@ai-sdk/openai':
+        specifier: ^3.0.53
+        version: 3.0.53(zod@4.3.6)
       '@murmurations-ai/core':
         specifier: workspace:*
         version: link:../core

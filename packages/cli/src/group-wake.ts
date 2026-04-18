@@ -29,14 +29,17 @@ import {
 import { createLLMClient, providerEnvKeyName, type LLMClient } from "@murmurations-ai/llm";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
+import { seedBuiltinProviders } from "./builtin-providers/seed.js";
 import {
   buildCollaborationProvider,
   CollaborationBuildError,
   findDefaultRepo,
 } from "./collaboration-factory.js";
 
-// Per ADR-0025: provider → env-key mapping lives on the LLM package's
-// ProviderRegistry. `providerEnvKeyName` consults the default registry.
+// Ensure the default ProviderRegistry singleton is populated with the
+// CLI's built-in providers before any back-compat shim lookups. This is
+// a CLI-side concern — the llm package itself ships no built-ins.
+seedBuiltinProviders();
 
 /** Resolve LLM provider + model from the facilitator's role.md. */
 const resolveLLMConfig = async (

@@ -10,16 +10,44 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  BUILT_IN_PROVIDERS,
   InvalidProviderDefinitionError,
   ProviderRegistry,
   createDefaultRegistry,
   defaultRegistry,
+  seedDefaultRegistry,
   validateProviderDefinition,
 } from "./providers.js";
-import { KNOWN_PROVIDERS } from "./types.js";
+import type { ProviderDefinition } from "./providers.js";
 import { providerEnvKeyName } from "./adapters/provider-registry.js";
-import { MODEL_TIER_TABLE, resolveModelForTier } from "./tiers.js";
+import { resolveModelForTier, lookupTierTable } from "./tiers.js";
+
+// Test fixtures — the llm package ships no built-ins of its own. These
+// mirror the shapes the CLI would seed for provider-integration tests.
+const TEST_GEMINI: ProviderDefinition = {
+  id: "gemini",
+  displayName: "Google Gemini",
+  envKeyName: "GEMINI_API_KEY",
+  tiers: { fast: "gemini-2.5-flash", balanced: "gemini-2.5-pro", deep: "gemini-2.5-pro" },
+  create: () => Promise.resolve({} as never),
+};
+const TEST_ANTHROPIC: ProviderDefinition = {
+  id: "anthropic",
+  displayName: "Anthropic",
+  envKeyName: "ANTHROPIC_API_KEY",
+  tiers: {
+    fast: "claude-sonnet-4-5-20250929",
+    balanced: "claude-sonnet-4-5-20250929",
+    deep: "claude-opus-4-6-20251030",
+  },
+  create: () => Promise.resolve({} as never),
+};
+const TEST_OLLAMA: ProviderDefinition = {
+  id: "ollama",
+  displayName: "Ollama",
+  envKeyName: null,
+  tiers: { fast: "llama3.2:3b", balanced: "llama3.2", deep: "llama3.1:70b" },
+  create: () => Promise.resolve({} as never),
+};
 
 describe("ProviderRegistry", () => {
   it("starts empty", () => {
@@ -95,47 +123,36 @@ describe("ProviderRegistry", () => {
   });
 });
 
-describe("Built-in providers", () => {
-  it("BUILT_IN_PROVIDERS covers all KNOWN_PROVIDERS", () => {
-    const ids = BUILT_IN_PROVIDERS.map((p) => p.id);
-    expect(ids.sort()).toEqual([...KNOWN_PROVIDERS].sort());
-  });
-
-  it("createDefaultRegistry registers all four built-ins", () => {
+describe("createDefaultRegistry", () => {
+  it("returns an empty registry (Phase 3: built-ins live in the CLI)", () => {
     const r = createDefaultRegistry();
-    for (const id of KNOWN_PROVIDERS) {
-      expect(r.has(id)).toBe(true);
-      expect(r.get(id)?.displayName).toBeTruthy();
-    }
-  });
-
-  it("each built-in has the expected env-key convention", () => {
-    const r = createDefaultRegistry();
-    expect(r.envKeyName("gemini")).toBe("GEMINI_API_KEY");
-    expect(r.envKeyName("anthropic")).toBe("ANTHROPIC_API_KEY");
-    expect(r.envKeyName("openai")).toBe("OPENAI_API_KEY");
-    expect(r.envKeyName("ollama")).toBeNull();
-  });
-
-  it("each built-in exposes fast/balanced/deep tiers", () => {
-    const r = createDefaultRegistry();
-    for (const id of KNOWN_PROVIDERS) {
-      expect(r.resolveModelForTier(id, "fast")).toBeTruthy();
-      expect(r.resolveModelForTier(id, "balanced")).toBeTruthy();
-      expect(r.resolveModelForTier(id, "deep")).toBeTruthy();
-    }
+    expect(r.list()).toHaveLength(0);
   });
 });
 
-describe("Default (singleton) registry", () => {
+describe("defaultRegistry singleton", () => {
   it("returns the same instance on repeated calls", () => {
     const a = defaultRegistry();
     const b = defaultRegistry();
     expect(a).toBe(b);
   });
 
-  it("is pre-populated with built-ins", () => {
+  it("starts empty and is populated on demand via seedDefaultRegistry", () => {
+    // The singleton may carry state seeded by earlier tests — drain/reset
+    // isn't exposed. Instead, confirm that after we explicitly seed, the
+    // provider is reachable. Idempotent: repeat seeds don't throw.
+    seedDefaultRegistry([TEST_GEMINI]);
+    expect(defaultRegistry().has("gemini")).toBe(true);
+    seedDefaultRegistry([TEST_GEMINI]); // idempotent
+  });
+});
+
+describe("seedDefaultRegistry", () => {
+  it("adds providers without duplicating existing ones", () => {
+    seedDefaultRegistry([TEST_ANTHROPIC]);
     expect(defaultRegistry().has("anthropic")).toBe(true);
+    seedDefaultRegistry([TEST_ANTHROPIC, TEST_OLLAMA]);
+    expect(defaultRegistry().has("ollama")).toBe(true);
   });
 });
 
@@ -202,26 +219,36 @@ describe("validateProviderDefinition", () => {
   });
 });
 
-describe("Back-compat shims", () => {
-  it("providerEnvKeyName returns the same value as the registry", () => {
+describe("Back-compat shims (require seeded defaultRegistry)", () => {
+  // The shims delegate to the default singleton, which the CLI seeds
+  // with built-in providers at startup. Tests seed explicitly.
+
+  it("providerEnvKeyName returns the seeded registry's env-key", () => {
+    seedDefaultRegistry([TEST_GEMINI, TEST_ANTHROPIC, TEST_OLLAMA]);
     expect(providerEnvKeyName("gemini")).toBe("GEMINI_API_KEY");
     expect(providerEnvKeyName("anthropic")).toBe("ANTHROPIC_API_KEY");
-    // Ollama is keyless — shim collapses null → undefined for legacy parity.
+    // Keyless providers: the shim collapses null → undefined for legacy parity.
     expect(providerEnvKeyName("ollama")).toBeUndefined();
     expect(providerEnvKeyName("unknown-provider")).toBeUndefined();
   });
 
-  it("resolveModelForTier returns the same model as the registry", () => {
+  it("resolveModelForTier consults the seeded registry", () => {
+    seedDefaultRegistry([TEST_GEMINI, TEST_ANTHROPIC]);
     expect(resolveModelForTier("gemini", "balanced")).toBe("gemini-2.5-pro");
     expect(resolveModelForTier("anthropic", "fast")).toBe("claude-sonnet-4-5-20250929");
   });
 
-  it("resolveModelForTier throws loudly for unknown providers", () => {
-    expect(() => resolveModelForTier("unknown", "balanced")).toThrow(/no tier/);
+  it("resolveModelForTier throws loudly for providers not in the registry", () => {
+    expect(() => resolveModelForTier("never-registered", "balanced")).toThrow(/no tier/);
   });
 
-  it("MODEL_TIER_TABLE mirrors the built-in tier tables", () => {
-    expect(MODEL_TIER_TABLE.gemini.balanced).toBe("gemini-2.5-pro");
-    expect(MODEL_TIER_TABLE.anthropic.fast).toBe("claude-sonnet-4-5-20250929");
+  it("lookupTierTable returns a snapshot of the provider's tiers", () => {
+    seedDefaultRegistry([TEST_GEMINI]);
+    const table = lookupTierTable("gemini");
+    expect(table?.balanced).toBe("gemini-2.5-pro");
+  });
+
+  it("lookupTierTable returns undefined for unregistered providers", () => {
+    expect(lookupTierTable("never-registered")).toBeUndefined();
   });
 });

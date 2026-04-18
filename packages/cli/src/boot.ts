@@ -764,9 +764,17 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   // contribute more via their `registerProviders(api)` hook below.
   // -------------------------------------------------------------------
 
-  const { createDefaultRegistry, validateProviderDefinition } =
-    await import("@murmurations-ai/llm");
-  const providerRegistry = createDefaultRegistry();
+  const { validateProviderDefinition, seedDefaultRegistry } = await import("@murmurations-ai/llm");
+  const { buildBuiltinProviderRegistry, BUILTIN_PROVIDERS } =
+    await import("./builtin-providers/index.js");
+  const providerRegistry = buildBuiltinProviderRegistry();
+  // Seed the process-wide default singleton so the legacy back-compat
+  // shims (`providerEnvKeyName`, `resolveModelForTier`, etc.) keep
+  // resolving built-in providers without having to thread a registry.
+  // Extension-contributed providers below land on the local
+  // `providerRegistry` only — they do not leak into the default
+  // singleton (that would mask extension scope across sessions).
+  seedDefaultRegistry(BUILTIN_PROVIDERS);
 
   // -------------------------------------------------------------------
   // Extension loading (ADR-0023 + ADR-0025 Phase 2)

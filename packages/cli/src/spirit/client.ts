@@ -23,9 +23,15 @@ import {
 } from "@murmurations-ai/llm";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
+import { seedBuiltinProviders } from "../builtin-providers/seed.js";
 import { loadHarnessConfig, type HarnessLLMConfig, type LLMProvider } from "../harness-config.js";
 import { buildSpiritSystemPrompt } from "./system-prompt.js";
 import { buildSpiritTools } from "./tools.js";
+
+// Attach runs in its own process (separate from the daemon). Make sure
+// the default ProviderRegistry singleton knows about the CLI built-ins
+// so shim lookups (`providerEnvKeyName`, etc.) succeed.
+seedBuiltinProviders();
 
 interface SocketResponse {
   readonly id: string;

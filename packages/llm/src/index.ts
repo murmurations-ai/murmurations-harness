@@ -35,17 +35,17 @@ export { DEFAULT_RETRY_POLICY } from "./retry.js";
 
 // Provider registry (ADR-0025)
 export {
-  BUILT_IN_PROVIDERS,
   InvalidProviderDefinitionError,
   ProviderRegistry,
   createDefaultRegistry,
   defaultRegistry,
+  seedDefaultRegistry,
   validateProviderDefinition,
 } from "./providers.js";
 export type { ProviderCreateOptions, ProviderDefinition } from "./providers.js";
 
 // Model tier resolution (back-compat shims over the default registry)
-export { MODEL_TIER_TABLE, resolveModelForTier } from "./tiers.js";
+export { resolveModelForTier, lookupTierTable } from "./tiers.js";
 
 // Provider env-key convention (back-compat shim; prefer ProviderRegistry.envKeyName)
 export { providerEnvKeyName } from "./adapters/provider-registry.js";

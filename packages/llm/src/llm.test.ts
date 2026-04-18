@@ -23,7 +23,7 @@ import {
   LLMInternalError,
 } from "./errors.js";
 import type { LLMRequest } from "./types.js";
-import { resolveModelForTier, MODEL_TIER_TABLE } from "./tiers.js";
+import { resolveModelForTier } from "./tiers.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -567,14 +567,11 @@ describe("VercelAdapter error mapping", () => {
 // ---------------------------------------------------------------------------
 
 describe("Model tier resolution", () => {
-  it("resolves fast/balanced/deep for all providers", () => {
-    for (const provider of ["gemini", "anthropic", "openai", "ollama"] as const) {
-      for (const tier of ["fast", "balanced", "deep"] as const) {
-        const model = resolveModelForTier(provider, tier);
-        expect(model).toBeTruthy();
-        expect(model).toBe(MODEL_TIER_TABLE[provider][tier]);
-      }
-    }
+  it("throws for providers not in the (empty) default registry", () => {
+    // Phase 3: the llm package ships no built-ins. The default registry
+    // is empty until a caller seeds it (the CLI does this at boot).
+    // A fresh test run has no seeding, so tier lookup throws.
+    expect(() => resolveModelForTier("never-registered", "balanced")).toThrow(/no tier/);
   });
 });
 
