@@ -7,21 +7,12 @@
 import type { ModelTier } from "@murmurations-ai/core";
 
 /**
- * Built-in provider identifiers. Extensions (ADR-0025) register
- * additional providers at daemon boot; those get arbitrary string ids.
+ * Provider identifier. Any non-empty string registered on a
+ * {@link ProviderRegistry} is valid. The harness ships no vendor
+ * strings in this package — built-in provider identities live in
+ * the CLI's `builtin-providers/` directory (ADR-0025 Phase 3).
  */
-export const KNOWN_PROVIDERS = ["gemini", "anthropic", "openai", "ollama"] as const;
-
-export type KnownProviderId = (typeof KNOWN_PROVIDERS)[number];
-
-/**
- * Provider identifier. Kept as an open string to support
- * extension-registered providers (Mistral, Groq, Bedrock, Vertex, …).
- * Built-in ids stay auto-completable via the `KnownProviderId` union.
- * The `& {}` trick widens the type without collapsing the known-set
- * literal-ness for autocomplete.
- */
-export type ProviderId = KnownProviderId | (string & {});
+export type ProviderId = string;
 
 /** Terminal state of a completion. Normalized across providers. */
 export type StopReason =

@@ -63,7 +63,7 @@ import {
 } from "@murmurations-ai/github";
 import {
   createLLMClient,
-  providerEnvKeyName,
+  ProviderRegistry,
   type LLMClient,
   type LLMCostHook,
 } from "@murmurations-ai/llm";
@@ -74,13 +74,9 @@ import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
 // Per ADR-0025, the provider → env-key mapping lives on the
-// ProviderRegistry. `providerEnvKeyName` is a back-compat shim over
-// the default (built-in) registry. Returns `undefined` both for
-// keyless providers (e.g. Ollama) and for providers not registered
-// under the default set — boot treats both the same: no secret to
-// declare. Extension-registered providers land in Phase 2 when the
-// boot path constructs its own registry and lets extensions
-// contribute before sealing.
+// ProviderRegistry. Boot builds its registry via
+// `buildBuiltinProviderRegistry()` and threads it into both
+// `buildSecretDeclaration` and `buildAgentClients`.
 
 /**
  * Per-wake adapter: turn the LLM client's token-count-only cost hook
@@ -202,7 +198,10 @@ const toBudgetCeiling = (agent: RegisteredAgent): BudgetCeiling | null => {
  * per-agent LLM client construction downstream checks `provider.has(...)`
  * and skips gracefully if the key is absent.
  */
-const buildSecretDeclaration = (agents: readonly RegisteredAgent[]): SecretDeclaration => {
+const buildSecretDeclaration = (
+  agents: readonly RegisteredAgent[],
+  providerRegistry: ProviderRegistry,
+): SecretDeclaration => {
   const required = new Map<string, SecretKey>();
   const optional = new Map<string, SecretKey>();
   optional.set(GITHUB_TOKEN.value, GITHUB_TOKEN);
@@ -215,8 +214,10 @@ const buildSecretDeclaration = (agents: readonly RegisteredAgent[]): SecretDecla
       if (!required.has(name)) optional.set(name, makeSecretKey(name));
     }
     if (agent.llm) {
-      const keyName = providerEnvKeyName(agent.llm.provider);
-      if (keyName !== undefined && !required.has(keyName)) {
+      const keyName = providerRegistry.envKeyName(agent.llm.provider);
+      // `null` = keyless provider (e.g. Ollama); `undefined` = provider
+      // not registered. Both mean "no secret to declare".
+      if (typeof keyName === "string" && !required.has(keyName)) {
         optional.set(keyName, makeSecretKey(keyName));
       }
     }
@@ -271,6 +272,7 @@ export interface InProcessRunnerClients {
 interface BuildAgentClientsArgs {
   readonly agent: RegisteredAgent;
   readonly provider: DotenvSecretsProvider | undefined;
+  readonly providerRegistry: ProviderRegistry;
   readonly costBuilder?: WakeCostBuilder;
   readonly dryRun: boolean;
   readonly ollamaBaseUrl: string | undefined;
@@ -293,6 +295,7 @@ interface BuildAgentClientsResult {
 const buildAgentClients = ({
   agent,
   provider,
+  providerRegistry,
   costBuilder,
   dryRun,
   ollamaBaseUrl,
@@ -305,26 +308,39 @@ const buildAgentClients = ({
   } = {};
 
   if (agent.llm) {
-    const keyName = providerEnvKeyName(agent.llm.provider);
-    const costHook = costBuilder ? makeDaemonHook(costBuilder) : undefined;
-    if (agent.llm.provider === "ollama") {
-      result.llm = createLLMClient({
-        provider: "ollama",
-        token: null,
-        ...(agent.llm.model !== undefined ? { model: agent.llm.model } : {}),
-        ...(ollamaBaseUrl !== undefined ? { baseUrl: ollamaBaseUrl } : {}),
-        ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
-      });
-    } else if (keyName !== undefined && provider?.has(makeSecretKey(keyName)) === true) {
-      const token = provider.get(makeSecretKey(keyName));
-      result.llm = createLLMClient({
-        provider: agent.llm.provider,
-        token,
-        ...(agent.llm.model !== undefined ? { model: agent.llm.model } : {}),
-        ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
-      });
+    const providerDef = providerRegistry.get(agent.llm.provider);
+    if (!providerDef) {
+      result.llmSkipReason = `provider "${agent.llm.provider}" is not registered`;
     } else {
-      result.llmSkipReason = "provider api key missing from secrets";
+      const resolvedModel =
+        agent.llm.model ?? providerRegistry.resolveModelForTier(agent.llm.provider, "balanced");
+      if (!resolvedModel) {
+        result.llmSkipReason = `no model for provider "${agent.llm.provider}" (pin role.md llm.model)`;
+      } else {
+        const costHook = costBuilder ? makeDaemonHook(costBuilder) : undefined;
+        if (providerDef.envKeyName === null) {
+          // Keyless provider (e.g. local Ollama).
+          result.llm = createLLMClient({
+            registry: providerRegistry,
+            provider: agent.llm.provider,
+            model: resolvedModel,
+            token: null,
+            ...(ollamaBaseUrl !== undefined ? { baseUrl: ollamaBaseUrl } : {}),
+            ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+          });
+        } else if (provider?.has(makeSecretKey(providerDef.envKeyName)) === true) {
+          const token = provider.get(makeSecretKey(providerDef.envKeyName));
+          result.llm = createLLMClient({
+            registry: providerRegistry,
+            provider: agent.llm.provider,
+            model: resolvedModel,
+            token,
+            ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+          });
+        } else {
+          result.llmSkipReason = "provider api key missing from secrets";
+        }
+      }
     }
   }
 
@@ -671,10 +687,20 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     ? new DotenvSecretsProvider({ envPath })
     : undefined;
 
+  // -------------------------------------------------------------------
+  // Provider registry (ADR-0025) — seed with CLI-bundled built-ins
+  // before extensions load (done further below) or secret declaration
+  // is computed. Extension-registered providers are added to the same
+  // instance when `loadExtensions` runs.
+  // -------------------------------------------------------------------
+
+  const { buildBuiltinProviderRegistry } = await import("./builtin-providers/index.js");
+  const providerRegistry = buildBuiltinProviderRegistry();
+
   // Unioned declaration across ALL registered agents, per ADR-0010 /
   // ADR-0016. For hello-world this collapses to `{ required: [],
   // optional: [GITHUB_TOKEN] }` — identical to the pre-2D behavior.
-  const declaration = buildSecretDeclaration(allRegistered);
+  const declaration = buildSecretDeclaration(allRegistered, providerRegistry);
 
   const secretsBlock: DaemonConfig["secrets"] | undefined = provider
     ? { provider, declaration }
@@ -760,25 +786,12 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   }
 
   // -------------------------------------------------------------------
-  // Provider registry (ADR-0025) — built-ins pre-registered; extensions
-  // contribute more via their `registerProviders(api)` hook below.
+  // Extension loading (ADR-0023 + ADR-0025 Phase 2) — extensions may
+  // contribute providers that land on the same `providerRegistry`
+  // instance constructed earlier in boot.
   // -------------------------------------------------------------------
 
-  const { validateProviderDefinition, seedDefaultRegistry } = await import("@murmurations-ai/llm");
-  const { buildBuiltinProviderRegistry, BUILTIN_PROVIDERS } =
-    await import("./builtin-providers/index.js");
-  const providerRegistry = buildBuiltinProviderRegistry();
-  // Seed the process-wide default singleton so the legacy back-compat
-  // shims (`providerEnvKeyName`, `resolveModelForTier`, etc.) keep
-  // resolving built-in providers without having to thread a registry.
-  // Extension-contributed providers below land on the local
-  // `providerRegistry` only — they do not leak into the default
-  // singleton (that would mask extension scope across sessions).
-  seedDefaultRegistry(BUILTIN_PROVIDERS);
-
-  // -------------------------------------------------------------------
-  // Extension loading (ADR-0023 + ADR-0025 Phase 2)
-  // -------------------------------------------------------------------
+  const { validateProviderDefinition } = await import("@murmurations-ai/llm");
 
   const { loadExtensions } = await import("@murmurations-ai/core");
   const extensionsDir = join(exampleRoot, "extensions");
@@ -840,6 +853,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     const validation = buildAgentClients({
       agent,
       provider,
+      providerRegistry,
       dryRun,
       ollamaBaseUrl,
     });
@@ -973,6 +987,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
             const wakeClients = buildAgentClients({
               agent: capturedAgent,
               provider,
+              providerRegistry,
               costBuilder,
               dryRun,
               ollamaBaseUrl,

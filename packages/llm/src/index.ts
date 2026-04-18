@@ -1,9 +1,16 @@
 /**
  * @murmurations-ai/llm
  *
- * LLM client for the Murmuration Harness. See `docs/adr/0014-llm-client.md`
- * for the core design and `docs/adr/0025-pluggable-llm-providers.md` for
- * the extensible provider registry.
+ * Provider-agnostic LLM client for the Murmuration Harness. See:
+ * - `docs/adr/0014-llm-client.md` — core design
+ * - `docs/adr/0020-vercel-ai-sdk.md` — single-adapter migration
+ * - `docs/adr/0025-pluggable-llm-providers.md` — pluggable provider registry
+ *
+ * The package ships no vendor strings. Callers construct a
+ * {@link ProviderRegistry}, register their providers (the CLI ships
+ * four built-ins; extensions register more), and pass the registry
+ * into {@link createLLMClient} along with an explicit provider id and
+ * model.
  */
 
 // Public factory + client interface
@@ -12,7 +19,6 @@ export type { CallOptions, LLMClient, LLMClientConfig } from "./client.js";
 
 // Domain types
 export type {
-  KnownProviderId,
   LLMClientCapabilities,
   LLMMessage,
   LLMRequest,
@@ -24,7 +30,6 @@ export type {
   ToolDefinition,
   ToolCallResult,
 } from "./types.js";
-export { KNOWN_PROVIDERS } from "./types.js";
 
 // Cost hook
 export type { LLMCostHook } from "./cost-hook.js";
@@ -37,18 +42,9 @@ export { DEFAULT_RETRY_POLICY } from "./retry.js";
 export {
   InvalidProviderDefinitionError,
   ProviderRegistry,
-  createDefaultRegistry,
-  defaultRegistry,
-  seedDefaultRegistry,
   validateProviderDefinition,
 } from "./providers.js";
 export type { ProviderCreateOptions, ProviderDefinition } from "./providers.js";
-
-// Model tier resolution (back-compat shims over the default registry)
-export { resolveModelForTier, lookupTierTable } from "./tiers.js";
-
-// Provider env-key convention (back-compat shim; prefer ProviderRegistry.envKeyName)
-export { providerEnvKeyName } from "./adapters/provider-registry.js";
 
 // Observability (ADR-0020 Phase 4)
 export { initLlmTelemetry, shutdownLlmTelemetry } from "./telemetry.js";

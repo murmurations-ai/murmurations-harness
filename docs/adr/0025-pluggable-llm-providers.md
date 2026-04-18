@@ -1,6 +1,6 @@
 # ADR-0025 — Pluggable LLM provider registry
 
-- **Status:** Proposed
+- **Status:** Accepted (Phase 1 + 2 + 3 shipped)
 - **Date:** 2026-04-17
 - **Decision-maker(s):** Source (design)
 - **Related:** ADR-0014 (LLM client), ADR-0020 (Vercel AI SDK migration), ADR-0023 (Extension system), ADR-0024 (Spirit of the Murmuration)

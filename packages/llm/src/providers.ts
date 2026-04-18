@@ -91,41 +91,6 @@ export class ProviderRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// Default registry + singleton
-// ---------------------------------------------------------------------------
-
-/** Build an empty `ProviderRegistry`. Callers populate it with
- *  `register(def)` — from CLI built-ins, from extensions, or from
- *  any other source they own. */
-export const createDefaultRegistry = (): ProviderRegistry => new ProviderRegistry();
-
-/**
- * Process-wide default registry. Starts empty. The CLI boot path
- * (and tests that use back-compat shims) seeds it by calling
- * `seedDefaultRegistry(...)` before any code consults the singleton.
- * Callers that want a clean registry should prefer
- * {@link createDefaultRegistry} + explicit dependency injection.
- */
-let DEFAULT_REGISTRY: ProviderRegistry | null = null;
-
-export const defaultRegistry = (): ProviderRegistry => {
-  DEFAULT_REGISTRY ??= new ProviderRegistry();
-  return DEFAULT_REGISTRY;
-};
-
-/** Populate the process-wide default registry with a known set of
- *  providers. Idempotent — repeat registrations of the same id are
- *  skipped rather than thrown, so CLI boot can call this once at
- *  startup without fighting tests that may have pre-seeded. */
-export const seedDefaultRegistry = (defs: readonly ProviderDefinition[]): ProviderRegistry => {
-  const registry = defaultRegistry();
-  for (const def of defs) {
-    if (!registry.has(def.id)) registry.register(def);
-  }
-  return registry;
-};
-
-// ---------------------------------------------------------------------------
 // Validation — used by the daemon boot path when accepting
 // extension-contributed provider definitions (ADR-0025 §3)
 // ---------------------------------------------------------------------------

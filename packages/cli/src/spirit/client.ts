@@ -16,22 +16,17 @@ import { join } from "node:path";
 import { makeSecretKey, makeSecretValue, type SecretValue } from "@murmurations-ai/core";
 import {
   createLLMClient,
-  providerEnvKeyName,
+  ProviderRegistry,
   type LLMClient,
   type LLMClientConfig,
   type LLMMessage,
 } from "@murmurations-ai/llm";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
-import { seedBuiltinProviders } from "../builtin-providers/seed.js";
+import { buildBuiltinProviderRegistry } from "../builtin-providers/index.js";
 import { loadHarnessConfig, type HarnessLLMConfig, type LLMProvider } from "../harness-config.js";
 import { buildSpiritSystemPrompt } from "./system-prompt.js";
 import { buildSpiritTools } from "./tools.js";
-
-// Attach runs in its own process (separate from the daemon). Make sure
-// the default ProviderRegistry singleton knows about the CLI built-ins
-// so shim lookups (`providerEnvKeyName`, etc.) succeed.
-seedBuiltinProviders();
 
 interface SocketResponse {
   readonly id: string;
@@ -86,13 +81,16 @@ const PRICING: Record<LLMProvider, { readonly input: number; readonly output: nu
 };
 
 /** Resolve the API key for a provider. Reads `<rootDir>/.env` first,
- *  falls back to `process.env`. Returns `null` for Ollama (no key). */
+ *  falls back to `process.env`. Returns `null` when the provider is
+ *  declared keyless on the registry (e.g. local Ollama). */
 const resolveProviderToken = async (
+  registry: ProviderRegistry,
   provider: LLMProvider,
   rootDir: string,
 ): Promise<SecretValue | null | undefined> => {
-  const keyName = providerEnvKeyName(provider);
-  if (!keyName) return null; // Ollama and anything else keyless
+  const keyName = registry.envKeyName(provider);
+  if (keyName === null) return null; // keyless provider
+  if (keyName === undefined) return undefined; // provider not registered — caller reports
 
   const secretKey = makeSecretKey(keyName);
   const envPath = join(rootDir, ".env");
@@ -114,18 +112,22 @@ const resolveProviderToken = async (
 
 /** Build the LLMClientConfig for a resolved provider + token. */
 const buildLLMConfig = (
+  registry: ProviderRegistry,
   llm: HarnessLLMConfig,
   token: SecretValue | null,
   model: string,
 ): LLMClientConfig => {
-  if (llm.provider === "ollama") return { provider: "ollama", token: null, model };
+  const providerDef = registry.get(llm.provider);
+  if (providerDef?.envKeyName === null) {
+    return { registry, provider: llm.provider, token: null, model };
+  }
   if (!token) {
-    const keyName = providerEnvKeyName(llm.provider) ?? "an LLM API key";
+    const keyName = providerDef?.envKeyName ?? "an LLM API key";
     throw new SpiritUnavailableError(
       `Spirit needs ${keyName} in .env or the environment for provider "${llm.provider}".`,
     );
   }
-  return { provider: llm.provider, token, model };
+  return { registry, provider: llm.provider, token, model };
 };
 
 /**
@@ -138,18 +140,28 @@ const buildLLMConfig = (
 export const initSpiritSession = async (opts: SpiritInitOptions): Promise<SpiritSession> => {
   const { rootDir, send } = opts;
 
+  const registry = buildBuiltinProviderRegistry();
   const harness = await loadHarnessConfig(rootDir);
-  const model = harness.llm.model ?? DEFAULT_MODEL[harness.llm.provider];
+  const providerDef = registry.get(harness.llm.provider);
+  if (!providerDef) {
+    throw new SpiritUnavailableError(
+      `Spirit needs provider "${harness.llm.provider}" — not registered (check harness.yaml llm.provider).`,
+    );
+  }
+  const model =
+    harness.llm.model ??
+    registry.resolveModelForTier(harness.llm.provider, "balanced") ??
+    DEFAULT_MODEL[harness.llm.provider];
 
-  const token = await resolveProviderToken(harness.llm.provider, rootDir);
+  const token = await resolveProviderToken(registry, harness.llm.provider, rootDir);
   if (token === undefined) {
-    const keyName = providerEnvKeyName(harness.llm.provider) ?? "an LLM API key";
+    const keyName = providerDef.envKeyName ?? "an LLM API key";
     throw new SpiritUnavailableError(
       `Spirit needs ${keyName} for provider "${harness.llm.provider}" — set it in .env or the environment.`,
     );
   }
 
-  const client: LLMClient = createLLMClient(buildLLMConfig(harness.llm, token, model));
+  const client: LLMClient = createLLMClient(buildLLMConfig(registry, harness.llm, token, model));
 
   const systemPrompt = await buildSpiritSystemPrompt();
   const tools = buildSpiritTools({ rootDir, send });
