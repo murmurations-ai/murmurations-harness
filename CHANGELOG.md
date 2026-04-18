@@ -3,6 +3,25 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.2] - 2026-04-17
+
+### Added
+
+- **Per-agent plugin declarations + runtime gating** (role.md `plugins:` field, ADR-0023 extension). Agents can declare which OpenClaw-compatible plugins they rely on:
+
+  ```yaml
+  plugins:
+    - provider: "@murmurations-ai/web-search"
+  ```
+
+  Matching rule: provider string matches extension id directly OR via last path segment, so `@murmurations-ai/web-search` resolves to extension id `web-search`.
+
+- **Backward-compat fallthrough:** empty or omitted `plugins:` continues to give the agent every loaded plugin's tools (today's behavior). Declared plugins filter to the declared subset.
+
+- Group meetings keep the full tool set — a meeting isn't a single-agent wake.
+
+- 3 new identity-loader tests for the plugin schema.
+
 ## [0.4.1] - 2026-04-17
 
 ### Added
