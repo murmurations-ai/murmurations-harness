@@ -1,0 +1,7 @@
+{
+  "id": "files",
+  "providerAuthEnvVars": {},
+  "contracts": {
+    "tools": ["write_file", "read_file", "edit_file", "list_dir"]
+  }
+}

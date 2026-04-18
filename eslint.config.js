@@ -21,6 +21,9 @@ export default tseslint.config(
       // the same strict typing rules since they are not part of the
       // published product.
       "examples/**",
+      // Bundled extensions are plain JS (.mjs) loaded at runtime via
+      // the extension loader — they don't participate in the TS project.
+      "packages/*/src/builtin-extensions/**",
     ],
   },
   js.configs.recommended,

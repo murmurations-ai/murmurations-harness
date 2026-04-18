@@ -3,6 +3,28 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.3] - 2026-04-17
+
+### Added
+
+- **Built-in `@murmurations-ai/files` plugin** — shipped bundled with the CLI distribution. Four tools:
+  - `write_file(path, content)` — create or overwrite, creates parent dirs, saves `.bak` on overwrite
+  - `read_file(path)` — read UTF-8 text
+  - `edit_file(path, find, replace)` — exact-single-occurrence replacement with `.bak`
+  - `list_dir(path)` — directory enumeration with `[dir]`/`[file]` markers
+  - Path safety: refuses escapes outside the murmuration root; refuses any basename matching `.env*`
+- **Bundled-extension loading at boot** — the CLI scans `<cli-dist>/builtin-extensions/` alongside `<root>/extensions/`. Operator extensions shadow built-ins by id on collision.
+- **Local-governance auto-include** — when `collaboration.provider: local`, the `files` plugin is automatically granted to every agent that has declared any plugins (without requiring an explicit declaration). Rationale: agents can't participate in governance (record proposals, decisions, tensions) without file access. Empty `plugins:` still uses the backward-compat "see everything" path.
+- **`examples/extensions/files/`** — standalone reference copy of the plugin for operators using GitHub-mode or non-default collaboration providers.
+
+### Changed
+
+- `daemon.extensions.builtin.loaded` event logs bundled-extension discovery separately from operator extensions for clearer provenance.
+
+### Verified
+
+- The researcher in `test02` (local-gov) successfully wrote `notes/write-test.md` via `write_file`. Closes the long-standing "synthesizing findings and creating persistent artifacts remains a challenge" tension the researcher had been filing on every wake.
+
 ## [0.4.2] - 2026-04-17
 
 ### Added

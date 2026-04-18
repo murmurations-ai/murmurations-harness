@@ -1,6 +1,6 @@
 {
   "name": "@murmurations-ai/cli",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Command-line interface for the Murmuration Harness daemon — start, stop, status.",
   "license": "MIT",
   "author": "Emergent Praxis murmuration",
@@ -31,7 +31,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc --build tsconfig.build.json && mkdir -p dist/spirit/skills && cp src/spirit/skills/*.md dist/spirit/skills/",
+    "build": "tsc --build tsconfig.build.json && mkdir -p dist/spirit/skills && cp src/spirit/skills/*.md dist/spirit/skills/ && mkdir -p dist/builtin-extensions/files && cp src/builtin-extensions/files/*.json src/builtin-extensions/files/*.mjs dist/builtin-extensions/files/",
     "clean": "rm -rf dist .tsbuildinfo .tsbuildinfo.build",
     "typecheck": "tsc --noEmit",
     "start": "node dist/bin.js start"

@@ -794,25 +794,53 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const { validateProviderDefinition } = await import("@murmurations-ai/llm");
 
   const { loadExtensions } = await import("@murmurations-ai/core");
+
+  // Per-provider-registration callback — shared by built-in and
+  // operator extension loads so a contributed provider from either
+  // source lands on the same `providerRegistry`.
+  const onRegisterProvider = (definition: unknown, extensionId: string): void => {
+    try {
+      const def = validateProviderDefinition(definition, extensionId);
+      providerRegistry.register(def);
+      logger.info("daemon.providers.registered", {
+        extensionId,
+        providerId: def.id,
+        displayName: def.displayName,
+      });
+    } catch (err) {
+      logger.warn("daemon.providers.invalid", {
+        extensionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  // Built-in extensions shipped with the CLI binary. These live in
+  // `packages/cli/dist/builtin-extensions/` at runtime (copied from
+  // `src/builtin-extensions/` by the build script) and are loaded
+  // first so operator extensions can override them by id if desired.
+  const cliDistDir = dirname(fileURLToPath(import.meta.url));
+  const builtinExtensionsDir = resolve(cliDistDir, "builtin-extensions");
+  const builtinExtensions = existsSync(builtinExtensionsDir)
+    ? await loadExtensions(builtinExtensionsDir, exampleRoot, { onRegisterProvider })
+    : [];
+  if (builtinExtensions.length > 0) {
+    logger.info("daemon.extensions.builtin.loaded", {
+      count: builtinExtensions.length,
+      ids: builtinExtensions.map((e) => e.id),
+    });
+  }
+
   const extensionsDir = join(exampleRoot, "extensions");
-  const loadedExtensions = await loadExtensions(extensionsDir, exampleRoot, {
-    onRegisterProvider: (definition, extensionId) => {
-      try {
-        const def = validateProviderDefinition(definition, extensionId);
-        providerRegistry.register(def);
-        logger.info("daemon.providers.registered", {
-          extensionId,
-          providerId: def.id,
-          displayName: def.displayName,
-        });
-      } catch (err) {
-        logger.warn("daemon.providers.invalid", {
-          extensionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    },
+  const operatorExtensions = await loadExtensions(extensionsDir, exampleRoot, {
+    onRegisterProvider,
   });
+  // Operator extensions win on id collision — built-ins are shadowed.
+  const builtinIdsSeen = new Set(operatorExtensions.map((e) => e.id));
+  const loadedExtensions = [
+    ...builtinExtensions.filter((e) => !builtinIdsSeen.has(e.id)),
+    ...operatorExtensions,
+  ];
   if (loadedExtensions.length > 0) {
     const toolCount = loadedExtensions.reduce((n, ext) => n + ext.tools.length, 0);
     logger.info("daemon.extensions.loaded", {
@@ -845,6 +873,15 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
    *
    * Backward compat: when `agent.plugins` is empty, return all loaded
    * extension tools (matches pre-gating behavior).
+   *
+   * Local-governance auto-include: when the murmuration uses the local
+   * `CollaborationProvider`, agents need file access to record
+   * governance artifacts (proposals, decisions, tensions). Without
+   * file-writes they can't participate in governance. So we auto-grant
+   * the built-in `files` plugin to every agent that has declared any
+   * plugins at all — the agent still sees their other declared plugins
+   * explicitly; we just add `files` on top. Empty declaration still
+   * gets everything via the backward-compat path.
    */
   const selectExtensionToolsFor = (
     agent: RegisteredAgent,
@@ -856,6 +893,10 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       const parts = p.provider.split("/");
       const last = parts[parts.length - 1];
       if (last !== undefined && parts.length > 1) declared.add(last);
+    }
+    if (config.collaboration.provider === "local") {
+      declared.add("files");
+      declared.add("@murmurations-ai/files");
     }
     return loadedExtensions.filter((ext) => declared.has(ext.id)).flatMap((ext) => ext.tools);
   };
