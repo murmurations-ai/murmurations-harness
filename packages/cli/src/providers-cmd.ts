@@ -6,7 +6,7 @@
  * a live daemon (Phase 3 adds a `providers.list` socket RPC).
  */
 
-import { createDefaultRegistry } from "@murmurations-ai/llm";
+import { buildBuiltinProviderRegistry } from "./builtin-providers/index.js";
 
 export const runProviders = async (args: readonly string[]): Promise<void> => {
   const verb = args[0] ?? "list";
@@ -16,7 +16,7 @@ export const runProviders = async (args: readonly string[]): Promise<void> => {
     process.exit(2);
   }
 
-  const registry = createDefaultRegistry();
+  const registry = buildBuiltinProviderRegistry();
   const providers = registry.list();
   const jsonFlag = args.includes("--json");
 

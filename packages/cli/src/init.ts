@@ -26,7 +26,7 @@ import { mkdir, writeFile, chmod } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 
-import { providerEnvKeyName } from "@murmurations-ai/llm";
+import { buildBuiltinProviderRegistry } from "./builtin-providers/index.js";
 
 // DO NOT create readline at module scope — it grabs stdin and corrupts
 // terminal mode for other commands (e.g., attach REPL double echo).
@@ -98,6 +98,7 @@ const formatScheduleYaml = (schedule: string): string => {
 // ---------------------------------------------------------------------------
 
 export const runInit = async (targetArg?: string): Promise<void> => {
+  const providerRegistry = buildBuiltinProviderRegistry();
   console.log("\nmurmuration init — create a new murmuration\n");
 
   // 1. Target directory
@@ -242,7 +243,8 @@ _Define the agent-specific bright lines beyond the murmuration soul._
     );
 
     // role.md
-    const secretName = providerEnvKeyName(agent.provider) ?? "";
+    const keyName = providerRegistry.envKeyName(agent.provider);
+    const secretName = typeof keyName === "string" ? keyName : "";
     if (secretName) secretNames.add(secretName);
     const groupLine = agent.group ? `\n  - "${agent.group}"` : "";
     const ghScopes = githubOwner

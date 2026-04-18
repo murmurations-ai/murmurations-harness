@@ -26,17 +26,15 @@ import {
   type GovernanceTally,
   GovernanceStateStore,
 } from "@murmurations-ai/core";
-import { createLLMClient, providerEnvKeyName, type LLMClient } from "@murmurations-ai/llm";
+import { createLLMClient, type LLMClient } from "@murmurations-ai/llm";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
+import { buildBuiltinProviderRegistry } from "./builtin-providers/index.js";
 import {
   buildCollaborationProvider,
   CollaborationBuildError,
   findDefaultRepo,
 } from "./collaboration-factory.js";
-
-// Per ADR-0025: provider → env-key mapping lives on the LLM package's
-// ProviderRegistry. `providerEnvKeyName` consults the default registry.
 
 /** Resolve LLM provider + model from the facilitator's role.md. */
 const resolveLLMConfig = async (
@@ -307,27 +305,31 @@ export const runGroupWakeCommand = async (
   console.log(`  LLM: ${llmConfig.provider}/${llmConfig.model}`);
 
   // Load secrets + clients
+  const providerRegistry = buildBuiltinProviderRegistry();
   const envPath = join(root, ".env");
   let llmClient: LLMClient | undefined;
   let secretsProvider: DotenvSecretsProvider | undefined;
-  const secretKeyName = providerEnvKeyName(llmConfig.provider);
+  const envKeyName = providerRegistry.envKeyName(llmConfig.provider);
+  const secretKeyName = typeof envKeyName === "string" ? envKeyName : undefined;
   if (existsSync(envPath)) {
     secretsProvider = new DotenvSecretsProvider({ envPath });
     const optionalKeys = secretKeyName ? [makeSecretKey(secretKeyName)] : [];
     await secretsProvider.load({ required: [], optional: optionalKeys });
     const tokenKey = secretKeyName ? makeSecretKey(secretKeyName) : null;
-    if (llmConfig.provider === "ollama") {
+    if (envKeyName === null) {
+      // Keyless provider (e.g. local Ollama).
       llmClient = createLLMClient({
-        provider: "ollama",
-        token: null,
+        registry: providerRegistry,
+        provider: llmConfig.provider,
         model: llmConfig.model,
+        token: null,
       });
     } else if (tokenKey && secretsProvider.has(tokenKey)) {
-      const provider = llmConfig.provider;
       llmClient = createLLMClient({
-        provider,
-        token: secretsProvider.get(tokenKey),
+        registry: providerRegistry,
+        provider: llmConfig.provider,
         model: llmConfig.model,
+        token: secretsProvider.get(tokenKey),
       });
     }
   }

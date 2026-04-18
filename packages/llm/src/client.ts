@@ -1,9 +1,15 @@
 /**
  * `createLLMClient` factory + `LLMClient` wrapper.
  *
- * ADR-0020: The wrapper delegates to VercelAdapter, which uses Vercel
- * AI SDK's generateText() under the hood. Provider selection via
- * discriminated `LLMClientConfig` union is unchanged.
+ * The client is provider-agnostic: callers supply a
+ * {@link ProviderRegistry} (ADR-0025) plus a concrete provider id and
+ * model. The registry's `ProviderDefinition.create` returns a Vercel
+ * AI SDK `LanguageModel` which `VercelAdapter` wraps to produce
+ * `LLMResponse` objects.
+ *
+ * Tier-based model resolution is a caller concern — the client refuses
+ * to guess at a model from a tier because the tier table lives on the
+ * registry's provider definitions, not in the client.
  */
 
 import type { SecretValue } from "@murmurations-ai/core";
@@ -11,21 +17,19 @@ import type { SecretValue } from "@murmurations-ai/core";
 import type { LLMCostHook } from "./cost-hook.js";
 import type { LLMClientError } from "./errors.js";
 import type { RetryPolicy } from "./retry.js";
-import { resolveModelForTier } from "./tiers.js";
 import type {
   LLMClientCapabilities,
   LLMRequest,
   LLMResponse,
-  ModelTier,
   ProviderId,
   Result,
 } from "./types.js";
 import type { LLMAdapter } from "./adapters/adapter.js";
 import { VercelAdapter } from "./adapters/vercel-adapter.js";
-import { createVercelModel } from "./adapters/provider-registry.js";
+import type { ProviderRegistry } from "./providers.js";
 
 // ---------------------------------------------------------------------------
-// Public interface (unchanged from pre-migration)
+// Public interface
 // ---------------------------------------------------------------------------
 
 export interface CallOptions {
@@ -50,9 +54,16 @@ export interface LLMClient {
   capabilities(): LLMClientCapabilities;
 }
 
-interface BaseClientConfig {
-  readonly model?: string;
-  readonly tier?: ModelTier;
+export interface LLMClientConfig {
+  /** The registry that knows how to construct a `LanguageModel` for
+   *  {@link provider}. Callers own the registry — typically populated
+   *  once at boot with built-ins + extension contributions. */
+  readonly registry: ProviderRegistry;
+  readonly provider: ProviderId;
+  /** The concrete model id. Tier resolution is a caller concern —
+   *  use `registry.resolveModelForTier(provider, tier)` to get one. */
+  readonly model: string;
+  readonly token: SecretValue | null;
   readonly baseUrl?: string;
   readonly userAgent?: string;
   readonly fetch?: typeof fetch;
@@ -63,36 +74,29 @@ interface BaseClientConfig {
   readonly now?: () => Date;
 }
 
-/**
- * Client configuration. Built-in providers have specific token
- * contracts (Ollama: `null`; rest: `SecretValue`). Extension-registered
- * providers (ADR-0025) may declare their own — the registry is
- * the source of truth at runtime.
- */
-export type LLMClientConfig = BaseClientConfig & {
-  readonly provider: ProviderId;
-  readonly token: SecretValue | null;
-};
-
 // ---------------------------------------------------------------------------
-// Factory (unchanged signature — lazy Vercel model creation)
+// Factory — synchronous by design; Vercel model is created lazily on
+// the first `complete()` call so construction never does I/O.
 // ---------------------------------------------------------------------------
 
 export const createLLMClient = (config: LLMClientConfig): LLMClient => {
-  const tier = config.tier ?? "balanced";
-  const resolvedModel = config.model ?? resolveModelForTier(config.provider, tier);
+  const def = config.registry.get(config.provider);
+  if (!def) {
+    throw new Error(
+      `createLLMClient: provider "${config.provider}" is not registered on the supplied registry`,
+    );
+  }
 
-  // Vercel model is created lazily on first complete() call to keep
-  // createLLMClient synchronous (preserves call-site compatibility).
   let adapterPromise: Promise<LLMAdapter> | null = null;
 
   const getAdapter = (): Promise<LLMAdapter> => {
-    adapterPromise ??= createVercelModel({
-      provider: config.provider,
-      model: resolvedModel,
-      token: config.provider === "ollama" ? null : config.token,
-      ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
-    }).then((vercelModel) => new VercelAdapter(config.provider, resolvedModel, vercelModel));
+    adapterPromise ??= def
+      .create({
+        token: config.token,
+        model: config.model,
+        ...(config.baseUrl !== undefined ? { baseUrl: config.baseUrl } : {}),
+      })
+      .then((vercelModel) => new VercelAdapter(config.provider, config.model, vercelModel));
     return adapterPromise;
   };
 

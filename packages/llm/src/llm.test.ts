@@ -23,7 +23,22 @@ import {
   LLMInternalError,
 } from "./errors.js";
 import type { LLMRequest } from "./types.js";
-import { resolveModelForTier, MODEL_TIER_TABLE } from "./tiers.js";
+import { ProviderRegistry } from "./providers.js";
+import type { ProviderDefinition } from "./providers.js";
+
+// Minimal test fixture — the llm package ships no built-ins.
+const buildTestRegistry = (): ProviderRegistry => {
+  const r = new ProviderRegistry();
+  const fakeProvider: ProviderDefinition = {
+    id: "gemini",
+    displayName: "Gemini (test)",
+    envKeyName: "GEMINI_API_KEY",
+    tiers: { fast: "gemini-2.5-flash", balanced: "gemini-2.5-pro", deep: "gemini-2.5-pro" },
+    create: () => Promise.resolve({} as never),
+  };
+  r.register(fakeProvider);
+  return r;
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -566,15 +581,16 @@ describe("VercelAdapter error mapping", () => {
 // Model tier resolution
 // ---------------------------------------------------------------------------
 
-describe("Model tier resolution", () => {
-  it("resolves fast/balanced/deep for all providers", () => {
-    for (const provider of ["gemini", "anthropic", "openai", "ollama"] as const) {
-      for (const tier of ["fast", "balanced", "deep"] as const) {
-        const model = resolveModelForTier(provider, tier);
-        expect(model).toBeTruthy();
-        expect(model).toBe(MODEL_TIER_TABLE[provider][tier]);
-      }
-    }
+describe("ProviderRegistry tier resolution", () => {
+  it("returns the registered model for known provider+tier", () => {
+    const r = buildTestRegistry();
+    expect(r.resolveModelForTier("gemini", "balanced")).toBe("gemini-2.5-pro");
+    expect(r.resolveModelForTier("gemini", "fast")).toBe("gemini-2.5-flash");
+  });
+
+  it("returns undefined for unregistered providers", () => {
+    const r = buildTestRegistry();
+    expect(r.resolveModelForTier("unknown", "balanced")).toBeUndefined();
   });
 });
 
@@ -585,6 +601,7 @@ describe("Model tier resolution", () => {
 describe("createLLMClient", () => {
   it("capabilities report streaming/tools/json as true (Vercel SDK)", () => {
     const client = createLLMClient({
+      registry: buildTestRegistry(),
       provider: "gemini",
       token: makeSecretValue("fake-key"),
       model: "test-model",
