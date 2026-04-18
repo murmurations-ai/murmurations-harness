@@ -11,6 +11,7 @@ import type {
   ToolDefinition,
   ExtensionEntry,
   ExtensionManifest,
+  ExtensionProviderDefinition,
   LoadedExtension,
   MurmurationPluginApi,
 } from "./types.js";
@@ -18,6 +19,21 @@ import type {
 // ---------------------------------------------------------------------------
 // Loader
 // ---------------------------------------------------------------------------
+
+export interface LoadExtensionsOptions {
+  /**
+   * Invoked when an extension calls `api.registerProvider(def)`
+   * (ADR-0025). The daemon boot path wires this to
+   * `ProviderRegistry.register` in `@murmurations-ai/llm`, which
+   * validates the shape at registration time. When this option is
+   * omitted, extensions that try to register providers see a missing
+   * `api.registerProvider` and should log or skip gracefully.
+   */
+  readonly onRegisterProvider?: (
+    definition: ExtensionProviderDefinition,
+    extensionId: string,
+  ) => void;
+}
 
 /**
  * Scan an extensions directory, load manifests, check env vars,
@@ -28,6 +44,7 @@ import type {
 export async function loadExtensions(
   extensionsDir: string,
   rootDir: string,
+  options: LoadExtensionsOptions = {},
 ): Promise<readonly LoadedExtension[]> {
   const loaded: LoadedExtension[] = [];
 
@@ -91,10 +108,17 @@ export async function loadExtensions(
       const extensionEntry = mod.default;
       if (!extensionEntry?.register) continue;
 
-      // Register tools via the plugin API
+      // Register tools and (optionally) providers via the plugin API
       const tools: ToolDefinition[] = [];
       const api: MurmurationPluginApi = {
         registerTool: (tool) => tools.push(tool),
+        ...(options.onRegisterProvider !== undefined
+          ? {
+              registerProvider: (def: ExtensionProviderDefinition): void => {
+                options.onRegisterProvider!(def, manifest.id);
+              },
+            }
+          : {}),
         getSecret: (key) => process.env[key],
         rootDir,
       };

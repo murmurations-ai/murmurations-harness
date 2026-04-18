@@ -36,9 +36,11 @@ export { DEFAULT_RETRY_POLICY } from "./retry.js";
 // Provider registry (ADR-0025)
 export {
   BUILT_IN_PROVIDERS,
+  InvalidProviderDefinitionError,
   ProviderRegistry,
   createDefaultRegistry,
   defaultRegistry,
+  validateProviderDefinition,
 } from "./providers.js";
 export type { ProviderCreateOptions, ProviderDefinition } from "./providers.js";
 

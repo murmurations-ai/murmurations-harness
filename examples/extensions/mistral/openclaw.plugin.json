@@ -1,0 +1,7 @@
+{
+  "id": "mistral-provider",
+  "providerAuthEnvVars": {
+    "mistral": ["MISTRAL_API_KEY"]
+  },
+  "contracts": {}
+}

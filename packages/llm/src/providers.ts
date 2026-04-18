@@ -208,3 +208,95 @@ export const defaultRegistry = (): ProviderRegistry => {
   DEFAULT_REGISTRY ??= createDefaultRegistry();
   return DEFAULT_REGISTRY;
 };
+
+// ---------------------------------------------------------------------------
+// Validation — used by the daemon boot path when accepting
+// extension-contributed provider definitions (ADR-0025 §3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown when an extension's provider registration fails validation.
+ * Fields are populated from the offending definition where possible.
+ */
+export class InvalidProviderDefinitionError extends Error {
+  public constructor(
+    message: string,
+    public readonly extensionId: string,
+    public readonly offending: unknown,
+  ) {
+    super(`[${extensionId}] ${message}`);
+    this.name = "InvalidProviderDefinitionError";
+  }
+}
+
+/**
+ * Runtime validation for an `unknown` payload contributed by an
+ * extension. Returns a typed `ProviderDefinition` or throws
+ * {@link InvalidProviderDefinitionError} with a precise reason.
+ *
+ * The contract is enforced at the boundary so extensions written in
+ * plain JavaScript can't corrupt the registry with malformed entries.
+ */
+export const validateProviderDefinition = (
+  def: unknown,
+  extensionId: string,
+): ProviderDefinition => {
+  if (!def || typeof def !== "object") {
+    throw new InvalidProviderDefinitionError(
+      "provider definition must be an object",
+      extensionId,
+      def,
+    );
+  }
+  const rec = def as {
+    id?: unknown;
+    displayName?: unknown;
+    envKeyName?: unknown;
+    create?: unknown;
+    tiers?: unknown;
+  };
+
+  if (typeof rec.id !== "string" || rec.id.length === 0) {
+    throw new InvalidProviderDefinitionError("`id` must be a non-empty string", extensionId, def);
+  }
+  if (typeof rec.displayName !== "string" || rec.displayName.length === 0) {
+    throw new InvalidProviderDefinitionError(
+      "`displayName` must be a non-empty string",
+      extensionId,
+      def,
+    );
+  }
+  if (rec.envKeyName !== null && typeof rec.envKeyName !== "string") {
+    throw new InvalidProviderDefinitionError(
+      "`envKeyName` must be a string or null",
+      extensionId,
+      def,
+    );
+  }
+  if (typeof rec.create !== "function") {
+    throw new InvalidProviderDefinitionError("`create` must be a function", extensionId, def);
+  }
+  if (rec.tiers !== undefined) {
+    const tiers = rec.tiers;
+    if (!tiers || typeof tiers !== "object") {
+      throw new InvalidProviderDefinitionError(
+        "`tiers` must be an object when present",
+        extensionId,
+        def,
+      );
+    }
+    const tierRec = tiers as { fast?: unknown; balanced?: unknown; deep?: unknown };
+    for (const key of ["fast", "balanced", "deep"] as const) {
+      const v = tierRec[key];
+      if (typeof v !== "string" || v.length === 0) {
+        throw new InvalidProviderDefinitionError(
+          `\`tiers.${key}\` must be a non-empty string when tiers are declared`,
+          extensionId,
+          def,
+        );
+      }
+    }
+  }
+
+  return def as ProviderDefinition;
+};

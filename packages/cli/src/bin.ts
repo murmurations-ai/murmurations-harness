@@ -266,6 +266,7 @@ Usage:
   murmuration directive --list          Show all directives and responses
   murmuration group-wake [options]     Convene a group meeting (on demand)
   murmuration backlog [options]         View/refresh a group's GitHub work queue
+  murmuration providers list [--json]   List registered LLM providers
   murmuration status [--root|--name]     Show daemon status and agent summary
   murmuration stop [--root|--name]      Stop the running daemon gracefully
   murmuration restart [--root|--name]   Stop and restart (picks up new code)
@@ -467,6 +468,11 @@ const main = async (): Promise<void> => {
     }
     case "directive": {
       await runDirective(argv.slice(1), resolveRoot(argv.slice(1)));
+      break;
+    }
+    case "providers": {
+      const { runProviders } = await import("./providers-cmd.js");
+      await runProviders(argv.slice(1));
       break;
     }
     case "register": {

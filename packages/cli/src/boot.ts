@@ -760,12 +760,38 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   }
 
   // -------------------------------------------------------------------
-  // Extension loading (ADR-0023)
+  // Provider registry (ADR-0025) — built-ins pre-registered; extensions
+  // contribute more via their `registerProviders(api)` hook below.
+  // -------------------------------------------------------------------
+
+  const { createDefaultRegistry, validateProviderDefinition } =
+    await import("@murmurations-ai/llm");
+  const providerRegistry = createDefaultRegistry();
+
+  // -------------------------------------------------------------------
+  // Extension loading (ADR-0023 + ADR-0025 Phase 2)
   // -------------------------------------------------------------------
 
   const { loadExtensions } = await import("@murmurations-ai/core");
   const extensionsDir = join(exampleRoot, "extensions");
-  const loadedExtensions = await loadExtensions(extensionsDir, exampleRoot);
+  const loadedExtensions = await loadExtensions(extensionsDir, exampleRoot, {
+    onRegisterProvider: (definition, extensionId) => {
+      try {
+        const def = validateProviderDefinition(definition, extensionId);
+        providerRegistry.register(def);
+        logger.info("daemon.providers.registered", {
+          extensionId,
+          providerId: def.id,
+          displayName: def.displayName,
+        });
+      } catch (err) {
+        logger.warn("daemon.providers.invalid", {
+          extensionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  });
   if (loadedExtensions.length > 0) {
     const toolCount = loadedExtensions.reduce((n, ext) => n + ext.tools.length, 0);
     logger.info("daemon.extensions.loaded", {
@@ -774,6 +800,12 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       ids: loadedExtensions.map((e) => e.id),
     });
   }
+
+  // Log the resolved provider roster — operator can see at a glance
+  // which providers are available for `llm.provider` config fields.
+  logger.info("daemon.providers.roster", {
+    providers: providerRegistry.list().map((p) => p.id),
+  });
 
   // Collect all extension tools into a flat array for the runner
   const extensionTools = loadedExtensions.flatMap((ext) => ext.tools);
