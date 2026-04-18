@@ -3,6 +3,33 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.1] - 2026-04-17
+
+### Added
+
+- **Pluggable LLM provider registry** (ADR-0025, Phases 1-3) — `ProviderRegistry` class in `@murmurations-ai/llm` accepts arbitrary `ProviderDefinition` objects. Any Vercel-AI-SDK-compatible provider can be registered — Mistral, Groq, Bedrock, Vertex AI, xAI, Perplexity, DeepSeek, Cerebras, etc. — without forking the harness.
+- **Extension hook for provider registration** — extensions gain `api.registerProvider(def)` (ADR-0023 integration). The daemon validates each contributed definition via `validateProviderDefinition` and logs `daemon.providers.registered` / `daemon.providers.invalid` / `daemon.providers.roster`.
+- **`murmuration providers list`** CLI command — shows registered provider id, display name, env-key convention, and tier defaults (text + `--json`).
+- **Worked Mistral example** at `examples/extensions/mistral/` — copy-paste reference for adding any provider as an extension.
+- **ADR-0025** accepted (Phases 1-3 shipped; Phase 4 converts the four built-ins to standalone `@murmurations-ai/provider-*` packages).
+
+### Changed
+
+- **`@murmurations-ai/llm` now carries zero hardcoded vendor knowledge.** The four built-in provider declarations (Gemini, Anthropic, OpenAI, Ollama) moved to `packages/cli/src/builtin-providers/`. The llm package exposes only `ProviderRegistry`, `ProviderDefinition`, `validateProviderDefinition`, and `createLLMClient`.
+- **`createLLMClient` requires explicit `{ registry, provider, model, token }`.** Tier-based model fallback is a caller concern (use `registry.resolveModelForTier(provider, tier)`).
+- **Boot ordering** — daemon boot constructs the provider registry once, threads it into `buildSecretDeclaration` + `buildAgentClients` + extension loading. No singletons, no module-scope side effects.
+- **`ProviderId = string`** — was a closed 4-union; now any registered id is valid. `KnownProviderId` and `KNOWN_PROVIDERS` removed.
+
+### Removed
+
+- **Legacy shims:** `packages/llm/src/tiers.ts` (`MODEL_TIER_TABLE`, `resolveModelForTier`, `lookupTierTable`), `packages/llm/src/adapters/provider-registry.ts` (`createVercelModel`, `providerEnvKeyName`).
+- **Singletons:** `defaultRegistry()`, `seedDefaultRegistry()`, the process-wide `DEFAULT_REGISTRY`.
+- **`@ai-sdk/anthropic`, `@ai-sdk/google`, `@ai-sdk/openai`** deps from `@murmurations-ai/llm/package.json` — those now live in the CLI package (where the built-ins live). Net: llm's install footprint shrinks.
+
+### Security
+
+- `validateProviderDefinition` enforces shape at the extension boundary — malformed contributions surface as `InvalidProviderDefinitionError` with the offending extension id, not silent corruption.
+
 ## [0.4.0] - 2026-04-17
 
 ### Added
