@@ -27,18 +27,26 @@ When the user invokes this skill, act as an interactive interview loop. Ask the 
 
 Once the interview is complete, inform the user that you are synthesizing their answers into the foundational governance documents.
 
-Use the `write` tool to generate the following file structure (relative to the current workspace, typically the root of the murmuration repo):
+Use the `write` tool to generate the following exact file structure (relative to the current workspace), which complies with the v0.1 Murmuration Harness specification (ADR 0026):
 
-*   `governance/SOURCE-VISION.md` (Synthesized from the Vision answers)
-*   `governance/circles/CIRCLE-DOMAINS.md` (Or individual files for each circle, synthesized from the Circles answers)
-*   `governance/agents/AGENT-ROSTER.md` (Synthesized from the Agents answers)
-*   `governance/soul.md` or `governance/AGENT-SOUL.md` (Synthesized from the Soul answers)
-*   `governance/SOURCE-DOMAIN-STATEMENT.md` (Synthesized from the Domain answers)
+*   **`murmuration/soul.md`**: Synthesize the Vision, Soul, and Domain answers into this single, unified constitutional document. Write the Soul sections in the first-person plural ("We believe...").
+*   **`governance/circles/`**: Create individual Markdown files for each circle defined by the user.
+*   **`agents/`**: For each agent identified, create a dedicated folder (e.g., `agents/[slug]/`). Inside each folder, generate:
+    *   **`agents/[slug]/soul.md`**: The agent's specific character, voice, and bright lines.
+    *   **`agents/[slug]/role.md`**: The agent's accountabilities, relationships, and schedule. 
+    **CRITICAL:** You must include the following YAML frontmatter at the top of every `role.md` file:
+    ```yaml
+    ---
+    agent_id: "[slug]"
+    name: "[Agent's full name]"
+    model_tier: "balanced"
+    soul_file: "agents/[slug]/soul.md"
+    ---
+    ```
 
 **Formatting Guidelines for Generated Files:**
 *   Use clear Markdown with headers, bullet points, and bold text.
-*   Write `AGENT-SOUL.md` in the first-person plural ("We believe...").
-*   Ensure the directory structure exactly matches: `governance/`, `governance/agents/`, `governance/circles/`. (Create the directories implicitly by providing the full path to the `write` tool).
+*   Ensure the directory structure exactly matches the v0.1 Harness specification (`murmuration/`, `agents/`, `governance/circles/`). DO NOT generate legacy files like `SOURCE-VISION.md` or `AGENT-ROSTER.md`.
 
 ## Rules
 *   **NEVER ask multiple questions at once.**
