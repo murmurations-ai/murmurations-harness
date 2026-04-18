@@ -11,9 +11,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   BUILT_IN_PROVIDERS,
+  InvalidProviderDefinitionError,
   ProviderRegistry,
   createDefaultRegistry,
   defaultRegistry,
+  validateProviderDefinition,
 } from "./providers.js";
 import { KNOWN_PROVIDERS } from "./types.js";
 import { providerEnvKeyName } from "./adapters/provider-registry.js";
@@ -134,6 +136,69 @@ describe("Default (singleton) registry", () => {
 
   it("is pre-populated with built-ins", () => {
     expect(defaultRegistry().has("anthropic")).toBe(true);
+  });
+});
+
+describe("validateProviderDefinition", () => {
+  const validDef = {
+    id: "mistral",
+    displayName: "Mistral",
+    envKeyName: "MISTRAL_API_KEY",
+    tiers: { fast: "mistral-small", balanced: "mistral-large", deep: "mistral-large" },
+    create: () => Promise.resolve({} as never),
+  };
+
+  it("accepts a well-formed definition", () => {
+    expect(() => validateProviderDefinition(validDef, "ext")).not.toThrow();
+  });
+
+  it("accepts null envKeyName (keyless)", () => {
+    const keyless = { ...validDef, id: "local", envKeyName: null };
+    expect(() => validateProviderDefinition(keyless, "ext")).not.toThrow();
+  });
+
+  it("accepts omitted tiers", () => {
+    const { tiers: _tiers, ...noTiers } = validDef;
+    expect(() => validateProviderDefinition(noTiers, "ext")).not.toThrow();
+  });
+
+  it("rejects non-object input", () => {
+    expect(() => validateProviderDefinition("string", "ext")).toThrow(
+      InvalidProviderDefinitionError,
+    );
+    expect(() => validateProviderDefinition(null, "ext")).toThrow(InvalidProviderDefinitionError);
+  });
+
+  it("rejects empty id", () => {
+    expect(() => validateProviderDefinition({ ...validDef, id: "" }, "ext")).toThrow(/id/);
+  });
+
+  it("rejects non-function create", () => {
+    expect(() => validateProviderDefinition({ ...validDef, create: "nope" }, "ext")).toThrow(
+      /create/,
+    );
+  });
+
+  it("rejects wrong-typed envKeyName", () => {
+    expect(() => validateProviderDefinition({ ...validDef, envKeyName: 42 }, "ext")).toThrow(
+      /envKeyName/,
+    );
+  });
+
+  it("rejects malformed tiers (missing tier)", () => {
+    expect(() =>
+      validateProviderDefinition({ ...validDef, tiers: { fast: "a", balanced: "b" } }, "ext"),
+    ).toThrow(/deep/);
+  });
+
+  it("reports the extensionId in the error message", () => {
+    try {
+      validateProviderDefinition({}, "mistral-ext");
+      expect.fail("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(InvalidProviderDefinitionError);
+      expect((err as Error).message).toMatch(/\[mistral-ext\]/);
+    }
   });
 });
 

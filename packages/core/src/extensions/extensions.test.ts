@@ -168,4 +168,52 @@ describe("loadExtensions", () => {
     const result = await loadExtensions(extDir, rootDir);
     expect(result).toEqual([]);
   });
+
+  it("forwards api.registerProvider to onRegisterProvider option (ADR-0025)", async () => {
+    await writeExtension(
+      "provider-ext",
+      { id: "provider-ext" },
+      `export default {
+        id: "provider-ext",
+        name: "Provider Ext",
+        description: "registers a provider",
+        register(api) {
+          api.registerProvider?.({
+            id: "fake",
+            displayName: "Fake",
+            envKeyName: "FAKE_KEY",
+            create: () => Promise.resolve({}),
+          });
+        },
+      };`,
+    );
+
+    const captured: { def: unknown; extensionId: string }[] = [];
+    await loadExtensions(extDir, rootDir, {
+      onRegisterProvider: (def, extensionId) => captured.push({ def, extensionId }),
+    });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.extensionId).toBe("provider-ext");
+    expect((captured[0]?.def as { id: string }).id).toBe("fake");
+  });
+
+  it("omits api.registerProvider when no onRegisterProvider is given", async () => {
+    await writeExtension(
+      "no-hook-ext",
+      { id: "no-hook-ext" },
+      `export default {
+        id: "no-hook-ext",
+        name: "No Hook Ext",
+        description: "",
+        register(api) {
+          globalThis.__registerProviderAvailable = typeof api.registerProvider === "function";
+        },
+      };`,
+    );
+
+    await loadExtensions(extDir, rootDir);
+    // @ts-expect-error — global test value
+    expect(globalThis.__registerProviderAvailable).toBe(false);
+  });
 });
