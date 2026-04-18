@@ -221,6 +221,20 @@ const toolsSchema = z
   })
   .default({ mcp: [], cli: [] });
 
+/** Plugin declarations — ADR-0023 extensions the agent wants to pull from.
+ *  Today these are loaded daemon-wide; this field is declarative so each
+ *  agent's plugin dependencies are visible in its role.md. Per-agent
+ *  plugin gating is a future enhancement. */
+const pluginsSchema = z
+  .array(
+    z
+      .object({
+        provider: z.string().min(1),
+      })
+      .strict(),
+  )
+  .default([]);
+
 /** Shape expected from `role.md` YAML frontmatter. Spec §5.3 + ADR-0016. */
 export const roleFrontmatterSchema = z.object({
   agent_id: z.string().min(1),
@@ -241,8 +255,13 @@ export const roleFrontmatterSchema = z.object({
   budget: budgetSchema,
   secrets: secretsSchema,
 
-  // ADR-0020 Phase 3: tool declarations
+  // ADR-0020 Phase 3: tool declarations (per-agent MCP + CLI)
   tools: toolsSchema,
+
+  // ADR-0023: plugin declarations — which OpenClaw-compatible plugins
+  // the agent relies on. Declarative today (plugins load daemon-wide);
+  // per-agent gating is a future enhancement.
+  plugins: pluginsSchema,
 });
 
 /** Parsed, validated shape of a `role.md` frontmatter block. */

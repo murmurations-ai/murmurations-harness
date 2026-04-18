@@ -462,6 +462,50 @@ describe("roleFrontmatterSchema (ADR-0016 extensions)", () => {
     expect(loaded.frontmatter.tools.mcp[1]?.env).toEqual({ GITHUB_TOKEN: "$GITHUB_TOKEN" });
     expect(loaded.frontmatter.tools.cli).toEqual(["gh", "gcloud"]);
   });
+
+  it("plugins defaults to empty when omitted (backwards compat)", async () => {
+    await writeMinimalFixture(
+      "no-plugins",
+      ['agent_id: "no-plugins"', 'name: "No Plugins"', "model_tier: fast"].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    const loaded = await loader.load("no-plugins");
+    expect(loaded.frontmatter.plugins).toEqual([]);
+  });
+
+  it("parses plugin declarations from role.md frontmatter (ADR-0023)", async () => {
+    await writeMinimalFixture(
+      "with-plugins",
+      [
+        'agent_id: "with-plugins"',
+        'name: "Plugin Agent"',
+        "model_tier: balanced",
+        "plugins:",
+        '  - provider: "@murmurations-ai/web-search"',
+        '  - provider: "custom-plugin"',
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    const loaded = await loader.load("with-plugins");
+    expect(loaded.frontmatter.plugins).toHaveLength(2);
+    expect(loaded.frontmatter.plugins[0]?.provider).toBe("@murmurations-ai/web-search");
+    expect(loaded.frontmatter.plugins[1]?.provider).toBe("custom-plugin");
+  });
+
+  it("rejects malformed plugin entries (empty provider)", async () => {
+    await writeMinimalFixture(
+      "bad-plugins",
+      [
+        'agent_id: "bad-plugins"',
+        'name: "Bad"',
+        "model_tier: fast",
+        "plugins:",
+        '  - provider: ""',
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    await expect(loader.load("bad-plugins")).rejects.toThrow(FrontmatterInvalidError);
+  });
 });
 
 // ---------------------------------------------------------------------------

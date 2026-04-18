@@ -77,6 +77,7 @@ const makeRegisteredAgent = (id: string, groups: string[] = []): RegisteredAgent
     budget: { maxCostMicros: 100000, maxGithubApiCalls: 10, onBreach: "warn" as const },
     secrets: { required: [], optional: [] },
     tools: { mcp: [], cli: [] },
+    plugins: [],
   };
 };
 
