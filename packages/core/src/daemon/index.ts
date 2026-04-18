@@ -179,6 +179,16 @@ export interface RegisteredAgent {
     }[];
     readonly cli: readonly string[];
   };
+
+  /**
+   * OpenClaw-compatible plugins the agent declares as dependencies
+   * (ADR-0023). Today this is declarative — plugins load daemon-wide
+   * and all agents see every plugin-contributed tool. Future per-agent
+   * gating will consult this field to filter what each agent sees.
+   */
+  readonly plugins: readonly {
+    readonly provider: string;
+  }[];
 }
 
 /**
@@ -259,6 +269,8 @@ export const registeredAgentFromLoadedIdentity = (
     cli: frontmatter.tools.cli,
   };
 
+  const plugins = frontmatter.plugins.map((p) => ({ provider: p.provider }));
+
   return {
     agentId: chain.agentId.value,
     displayName: frontmatter.name,
@@ -274,6 +286,7 @@ export const registeredAgentFromLoadedIdentity = (
     budget,
     secrets,
     tools,
+    plugins,
   };
 };
 

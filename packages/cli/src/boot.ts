@@ -828,8 +828,37 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     providers: providerRegistry.list().map((p) => p.id),
   });
 
-  // Collect all extension tools into a flat array for the runner
+  // Collect all extension tools into a flat array — used by group
+  // meetings (where any member may invoke any plugin) and as the
+  // fallback for agents whose role.md declares no `plugins:`.
   const extensionTools = loadedExtensions.flatMap((ext) => ext.tools);
+
+  /**
+   * Filter the loaded extensions by an agent's declared `plugins:`
+   * (ADR-0023). Returns a flat tool array ready to hand to the runner.
+   *
+   * Matching rule: an agent's `provider` string matches an extension
+   * id directly (e.g. `"web-search"`) OR via its last path segment
+   * (e.g. `"@murmurations-ai/web-search"` → `"web-search"`). This lets
+   * role.md declarations use either the bare plugin id or the
+   * scoped-npm-style form.
+   *
+   * Backward compat: when `agent.plugins` is empty, return all loaded
+   * extension tools (matches pre-gating behavior).
+   */
+  const selectExtensionToolsFor = (
+    agent: RegisteredAgent,
+  ): readonly (typeof extensionTools)[number][] => {
+    if (agent.plugins.length === 0) return extensionTools;
+    const declared = new Set<string>();
+    for (const p of agent.plugins) {
+      declared.add(p.provider);
+      const parts = p.provider.split("/");
+      const last = parts[parts.length - 1];
+      if (last !== undefined && parts.length > 1) declared.add(last);
+    }
+    return loadedExtensions.filter((ext) => declared.has(ext.id)).flatMap((ext) => ext.tools);
+  };
 
   // -------------------------------------------------------------------
   // Per-agent composition (Phase 2D3)
@@ -973,12 +1002,15 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               }
               return candidate as AgentRunner<InProcessRunnerClients>;
             } catch {
-              // No custom runner — use the built-in default runner
+              // No custom runner — use the built-in default runner.
+              // Per-agent plugin gating: filter extension tools by the
+              // agent's declared plugins (role.md `plugins:`).
               const { createDefaultRunner } = await import("@murmurations-ai/core");
+              const agentTools = selectExtensionToolsFor(capturedAgent);
               return createDefaultRunner(
                 capturedAgentDir,
                 [],
-                extensionTools.length > 0 ? { extensionTools } : {},
+                agentTools.length > 0 ? { extensionTools: agentTools } : {},
                 exampleRoot,
               ) as unknown as AgentRunner<InProcessRunnerClients>;
             }
