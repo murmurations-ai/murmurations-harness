@@ -53,15 +53,22 @@ If they choose GitHub, walk them through this process one step at a time. Wait f
 
 ### Step 2. Configure harness.yaml
 
-Instruct the operator to open `murmuration/harness.yaml` and ensure it has:
+Instruct the operator to open `murmuration/harness.yaml` and configure the collaboration provider:
 
 ```yaml
 collaboration:
   provider: "github"
   repo: "my-org/my-murmuration" # Replace with their actual repo
+```
 
-mcp:
-  servers:
+### Step 3. Give Agents the GitHub MCP Tools
+
+For agents to interact with GitHub issues natively, they need the GitHub MCP server mapped into their `role.md` configuration.
+Instruct the operator to edit `murmuration/default-agent/role.md` (or specific agents' `role.md` files) and add the `mcp` block under `tools`:
+
+```yaml
+tools:
+  mcp:
     - name: github
       command: npx
       args: ["-y", "@modelcontextprotocol/server-github"]
@@ -69,13 +76,13 @@ mcp:
         GITHUB_TOKEN: "$GITHUB_TOKEN"
 ```
 
-### Step 3. Generate a GitHub Token
+### Step 4. Generate a GitHub Token
 
 - **Classic Token (Recommended for simplicity):** Go to GitHub Developer Settings -> Personal access tokens -> Tokens (classic). Generate a new token with the `repo` scope selected.
 - **Fine-grained Token:** Ensure it has Read/Write access to Issues, Pull Requests, and Metadata for the specific repository.
 - Copy the generated token immediately.
 
-### Step 4. Set the Token in .env
+### Step 5. Set the Token in .env
 
 - In the root of their murmuration workspace, create a file named `.env`.
 - Add the token:
@@ -83,8 +90,8 @@ mcp:
   GITHUB_TOKEN=ghp_... (paste the token here)
   ```
 
-### Step 5. Verify and Start
+### Step 6. Verify and Start
 
-- Confirm that the `.env` file is excluded from source control (the `murmuration init` command creates a `.gitignore` that handles this, but it's good to verify).
+- Confirm that the `.env` file is excluded from source control.
 - Run `murmuration start`.
-- The agents will now be able to use the `github` tools securely via MCP.
+- The agents will now be able to use the `github` tools securely via MCP to read/write to the GitHub issues for governance.
