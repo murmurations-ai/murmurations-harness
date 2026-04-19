@@ -7,11 +7,30 @@ description: How to guide the operator through setting up GitHub and the MCP tok
 
 When the operator wants to set up GitHub for their murmuration, guide them through this step-by-step process. Walk them through it iteratively rather than dumping the whole process at once. Wait for them to confirm completion of a step before moving to the next.
 
+## Advising on Architecture Choices
+
+Before starting the setup, ensure the operator understands the tradeoffs they are making:
+
+### Local vs. GitHub Governance
+
+- **Local Governance (`collaboration: local`)**:
+  - _Pros_: Completely private, works offline, zero external dependencies, fastest execution, no API limits.
+  - _Cons_: Single-player only, hard to audit over time, no native issue tracking or discussion threads, lacks the async handoff benefits of a shared platform.
+- **GitHub Governance (`collaboration: github`)**:
+  - _Pros_: System of record is external and highly durable, native support for async threads (Issues/PRs), multi-operator/multi-agent transparent, easy to audit agent decisions.
+  - _Cons_: Requires network access, API tokens, potential rate limits, requires secure secret management.
+
+### Private vs. Public Repositories
+
+- **CRITICAL: Always recommend a Private repository by default.**
+- _Why?_ The governance repository holds agent `role.md` files, internal discussions, and potentially sensitive organizational state. Unless the murmuration is explicitly building an open-source project in public (like Emergent Praxis), public exposure is a severe security and privacy risk.
+- _Action:_ Explicitly ask the operator to verify the repo is set to Private before pushing any local state or creating tokens.
+
 ## 1. Create the Murmuration Repository
 
 First, the operator needs a GitHub repository to hold the murmuration's state.
 
-- Create a new repository on GitHub (e.g., `my-org/my-murmuration`). A private repository is strongly recommended since it will hold internal governance and agent roles.
+- Create a new repository on GitHub (e.g., `my-org/my-murmuration`). Remind them to make it **Private**.
 - Clone the repository locally, or if starting from scratch locally:
   ```bash
   mkdir my-murmuration
