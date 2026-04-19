@@ -1,6 +1,6 @@
 # ADR-0023 — Extension system compatible with OpenClaw plugins
 
-- **Status:** Proposed
+- **Status:** Accepted (shipped v0.3.x–v0.4.x)
 - **Date:** 2026-04-17
 - **Decision-maker(s):** Source (design), Engineering Circle
 - **Related:** ADR-0020 (Vercel AI SDK), ADR-0021 (CollaborationProvider), OpenClaw plugin SDK

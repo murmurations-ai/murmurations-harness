@@ -543,7 +543,7 @@ export interface BootDaemonOptions {
  * identically to the Phase 1A entry point.
  */
 export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void> => {
-  const exampleRoot = options.rootDir ? resolve(options.rootDir) : resolveHelloWorldRoot();
+  const exampleRoot = options.rootDir ? resolve(options.rootDir) : process.cwd();
   const dryRun = options.dryRun === true;
   const once = options.once === true;
 
@@ -1584,19 +1584,6 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       event: "daemon.exit",
     })}\n`,
   );
-};
-
-/**
- * Resolve the absolute path to `<repo-root>/examples/hello-world-agent/`,
- * used as the default identity root when no `--root` is provided. The
- * relative walk assumes this file lives at
- * `packages/cli/dist/boot.js` (post-build) or `packages/cli/src/boot.ts`
- * (tsc --noEmit / test).
- */
-const resolveHelloWorldRoot = (): string => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = resolve(here, "..", "..", "..");
-  return resolve(repoRoot, "examples", "hello-world-agent");
 };
 
 /**

@@ -22,7 +22,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, writeFile, chmod, copyFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, appendFile, chmod, copyFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -65,6 +65,32 @@ const copyDefaultAgentTemplates = async (destDir: string): Promise<void> => {
     if (!existsSync(srcPath)) continue;
     await copyFile(srcPath, join(destDir, file));
   }
+};
+
+// ---------------------------------------------------------------------------
+// .gitignore preflight (#10)
+// ---------------------------------------------------------------------------
+
+/** Ensure `.gitignore` in `targetDir` lists every requested entry.
+ *  Creates the file when absent; appends only missing lines when
+ *  present. Never overwrites — preserves whatever rules the operator
+ *  has already curated for the target repo. Matching is exact (per
+ *  line, trimmed) so near-misses like `.env*` do NOT satisfy `.env`. */
+const ensureGitignoreCovers = async (
+  targetDir: string,
+  entries: readonly string[],
+): Promise<void> => {
+  const path = join(targetDir, ".gitignore");
+  if (!existsSync(path)) {
+    await writeFile(path, entries.join("\n") + "\n", "utf8");
+    return;
+  }
+  const current = await readFile(path, "utf8");
+  const existingLines = new Set(current.split("\n").map((l) => l.trim()));
+  const toAdd = entries.filter((e) => !existingLines.has(e));
+  if (toAdd.length === 0) return;
+  const prefix = current.endsWith("\n") ? "" : "\n";
+  await appendFile(path, `${prefix}${toAdd.join("\n")}\n`, "utf8");
 };
 
 // ---------------------------------------------------------------------------
@@ -370,6 +396,12 @@ ${members.map((m) => `- ${m}`).join("\n")}
     );
   }
 
+  // .gitignore — preflight BEFORE writing .env so secrets are never
+  // uncovered on disk even for a moment. If a .gitignore already
+  // exists (e.g. running init against an existing repo), append
+  // only the missing entries instead of overwriting.
+  await ensureGitignoreCovers(targetDir, [".env", ".murmuration/"]);
+
   // .env
   const envLines: string[] = [];
   for (const secret of secretNames) {
@@ -384,9 +416,6 @@ ${members.map((m) => `- ${m}`).join("\n")}
   const envPath = join(targetDir, ".env");
   await writeFile(envPath, envContent, "utf8");
   await chmod(envPath, 0o600);
-
-  // .gitignore
-  await writeFile(join(targetDir, ".gitignore"), ".env\n.murmuration/\n", "utf8");
 
   // Register session
   const sessionName = targetDir.split("/").pop() ?? "murmuration";

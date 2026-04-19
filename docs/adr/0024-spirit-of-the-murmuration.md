@@ -1,6 +1,6 @@
 # ADR-0024 — Spirit of the Murmuration
 
-- **Status:** Proposed
+- **Status:** Accepted (Phase 1 shipped v0.4.x)
 - **Date:** 2026-04-17
 - **Decision-maker(s):** Source (design)
 - **Related:** ADR-0018 (CLI tmux interface / REPL), ADR-0019 (persistent context), ADR-0020 (Vercel AI SDK), ADR-0021 (CollaborationProvider), ADR-0022 (Langfuse self-reflection), ADR-0023 (Extension system)

@@ -1,6 +1,6 @@
 # ADR-0018 — CLI tmux-style interface and parity contract
 
-- **Status:** Proposed
+- **Status:** Accepted (shipped)
 - **Date:** 2026-04-13
 - **Decision-maker(s):** Source (design), Engineering Circle (consent pending), CLI / TUI / Web maintainers (implementation)
 - **Consulted:** Operators (current heavy users of `murmuration attach`), Daemon Runtime Agent, Dashboard Agent
