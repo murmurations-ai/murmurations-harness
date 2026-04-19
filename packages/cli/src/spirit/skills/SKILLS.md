@@ -14,5 +14,7 @@ The Spirit loads skill bodies on demand via `load_skill(name)`. This index is al
 | `governance-models`      | Discussions about governance, plugins, meetings, `governance/groups/*.md`, state graphs, decision records   |
 | `when-to-use-governance` | The operator wants to change something and isn't sure whether to act directly or delegate via governance    |
 | `setup-github`           | The operator wants to configure GitHub, set up the GITHUB_TOKEN, or enable the GitHub MCP server            |
+| `setup-products`         | The operator wants to link external workspaces, code repos, or local PKM vaults to the murmuration          |
+| `setup-llms`             | The operator needs to configure API keys, Ollama, or set up per-agent model overrides                       |
 
 When the operator asks something substantive, check whether one of these skills covers it. If yes, load it before answering. If none applies and you're unsure, say so — don't guess.
