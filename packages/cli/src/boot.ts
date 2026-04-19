@@ -543,7 +543,7 @@ export interface BootDaemonOptions {
  * identically to the Phase 1A entry point.
  */
 export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void> => {
-  const exampleRoot = options.rootDir ? resolve(options.rootDir) : resolveHelloWorldRoot();
+  const exampleRoot = options.rootDir ? resolve(options.rootDir) : process.cwd();
   const dryRun = options.dryRun === true;
   const once = options.once === true;
 
@@ -614,7 +614,22 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     );
   }
 
-  const loader = new IdentityLoader({ rootDir: exampleRoot });
+  // ADR-0027: fallback identity for incomplete agent directories.
+  // Operators can scaffold empty dirs during iteration; the loader
+  // synthesizes a generic identity with a visible daemon WARN instead
+  // of crashing boot.
+  const loader = new IdentityLoader({
+    rootDir: exampleRoot,
+    fallbackOnMissing: true,
+    onFallback: (agentDir, reason) => {
+      logger.warn("daemon.agent.fallback", {
+        agentDir,
+        reason: reason.reason,
+        missingFiles: reason.missingFiles,
+        ...(reason.detail !== undefined ? { detail: reason.detail } : {}),
+      });
+    },
+  });
 
   // -------------------------------------------------------------------
   // Agent discovery: when --agent is set, boot one; when omitted, boot
@@ -662,8 +677,11 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   }
 
   // A provisional subprocess executor is used for the first-pass daemon
-  // (which only calls loadSecrets() before being discarded). It accepts
-  // any registered agentId and spawns `<root>/agent.mjs`.
+  // (which only calls loadSecrets() before being discarded) and as the
+  // ADR-0028 opt-in escape hatch for non-LLM agents when the operator
+  // has dropped an `agent.mjs` at the murmuration root. Standard agents
+  // never trigger this path — they route through InProcessExecutor with
+  // the default runner (see the per-agent block below).
   const agentScriptPath = resolve(exampleRoot, "agent.mjs");
   const registeredIds = new Set(allRegistered.map((a) => a.agentId));
   const provisionalExecutor = new SubprocessExecutor({
@@ -1005,15 +1023,27 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     );
 
     // -------------------------------------------------------------------
-    // Per-agent executor selection
+    // Per-agent executor selection (ADR-0028)
     //
-    // LLM agents get an InProcessExecutor with per-wake client
-    // construction; non-LLM agents share the provisional subprocess
-    // executor. When multiple agents exist, DispatchExecutor routes
+    // Every agent runs through InProcessExecutor + the default runner
+    // unless the operator has dropped an `agent.mjs` at the murmuration
+    // root, in which case that opt-in subprocess escape hatch still
+    // works. Source never has to author JavaScript to stand up a
+    // standard LLM or governance-only agent.
+    //
+    // Non-LLM agents route through the default runner too: it returns
+    // a "skipped — no LLM client" wake summary so the daemon keeps
+    // running and the operator can add an `llm:` block to role.md
+    // whenever they're ready.
+    //
+    // When multiple agents exist, DispatchExecutor routes
     // spawn/waitForCompletion/kill by agentId.
     // -------------------------------------------------------------------
 
-    if (agent.llm) {
+    const useSubprocessEscapeHatch = !agent.llm && existsSync(agentScriptPath);
+    if (useSubprocessEscapeHatch) {
+      executorMap.set(agent.agentId, provisionalExecutor);
+    } else {
       // Capture the agent reference for the closure — the loop
       // variable `agent` would be stale by the time resolveRunner runs.
       const capturedAgent = agent;
@@ -1076,8 +1106,6 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
           },
         }),
       );
-    } else {
-      executorMap.set(agent.agentId, provisionalExecutor);
     }
   }
 
@@ -1556,19 +1584,6 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       event: "daemon.exit",
     })}\n`,
   );
-};
-
-/**
- * Resolve the absolute path to `<repo-root>/examples/hello-world-agent/`,
- * used as the default identity root when no `--root` is provided. The
- * relative walk assumes this file lives at
- * `packages/cli/dist/boot.js` (post-build) or `packages/cli/src/boot.ts`
- * (tsc --noEmit / test).
- */
-const resolveHelloWorldRoot = (): string => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = resolve(here, "..", "..", "..");
-  return resolve(repoRoot, "examples", "hello-world-agent");
 };
 
 /**

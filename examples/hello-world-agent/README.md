@@ -1,39 +1,42 @@
 # hello-world-agent
 
-The simplest possible agent the harness can wake. No LLM, no identity doc, no real reasoning. Phase 1A only — exists to prove the wake loop is structurally correct.
+The simplest possible murmuration the harness can wake. Pure markdown
+— no JavaScript at all. Exists to prove the wake loop is structurally
+correct with nothing but identity files.
 
-## What it does
+## What it is
 
-1. Reads `MURMURATION_WAKE_ID`, `MURMURATION_AGENT_ID`, and `MURMURATION_SPAWN_CONTEXT` from the environment
-2. Prints three `::wake-summary::` lines to stdout following the Phase 1A output protocol
-3. Exits with status 0
+- `murmuration/soul.md` — murmuration purpose
+- `agents/hello-world/soul.md` — agent character
+- `agents/hello-world/role.md` — agent frontmatter + accountabilities
+- `governance/groups/engineering.md` — group context
 
-## The Phase 1A output protocol
-
-Any line starting with `::wake-summary::` is appended to the wake summary. Any line starting with `::governance::<kind>::` is parsed as a governance event payload.
-
-```
-::wake-summary:: hello from agent hello-world, wake abc-123
-::governance::tension:: {"title": "example tension", "body": "..."}
-```
-
-The protocol is parsed by `parseChildOutput` in `packages/core/src/execution/subprocess.ts`. It is intentionally minimal and will be replaced in Phase 2 with a real structured output contract.
-
-## Run manually
-
-```bash
-MURMURATION_WAKE_ID=test MURMURATION_AGENT_ID=hello-world \
-  node examples/hello-world-agent/agent.mjs
-```
+No `agent.mjs`. No `runner.mjs`. No `llm:` block in role.md. The
+harness boots, fires the scheduled wake, and the default runner
+records a `"skipped — no LLM client"` wake summary to the run
+artifacts under `.murmuration/runs/hello-world/`. That's the proof
+that identity loading, scheduling, signal aggregation, and artifact
+capture all work end-to-end.
 
 ## Run via the harness
 
 ```bash
-# Build first
 pnpm build
-
-# Boot the daemon
-pnpm --filter @murmurations-ai/cli start
+murmuration start --root examples/hello-world-agent
 ```
 
-The daemon will fire a wake at this agent after a 2-second delay, capture the output, and log the completion.
+The daemon fires a wake after a 2-second delay, captures the skip
+summary, and stays alive until `Ctrl-C`.
+
+## Add an LLM when you're ready
+
+Edit `agents/hello-world/role.md` and drop in an `llm:` block:
+
+```yaml
+llm:
+  provider: "gemini" # or anthropic, openai, ollama, vertex, …
+  model: "gemini-2.5-flash"
+```
+
+Set the corresponding API key in `.env` and the next wake calls the
+LLM instead of skipping. Still no JavaScript required.

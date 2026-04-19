@@ -1,6 +1,6 @@
 # ADR-0019 — Persistent context agents (long-running conversation windows)
 
-- **Status:** Proposed
+- **Status:** Accepted (shipped)
 - **Date:** 2026-04-13
 - **Decision-maker(s):** Source (design), Engineering Circle (consent pending)
 - **Supersedes:** _none_

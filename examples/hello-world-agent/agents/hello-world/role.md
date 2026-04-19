@@ -2,7 +2,7 @@
 agent_id: "hello-world"
 name: "Hello World Agent"
 model_tier: fast
-circle_memberships:
+group_memberships:
   - engineering
 wake_schedule:
   delayMs: 2000

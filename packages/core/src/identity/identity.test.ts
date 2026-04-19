@@ -613,3 +613,110 @@ describe("examples/research-agent identity chain", () => {
     expect(loaded.chain.layers[3]?.kind).toBe("group-context");
   });
 });
+
+// ---------------------------------------------------------------------------
+// ADR-0027 — Fallback identity for incomplete agent directories
+// ---------------------------------------------------------------------------
+
+describe("IdentityLoader fallback (ADR-0027)", () => {
+  let rootDir = "";
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "murmuration-fallback-"));
+  });
+
+  afterEach(async () => {
+    if (rootDir) await rm(rootDir, { recursive: true, force: true });
+  });
+
+  const writeFixture = async (relativePath: string, content: string): Promise<void> => {
+    const full = join(rootDir, relativePath);
+    await mkdir(full.substring(0, full.lastIndexOf("/")), { recursive: true });
+    await writeFile(full, content, "utf8");
+  };
+
+  it("synthesizes a functional identity when role.md and soul.md are both missing", async () => {
+    await writeFixture("murmuration/soul.md", "# Murmuration\n");
+    // agents/new-agent/ directory doesn't exist at all — still should load
+    const calls: { agentDir: string; reason: string; missing: readonly string[] }[] = [];
+    const loader = new IdentityLoader({
+      rootDir,
+      fallbackOnMissing: true,
+      onFallback: (agentDir, reason) => {
+        calls.push({ agentDir, reason: reason.reason, missing: reason.missingFiles });
+      },
+    });
+    const loaded = await loader.load("new-agent");
+
+    expect(loaded.fallback).toBeDefined();
+    expect(loaded.fallback?.reason).toBe("missing-files");
+    expect(loaded.frontmatter.agent_id).toBe("new-agent");
+    expect(loaded.frontmatter.name).toContain("new-agent");
+    expect(loaded.frontmatter.model_tier).toBe("balanced");
+    expect(loaded.frontmatter.plugins).toEqual([]);
+    // onFallback was invoked exactly once for this agent
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.agentDir).toBe("new-agent");
+  });
+
+  it("synthesizes a fallback identity when role.md is present but soul.md is missing", async () => {
+    await writeFixture("murmuration/soul.md", "# Murmuration\n");
+    await writeFixture(
+      "agents/half/role.md",
+      `---
+agent_id: "half"
+name: "Half Agent"
+model_tier: fast
+---
+
+# Half Agent
+`,
+    );
+    const loader = new IdentityLoader({ rootDir, fallbackOnMissing: true });
+    const loaded = await loader.load("half");
+
+    expect(loaded.fallback).toBeDefined();
+    expect(loaded.fallback?.missingFiles).toContain("soul.md");
+  });
+
+  it("preserves the old IdentityFileMissingError when fallbackOnMissing is not set", async () => {
+    await writeFixture("murmuration/soul.md", "# Murmuration\n");
+    // no agent files at all
+    const loader = new IdentityLoader({ rootDir });
+    await expect(loader.load("ghost")).rejects.toBeInstanceOf(IdentityFileMissingError);
+  });
+
+  it("prefers operator-provided default templates over built-ins", async () => {
+    await writeFixture("murmuration/soul.md", "# Murmuration\n");
+    await writeFixture(
+      "murmuration/default-agent/soul.md",
+      "# Operator default soul for {{agent_id}}\n",
+    );
+    await writeFixture(
+      "murmuration/default-agent/role.md",
+      `---
+agent_id: "{{agent_id}}"
+name: "Operator Default ({{agent_id}})"
+model_tier: fast
+plugins: []
+---
+
+# Operator Default Role — {{agent_id}}
+
+Custom operator content.
+`,
+    );
+
+    const loader = new IdentityLoader({ rootDir, fallbackOnMissing: true });
+    const loaded = await loader.load("custom");
+
+    expect(loaded.fallback).toBeDefined();
+    expect(loaded.frontmatter.agent_id).toBe("custom");
+    expect(loaded.frontmatter.name).toBe("Operator Default (custom)");
+    expect(loaded.frontmatter.model_tier).toBe("fast");
+
+    // Agent-soul layer carries the interpolated operator soul content
+    const agentSoulLayer = loaded.chain.layers.find((l) => l.kind === "agent-soul");
+    expect(agentSoulLayer?.content).toContain("Operator default soul for custom");
+  });
+});

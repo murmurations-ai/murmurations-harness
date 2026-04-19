@@ -90,41 +90,16 @@ budget:
   on_breach: "warn" # or "abort"
 ```
 
-### Write the runner (for LLM agents)
+### That's it — no code required
 
-If your agent uses an LLM, create `agents/<name>/runner.mjs`:
+You do not need to write any code for a standard agent. The harness
+reads your `soul.md` / `role.md`, loads signals, calls the configured
+LLM, and captures the output. Governance participants, researchers,
+builders — all of them work from markdown identity alone.
 
-```js
-export default async function runWake(ctx) {
-  const { spawn, clients, signal } = ctx;
-
-  // clients.llm is your LLM client (if configured)
-  // clients.github is your GitHub client (if token + scopes configured)
-
-  if (!clients.llm) {
-    return { wakeSummary: "no LLM client — add API key to .env" };
-  }
-
-  const result = await clients.llm.complete(
-    {
-      model: "gemini-2.5-flash",
-      messages: [{ role: "user", content: "Hello from my agent!" }],
-      maxOutputTokens: 500,
-    },
-    { signal },
-  );
-
-  if (!result.ok) {
-    throw new Error(`LLM failed: ${result.error.code}`);
-  }
-
-  return {
-    wakeSummary: `Agent responded: ${result.value.content.slice(0, 200)}`,
-  };
-}
-```
-
-If your agent does NOT use an LLM, create `agent.mjs` at the murmuration root instead (subprocess mode — see the hello-world example).
+If an agent has no `llm:` block yet, the daemon still boots — the
+wake just records a "skipped — no LLM client" summary. Add an `llm:`
+block to `role.md` when you're ready and the next wake will call it.
 
 ## 4. Boot
 
