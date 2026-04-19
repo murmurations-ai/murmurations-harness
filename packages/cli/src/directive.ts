@@ -12,16 +12,97 @@
  *   murmuration directive --root ../my-murmuration --group content "Should this group hold meetings?"
  *   murmuration directive --root ../my-murmuration --all "Propose your ideal wake cadence"
  *   murmuration directive --root ../my-murmuration --list
+ *   murmuration directive --root ../my-murmuration close <id>
+ *   murmuration directive --root ../my-murmuration delete <id>   # local provider only
+ *   murmuration directive --root ../my-murmuration edit <id>     # local provider only
  */
 
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { unlink } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 import { buildCollaborationProvider, CollaborationBuildError } from "./collaboration-factory.js";
+
+const MANAGE_SUBCOMMANDS = new Set(["close", "delete", "edit"]);
+
+/** Compute the local-provider path for a directive item by id. Local
+ *  items live as YAML frontmatter markdown files under
+ *  `<rootDir>/.murmuration/items/<id>.{json,md}`. Returns the first
+ *  match or `undefined` when no file exists. */
+const localItemPath = (rootDir: string, id: string): string | undefined => {
+  const itemsDir = join(rootDir, ".murmuration", "items");
+  for (const ext of ["json", "md"] as const) {
+    const candidate = join(itemsDir, `${id}.${ext}`);
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+};
 
 export const runDirective = async (args: readonly string[], rootDir: string): Promise<void> => {
   const root = resolve(rootDir);
 
-  // Determine scope
+  // -------------------------------------------------------------------
+  // Manage subcommands — close / delete / edit — handled first so they
+  // don't fall through to the scope-required create path. The
+  // subcommand may appear anywhere in argv (after `--root <path>` etc.),
+  // so we scan for the first known verb rather than trusting args[0].
+  // -------------------------------------------------------------------
+  const verbIdx = args.findIndex((a) => MANAGE_SUBCOMMANDS.has(a));
+  if (verbIdx >= 0) {
+    const verb = args[verbIdx] ?? "";
+    const id = args[verbIdx + 1];
+    if (!id || id.startsWith("--")) {
+      throw new Error(`murmuration directive ${verb}: <id> is required`);
+    }
+
+    if (verb === "close") {
+      let provider;
+      try {
+        ({ provider } = await buildCollaborationProvider(root));
+      } catch (err) {
+        if (err instanceof CollaborationBuildError) {
+          throw new Error(`murmuration directive close: ${err.message}`, { cause: err });
+        }
+        throw err;
+      }
+      const result = await provider.updateItemState({ id }, "closed");
+      if (!result.ok) {
+        throw new Error(
+          `${provider.displayName} error: ${result.error.code} — ${result.error.message}`,
+        );
+      }
+      console.log(`Directive ${id} closed.`);
+      return;
+    }
+
+    // delete and edit are local-provider-only — both operate on the
+    // on-disk JSON file directly. GitHub doesn't support true delete
+    // (only close), and editing a GitHub issue on the CLI is better
+    // served by `gh issue edit`.
+    const path = localItemPath(root, id);
+    if (!path) {
+      throw new Error(
+        `murmuration directive ${verb}: directive "${id}" not found in .murmuration/items/ ` +
+          `(${verb} works with the local collaboration provider; for GitHub use 'gh issue ${verb === "delete" ? "close" : "edit"}')`,
+      );
+    }
+
+    if (verb === "delete") {
+      await unlink(path);
+      console.log(`Directive ${id} deleted.`);
+      return;
+    }
+
+    // edit
+    const editor = process.env.EDITOR ?? "vi";
+    const { execSync } = await import("node:child_process");
+    execSync(`${editor} ${path}`, { stdio: "inherit" });
+    return;
+  }
+
+  // -------------------------------------------------------------------
+  // Scope determination for create / list
+  // -------------------------------------------------------------------
   const agentIdx = args.indexOf("--agent");
   const groupIdx = args.indexOf("--group");
   const allFlag = args.includes("--all");
@@ -40,7 +121,10 @@ export const runDirective = async (args: readonly string[], rootDir: string): Pr
     scopeLabel = "scope:all";
     scopeDesc = "all agents";
   } else if (!args.includes("--list")) {
-    throw new Error("murmuration directive: specify --agent <id>, --group <id>, --all, or --list");
+    throw new Error(
+      "murmuration directive: specify --agent <id>, --group <id>, --all, --list, or a manage " +
+        "subcommand (close / delete / edit)",
+    );
   } else {
     scopeLabel = "";
     scopeDesc = "";

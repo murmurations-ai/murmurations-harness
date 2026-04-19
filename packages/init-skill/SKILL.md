@@ -29,26 +29,28 @@ Once the interview is complete, inform the user that you are synthesizing their 
 
 Use the `write` tool to generate the following exact file structure (relative to the current workspace), which complies with the v0.1 Murmuration Harness specification:
 
-*   **`murmuration/soul.md`**: Synthesize the Vision, Soul, and Domain answers into this single, unified constitutional document. Write the Soul sections in the first-person plural ("We believe...").
-*   **`governance/circles/`**: Create individual Markdown files for each circle defined by the user.
-*   **`agents/`**: For each agent identified, create a dedicated folder (e.g., `agents/[slug]/`). Inside each folder, generate:
-    *   **`agents/[slug]/soul.md`**: The agent's specific character, voice, and bright lines.
-    *   **`agents/[slug]/role.md`**: The agent's accountabilities, relationships, and schedule. 
+- **`murmuration/soul.md`**: Synthesize the Vision, Soul, and Domain answers into this single, unified constitutional document. Write the Soul sections in the first-person plural ("We believe...").
+- **`governance/circles/`**: Create individual Markdown files for each circle defined by the user.
+- **`agents/`**: For each agent identified, create a dedicated folder (e.g., `agents/[slug]/`). Inside each folder, generate:
+  - **`agents/[slug]/soul.md`**: The agent's specific character, voice, and bright lines.
+  - **`agents/[slug]/role.md`**: The agent's accountabilities, relationships, and schedule.
     **CRITICAL:** You must include the following YAML frontmatter at the top of every `role.md` file:
-    ```yaml
-    ---
-    agent_id: "[slug]"
-    name: "[Agent's full name]"
-    model_tier: "balanced"
-    soul_file: "agents/[slug]/soul.md"
-    ---
-    ```
+  ```yaml
+  ---
+  agent_id: "[slug]"
+  name: "[Agent's full name]"
+  model_tier: "balanced"
+  soul_file: "agents/[slug]/soul.md"
+  ---
+  ```
 
 **Formatting Guidelines for Generated Files:**
-*   Use clear Markdown with headers, bullet points, and bold text.
-*   Ensure the directory structure exactly matches the v0.1 Harness specification (`murmuration/`, `agents/`, `governance/circles/`).
+
+- Use clear Markdown with headers, bullet points, and bold text.
+- Ensure the directory structure exactly matches the v0.1 Harness specification (`murmuration/`, `agents/`, `governance/circles/`).
 
 ## Rules
-*   **NEVER ask multiple questions at once.**
-*   Do not rush. This is the most important conversation for the murmuration's foundation.
-*   Once generation is complete, provide a summary of the files created and tell the user they are ready to begin Phase 2 (Agent Identity Documents).
+
+- **NEVER ask multiple questions at once.**
+- Do not rush. This is the most important conversation for the murmuration's foundation.
+- Once generation is complete, provide a summary of the files created and tell the user they are ready to begin Phase 2 (Agent Identity Documents).
