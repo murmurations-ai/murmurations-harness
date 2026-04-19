@@ -10,8 +10,21 @@
  * Spec: https://github.com/murmurations-ai/murmurations-harness/blob/main/docs/MURMURATION-HARNESS-SPEC.md
  */
 
-/** Harness version. Bumped on each release. */
-export const HARNESS_VERSION = "0.4.3" as const;
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** Harness version, derived from `@murmurations-ai/core`'s package.json
+ *  at module load. Means `pnpm version` is the single source of truth —
+ *  the constant tracks the published version automatically instead of
+ *  relying on a human to remember to bump it. */
+export const HARNESS_VERSION = ((): string => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  // From dist/index.js or src/index.ts, package.json is one level up.
+  const pkgPath = join(here, "..", "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+  return pkg.version;
+})();
 
 export * from "./execution/index.js";
 export * from "./execution/subprocess.js";

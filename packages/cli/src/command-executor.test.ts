@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import {
   AgentStateStore,
   DaemonEventBus,
+  HARNESS_VERSION,
   makeAgentId,
   makeGroupId,
   type DaemonEvent,
@@ -177,7 +178,8 @@ describe("DaemonCommandExecutor", () => {
       pid: number;
     };
 
-    expect(status.version).toBe("0.4.3");
+    expect(status.version).toBe(HARNESS_VERSION);
+    expect(status.version).toMatch(/^\d+\.\d+\.\d+/);
     expect(status.schemaVersion).toBe(1);
     expect(status.pid).toBe(process.pid);
   });
