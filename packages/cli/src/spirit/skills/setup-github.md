@@ -16,12 +16,13 @@ Before starting any setup, help the operator decide what architecture is actuall
 - Are they just experimenting locally, or are they building a persistent agent team?
 - Do they need an auditable history of agent decisions?
 - Will other humans ever interact with this murmuration?
+- **Do they use Obsidian or another local Markdown knowledge base?**
 
 ### Based on their answers, explain the tradeoffs:
 
 - **Local Governance (`collaboration: local`)**:
-  - _Best for_: Quick experiments, offline work, strict data privacy, or solo operators who don't need a durable history.
-  - _Pros_: Zero external dependencies, fastest execution, no API limits.
+  - _Best for_: Operators using Obsidian (or similar PKMs), quick experiments, offline work, strict data privacy, or solo operators.
+  - _Pros_: Zero external dependencies, fastest execution, no API limits. **Crucially, if the operator uses Obsidian, local governance means all agent files, issues, and decisions are natively visible and linkable directly inside their vault without context-switching.**
   - _Cons_: Hard to audit over time, lacks native issue tracking for async handoffs.
 - **GitHub Governance (`collaboration: github`)**:
   - _Best for_: Persistent agent teams, complex governance (S3, consensus), auditing agent decisions, and multi-human collaboration.
