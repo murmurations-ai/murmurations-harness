@@ -6,7 +6,8 @@
  */
 
 import { TUI, Text, ProcessTerminal } from "@mariozechner/pi-tui";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 import {
   readPipelineState,
@@ -153,21 +154,17 @@ const renderCostSummary = (cost: CostSummary): string => {
     `  Today: ${bold(formatUsd(cost.todayMicros))} (${String(cost.todayWakes)}w)  ${dim("|")}  Week: ${formatUsd(cost.weekMicros)} (${String(cost.weekWakes)}w)  ${dim("|")}  Month: ${formatUsd(cost.monthMicros)} (${String(cost.monthWakes)}w)`,
   );
 
-  // Sparkline (last 7 days) with day count labels
+  // Sparkline (last 7 days) — real buckets from finishedAt timestamps,
+  // computed in readCostSummary (fixes #59: previously we distributed
+  // week wakes evenly across days 0-5, which misled Source about
+  // activity shape).
   const sparkChars = " ▁▂▃▄▅▆▇█";
-  const days: number[] = [];
+  const days: number[] = [...cost.wakesPerDay7d];
   const dayLabels: string[] = [];
   const now = new Date();
   for (let i = 6; i >= 0; i--) {
     const d = new Date(now.getTime() - i * 86_400_000);
     dayLabels.push(d.toISOString().slice(8, 10));
-    days.push(0);
-  }
-  if (cost.weekWakes > 0) {
-    const otherDays = cost.weekWakes - cost.todayWakes;
-    const perDay = otherDays > 0 ? Math.round(otherDays / 6) : 0;
-    for (let i = 0; i < 6; i++) days[i] = perDay;
-    days[6] = cost.todayWakes;
   }
   const maxDay = Math.max(...days, 1);
   const spark = days
@@ -258,6 +255,30 @@ const renderActivity = (entries: readonly ActivityEntry[]): string => {
 // Dashboard entry point
 // ---------------------------------------------------------------------------
 
+/** Full-screen preflight message shown when `.murmuration/` is absent
+ *  (fixes #61). Four empty panels with no explanation was worse than
+ *  no dashboard — a new operator had no signal about what was wrong. */
+const renderNoMurmurationDir = (root: string): string => {
+  const lines = [
+    "",
+    `  ${bold("Murmuration Dashboard")}`,
+    "",
+    `  ${red("No .murmuration/ directory found at:")}`,
+    `    ${root}`,
+    "",
+    `  ${dim("The dashboard reads daemon state from .murmuration/ under")}`,
+    `  ${dim("your murmuration root. It doesn't exist here yet.")}`,
+    "",
+    `  ${bold("To fix:")}`,
+    `    ${cyan("•")} cd to your murmuration root, then run murmuration-dashboard`,
+    `    ${cyan("•")} Or pass the correct path: ${dim("murmuration-dashboard --root <path>")}`,
+    `    ${cyan("•")} Run ${dim("murmuration start")} first if the daemon has never run here`,
+    "",
+    `  ${dim("[r] refresh  [q] quit")}`,
+  ];
+  return lines.join("\n");
+};
+
 export const startDashboard = async (rootDir: string): Promise<void> => {
   const root = resolve(rootDir);
   const terminal = new ProcessTerminal();
@@ -267,6 +288,12 @@ export const startDashboard = async (rootDir: string): Promise<void> => {
   tui.addChild(display);
 
   const refresh = async (): Promise<void> => {
+    if (!existsSync(join(root, ".murmuration"))) {
+      display.setText(renderNoMurmurationDir(root));
+      tui.requestRender();
+      return;
+    }
+
     const [pipeline, activity, governance, cost] = await Promise.all([
       readPipelineState(root),
       readRecentActivity(root),

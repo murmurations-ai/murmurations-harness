@@ -478,6 +478,10 @@ export interface CostSummary {
   readonly weekWakes: number;
   readonly monthMicros: number;
   readonly monthWakes: number;
+  /** Wake counts for the last 7 calendar days, oldest first. Index 6
+   *  is today. Bucketed by `finishedAt` date (local time) — real data,
+   *  not a uniform distribution. */
+  readonly wakesPerDay7d: readonly number[];
   readonly perAgent: readonly { agentId: string; totalMicros: number; wakes: number }[];
 }
 
@@ -494,6 +498,7 @@ export const readCostSummary = async (rootDir: string): Promise<CostSummary> => 
       weekWakes: 0,
       monthMicros: 0,
       monthWakes: 0,
+      wakesPerDay7d: [0, 0, 0, 0, 0, 0, 0],
       perAgent: [],
     };
   }
@@ -502,6 +507,15 @@ export const readCostSummary = async (rootDir: string): Promise<CostSummary> => 
   const todayStr = now.toISOString().slice(0, 10);
   const weekAgo = new Date(now.getTime() - 7 * 86_400_000);
   const monthAgo = new Date(now.getTime() - 30 * 86_400_000);
+
+  // 7-day wake histogram, index 0 = 6 days ago, index 6 = today.
+  // Keyed by YYYY-MM-DD (ISO date) so finishedAt lookups are O(1).
+  const wakesPerDay: number[] = [0, 0, 0, 0, 0, 0, 0];
+  const dayKeys: string[] = [];
+  for (let i = 6; i >= 0; i--) {
+    dayKeys.push(new Date(now.getTime() - i * 86_400_000).toISOString().slice(0, 10));
+  }
+  const dayKeyIndex = new Map(dayKeys.map((k, i) => [k, i]));
 
   let todayMicros = 0,
     todayWakes = 0,
@@ -529,7 +543,8 @@ export const readCostSummary = async (rootDir: string): Promise<CostSummary> => 
           agentTotal += cost;
           agentWakes++;
           if (finishedAt) {
-            if (finishedAt.toISOString().slice(0, 10) === todayStr) {
+            const dateKey = finishedAt.toISOString().slice(0, 10);
+            if (dateKey === todayStr) {
               todayMicros += cost;
               todayWakes++;
             }
@@ -540,6 +555,11 @@ export const readCostSummary = async (rootDir: string): Promise<CostSummary> => 
             if (finishedAt >= monthAgo) {
               monthMicros += cost;
               monthWakes++;
+            }
+            const idx = dayKeyIndex.get(dateKey);
+            if (idx !== undefined) {
+              const current = wakesPerDay[idx] ?? 0;
+              wakesPerDay[idx] = current + 1;
             }
           }
         } catch {
@@ -552,5 +572,14 @@ export const readCostSummary = async (rootDir: string): Promise<CostSummary> => 
     if (agentWakes > 0) perAgent.push({ agentId, totalMicros: agentTotal, wakes: agentWakes });
   }
 
-  return { todayMicros, todayWakes, weekMicros, weekWakes, monthMicros, monthWakes, perAgent };
+  return {
+    todayMicros,
+    todayWakes,
+    weekMicros,
+    weekWakes,
+    monthMicros,
+    monthWakes,
+    wakesPerDay7d: wakesPerDay,
+    perAgent,
+  };
 };
