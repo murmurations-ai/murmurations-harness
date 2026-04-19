@@ -13,5 +13,6 @@ The Spirit loads skill bodies on demand via `load_skill(name)`. This index is al
 | `agent-anatomy`          | Creating, editing, or debugging agents — `soul.md`, `role.md` frontmatter, signal scopes, write scopes      |
 | `governance-models`      | Discussions about governance, plugins, meetings, `governance/groups/*.md`, state graphs, decision records   |
 | `when-to-use-governance` | The operator wants to change something and isn't sure whether to act directly or delegate via governance    |
+| `setup-github`           | The operator wants to configure GitHub, set up the GITHUB_TOKEN, or enable the GitHub MCP server            |
 
 When the operator asks something substantive, check whether one of these skills covers it. If yes, load it before answering. If none applies and you're unsure, say so — don't guess.

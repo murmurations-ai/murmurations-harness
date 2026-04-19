@@ -6,14 +6,14 @@
  *       the REPL attach loop, or
  *   (b) a filesystem read guarded by path-safety rules.
  *
- * Mutations (writes, lifecycle commands) are Phase 2.
+ * Includes basic mutations (write_file) so agents can generate artifacts.
  *
  * Tools return strings because the LLM consumes the result as text
  * anyway. JSON is stringified; filesystem reads return raw bytes.
  */
 
-import { readFile, readdir, stat } from "node:fs/promises";
-import { join, resolve, relative, basename } from "node:path";
+import { readFile, readdir, stat, writeFile, mkdir } from "node:fs/promises";
+import { join, resolve, relative, basename, dirname } from "node:path";
 
 import type { ToolDefinition } from "@murmurations-ai/llm";
 import { z } from "zod";
@@ -266,6 +266,28 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     },
   };
 
+  const writeFileTool: ToolDefinition = {
+    name: "write_file",
+    description:
+      "Write content to a file in the murmuration root. Creates directories if they do not exist. Use for creating artifacts, drafting memories, or writing context files. Paths are relative to the murmuration root. Overwrites existing files.",
+    parameters: z.object({
+      path: z.string().describe("Path relative to the murmuration root."),
+      content: z.string().describe("Content to write."),
+    }),
+    execute: async (input) => {
+      const { path, content } = input as { path: string; content: string };
+      try {
+        const abs = safePath(rootDir, path);
+        await mkdir(dirname(abs), { recursive: true });
+        await writeFile(abs, content, "utf8");
+        return `Successfully wrote file ${path}`;
+      } catch (err) {
+        if (err instanceof PathSafetyError) return err.message;
+        return `write_file error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
   return [
     statusTool,
     agentsTool,
@@ -273,6 +295,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     eventsTool,
     readFileTool,
     listDirTool,
+    writeFileTool,
     loadSkillTool,
     wakeTool,
     directiveTool,
