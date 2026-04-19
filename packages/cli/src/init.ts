@@ -177,16 +177,26 @@ export const runInit = async (targetArg?: string): Promise<void> => {
   );
   const defaultProvider = normalizeProvider(defaultProviderInput, "gemini");
 
-  // 4. GitHub config (optional)
-  const githubInput = await ask("GitHub repo (e.g. org/repo, or Enter to skip): ");
-  const githubRepo = githubInput.trim();
+  // 4. Collaboration & Products
+  const collabInput = await ask("Collaboration provider (github / local) [github]: ");
+  const collaboration = collabInput.trim().toLowerCase() === "local" ? "local" : "github";
+
   let githubOwner = "";
   let githubRepoName = "";
-  if (githubRepo.includes("/")) {
-    const parts = githubRepo.split("/");
-    githubOwner = parts[0] ?? "";
-    githubRepoName = parts[1] ?? "";
+  if (collaboration === "github") {
+    const githubInput = await ask("GitHub repo (e.g. org/repo, or Enter to skip): ");
+    const githubRepo = githubInput.trim();
+    if (githubRepo.includes("/")) {
+      const parts = githubRepo.split("/");
+      githubOwner = parts[0] ?? "";
+      githubRepoName = parts[1] ?? "";
+    }
   }
+
+  const productInput = await ask(
+    "External product workspace (e.g. /home/user/vault or org/repo, or Enter to skip): ",
+  );
+  const productPath = productInput.trim();
 
   // 5. Agents
   const agents: AgentAnswers[] = [];
@@ -232,6 +242,19 @@ export const runInit = async (targetArg?: string): Promise<void> => {
   // through CLI flags.
   await copyDefaultAgentTemplates(join(targetDir, "murmuration", "default-agent"));
 
+  // If local collaboration, remove the github MCP tool from the default agent role.md
+  if (collaboration === "local") {
+    const defaultRolePath = join(targetDir, "murmuration", "default-agent", "role.md");
+    if (fs.existsSync(defaultRolePath)) {
+      let roleContent = fs.readFileSync(defaultRolePath, "utf8");
+      roleContent = roleContent.replace(
+        /tools:\n  mcp:\n    - name: github\n      command: npx\n      args: \["-y", "@modelcontextprotocol\/server-github"\]\n      env:\n        GITHUB_TOKEN: "\$GITHUB_TOKEN"\n/g,
+        "",
+      );
+      fs.writeFileSync(defaultRolePath, roleContent);
+    }
+  }
+
   // murmuration/soul.md
   await writeFile(
     join(targetDir, "murmuration", "soul.md"),
@@ -269,6 +292,16 @@ _What does this murmuration optimize for?_
     governance !== "none"
       ? `governance:\n  model: "${governance}"\n  plugin: "${governancePlugin ?? governance}"`
       : `governance:\n  model: none`;
+
+  const collabBlock =
+    collaboration === "github" && githubOwner
+      ? `collaboration:\n  provider: "${collaboration}"\n  repo: "${githubOwner}/${githubRepoName}"`
+      : `collaboration:\n  provider: "${collaboration}"`;
+
+  const productName = productPath.split("/").pop() || "workspace";
+  const productBlock = productPath
+    ? `\n\nproducts:\n  - name: "${productName}"\n    repo: "${productPath}"`
+    : "";
   await writeFile(
     join(targetDir, "murmuration", "harness.yaml"),
     `# Murmuration Harness configuration
@@ -280,6 +313,8 @@ llm:
   provider: "${defaultProvider}"
 
 ${governanceBlock}
+
+${collabBlock}${productBlock}
 `,
     "utf8",
   );
