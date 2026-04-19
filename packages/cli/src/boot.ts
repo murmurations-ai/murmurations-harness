@@ -71,6 +71,8 @@ import { resolveLLMCost } from "@murmurations-ai/llm/pricing";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
+import { buildMemoryToolsForAgent } from "./memory/index.js";
+
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
 // Per ADR-0025, the provider → env-key mapping lives on the
@@ -903,8 +905,28 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
    */
   const selectExtensionToolsFor = (
     agent: RegisteredAgent,
+    agentDir: string,
   ): readonly (typeof extensionTools)[number][] => {
-    if (agent.plugins.length === 0) return extensionTools;
+    // ADR-0029: memory is agent-scoped — tools are built per-agent,
+    // not shared across agents. Emit them whenever the agent declared
+    // memory explicitly OR when local-gov auto-includes them.
+    const buildAgentBoundMemory = (): readonly (typeof extensionTools)[number][] =>
+      buildMemoryToolsForAgent({
+        rootDir: exampleRoot,
+        agentDir,
+      }) as readonly (typeof extensionTools)[number][];
+
+    if (agent.plugins.length === 0) {
+      // Backward compat: agents with no explicit declaration see the
+      // shared extension tools. Memory is agent-bound so we add
+      // per-agent tools on top only when local-gov makes it
+      // automatic.
+      if (config.collaboration.provider === "local") {
+        return [...extensionTools, ...buildAgentBoundMemory()];
+      }
+      return extensionTools;
+    }
+
     const declared = new Set<string>();
     for (const p of agent.plugins) {
       declared.add(p.provider);
@@ -915,8 +937,20 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     if (config.collaboration.provider === "local") {
       declared.add("files");
       declared.add("@murmurations-ai/files");
+      declared.add("memory");
+      declared.add("@murmurations-ai/memory");
     }
-    return loadedExtensions.filter((ext) => declared.has(ext.id)).flatMap((ext) => ext.tools);
+
+    const sharedTools = loadedExtensions
+      .filter((ext) => declared.has(ext.id))
+      .flatMap((ext) => ext.tools);
+
+    // Attach per-agent memory tools if the memory plugin is declared
+    // (either explicitly or via the local-gov auto-include above).
+    if (declared.has("memory") || declared.has("@murmurations-ai/memory")) {
+      return [...sharedTools, ...buildAgentBoundMemory()];
+    }
+    return sharedTools;
   };
 
   // -------------------------------------------------------------------
@@ -1077,7 +1111,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               // Per-agent plugin gating: filter extension tools by the
               // agent's declared plugins (role.md `plugins:`).
               const { createDefaultRunner } = await import("@murmurations-ai/core");
-              const agentTools = selectExtensionToolsFor(capturedAgent);
+              const agentTools = selectExtensionToolsFor(capturedAgent, capturedAgentDir);
               return createDefaultRunner(
                 capturedAgentDir,
                 [],
