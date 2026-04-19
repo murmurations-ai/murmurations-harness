@@ -1,0 +1,7 @@
+{
+  "id": "memory",
+  "providerAuthEnvVars": {},
+  "contracts": {
+    "tools": ["remember", "recall", "forget"]
+  }
+}
