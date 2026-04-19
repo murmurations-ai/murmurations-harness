@@ -1,6 +1,6 @@
 # ADR-0028 — Eliminate the `agent.mjs` requirement for standard agents
 
-- **Status:** Accepted (shipped v0.4.5)
+- **Status:** Accepted (shipped v0.4.4)
 - **Date:** 2026-04-19
 - **Decision-maker(s):** Source
 - **Related:** ADR-0019 (persistent-context agents), ADR-0023 (extension system), ADR-0027 (fallback identity)

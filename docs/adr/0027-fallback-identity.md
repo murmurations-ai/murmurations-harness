@@ -1,6 +1,6 @@
 # ADR-0027 — Fallback identity for incomplete agent directories
 
-- **Status:** Accepted (shipped v0.4.5)
+- **Status:** Accepted (shipped v0.4.4)
 - **Date:** 2026-04-19
 - **Decision-maker(s):** Source
 - **Related:** ADR-0016 (role template), ADR-0023 (extension system), ADR-0024 (Spirit of the Murmuration)
