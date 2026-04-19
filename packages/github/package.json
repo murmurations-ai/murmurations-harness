@@ -1,6 +1,6 @@
 {
   "name": "@murmurations-ai/github",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "Typed GitHub REST client for the Murmuration Harness — rate-limited, cache-aware, secret-safe.",
   "license": "MIT",
   "author": "Emergent Praxis murmuration",

@@ -3,6 +3,33 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.5] - 2026-04-19
+
+### Added
+
+- **ADR-0029 — Agent persistent memory across wakes.** New built-in `@murmurations-ai/memory` extension ratified by the EP Engineering Circle consent round (emergent-praxis#444). Three tools:
+  - `remember(topic, content, tags?)` — append a YAML-headed entry to `agents/<id>/memory/<topic>.md`
+  - `recall(topic | query)` — exact topic return OR substring search across all topics; responses wrapped in `<memory_content>` boundaries
+  - `forget(topic, entry_id?)` — move to `.trash/` with retention metadata
+  - Tools are built per-agent at wake time, `agentDir` captured in the closure. No LLM can cross-address another agent's memory.
+  - Auto-included for local-governance agents (same pattern as the files plugin in v0.4.3).
+  - Memory files are human-readable markdown, git-diff-able, operator-editable.
+- **Self-digest tail** — default runner now injects the agent's own last N wake digests as a `## Recent work` block, wrapped in `<memory_content>` tags. Configurable via `DefaultRunnerOptions.selfDigestTail` (default 3, set to 0 to disable).
+- **Memory-poisoning mitigation** (ADR-0029 §4) — system prompt includes a passive-data instruction telling the LLM to treat memory content as quotation, not directive. Upstream digests + self-digest + recall responses all emit `<memory_content>` boundaries.
+
+### Changed
+
+- **Dashboard Cost & Wakes sparkline** now buckets from real `finishedAt` timestamps in `index.jsonl` instead of distributing week wakes uniformly across days 0-5 (fixes #59). `CostSummary.wakesPerDay7d` exposes the 7-day histogram.
+- **Dashboard missing-root guidance** — when `.murmuration/` is absent at the target path, the TUI renders a dedicated guidance panel with fix paths (`cd`, `--root`, or `murmuration start`) instead of four simultaneous empty panels (fixes #61).
+
+### Fixed
+
+- **`HARNESS_VERSION` drifts out of sync with published version.** Derived from `@murmurations-ai/core`'s `package.json` at module load now, so `pnpm version` is the single source of truth and `murmuration --version` can't lie.
+
+### Documentation
+
+- **ADR-0029 amended and accepted** — memory-poisoning threat model added per EP Engineering Circle consent round. Security Agent's S3 objection resolved with `<memory_content>` boundaries + passive-data prompt instruction + explicit threat-model table.
+
 ## [0.4.4] - 2026-04-19
 
 ### Added
