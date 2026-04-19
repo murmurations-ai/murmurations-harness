@@ -3,6 +3,31 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.4] - 2026-04-19
+
+### Added
+
+- **ADR-0027 — Fallback identity for incomplete agent directories.** `IdentityLoader` now accepts `fallbackOnMissing: true` + `onFallback` callback. Missing `soul.md` / `role.md` or invalid frontmatter synthesizes a generic identity (`model_tier: balanced`, modest budget, no write scopes, functional default) instead of crashing boot. `LoadedAgentIdentity.fallback` tells callers when a fallback was used.
+- **Operator-tunable default agent templates.** `<root>/murmuration/default-agent/{soul,role}.md` is the operator's per-murmuration default, with `{{agent_id}}` tokens interpolated at load time. Falls through to the built-in shipped in `@murmurations-ai/core` when absent. `murmuration init` materializes the templates into every new murmuration.
+- Daemon boot wires `fallbackOnMissing: true` and logs `daemon.agent.fallback` at `warn` so fallbacks surface in production runs.
+
+### Changed
+
+- **ADR-0028 — Eliminate `agent.mjs` requirement for standard agents.** Every agent now routes through `InProcessExecutor` with the default runner by default. Non-LLM agents get a `"skipped — no LLM client"` wake summary rather than requiring a subprocess script. Operators who already have `<root>/agent.mjs` still get the subprocess escape hatch.
+- `docs/GETTING-STARTED.md` scrubbed of `agent.mjs` / `runner.mjs` references — internal implementation details, not public surface. The public contract is markdown only.
+- `examples/hello-world-agent/` is now pure markdown: `agent.mjs` removed, `circle_memberships` → `group_memberships`, `governance/circles/` → `governance/groups/`.
+- `murmuration start` defaults to `process.cwd()` like every other CLI command rather than the bundled hello-world (fixes #60).
+- `murmuration init` writes `.gitignore` with `.env` + `.murmuration/` coverage BEFORE writing `.env`, and appends missing entries to an existing `.gitignore` rather than overwriting curated rules (fixes #10).
+
+### Fixed
+
+- **Directive close / delete / edit CLI subcommands** (regression fix from #111, shipped via #114). Restored the management verbs that were silently dropped in PR #104. 8 new regression tests lock the dispatch shape.
+
+### Documentation
+
+- ADR-0018, 0019, 0023, 0024 status bumped from "Proposed" → "Accepted" (all shipped in v0.3.x–v0.4.x).
+- ADR-0027 and ADR-0028 written and accepted.
+
 ## [0.4.3] - 2026-04-17
 
 ### Added
