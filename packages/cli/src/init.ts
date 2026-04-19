@@ -22,9 +22,10 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, writeFile, chmod } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdir, writeFile, chmod, copyFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
+import { fileURLToPath } from "node:url";
 
 import { buildBuiltinProviderRegistry } from "./builtin-providers/index.js";
 
@@ -39,6 +40,32 @@ const ask = (question: string): Promise<string> =>
   new Promise((r) => {
     getRL().question(question, r);
   });
+
+// ---------------------------------------------------------------------------
+// Default-agent templates
+// ---------------------------------------------------------------------------
+
+/** Resolve the shipped default-agent templates directory. When the CLI
+ *  is running from its published `dist/`, templates live next to the
+ *  compiled JS at `dist/default-agent/`. When running from source
+ *  (tests, `pnpm dev`), the compiled entry point and the templates
+ *  under `src/default-agent/` sit at the same relative offset. */
+const resolveDefaultAgentTemplatesDir = (): string => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const shipped = join(here, "default-agent");
+  if (existsSync(shipped)) return shipped;
+  // Source-tree fallback for `pnpm -C packages/cli run dev`-style execution.
+  return join(here, "..", "src", "default-agent");
+};
+
+const copyDefaultAgentTemplates = async (destDir: string): Promise<void> => {
+  const src = resolveDefaultAgentTemplatesDir();
+  for (const file of ["soul.md", "role.md"] as const) {
+    const srcPath = join(src, file);
+    if (!existsSync(srcPath)) continue;
+    await copyFile(srcPath, join(destDir, file));
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Agent question helper
@@ -164,12 +191,20 @@ export const runInit = async (targetArg?: string): Promise<void> => {
 
   // Directories
   await mkdir(join(targetDir, "murmuration"), { recursive: true });
+  await mkdir(join(targetDir, "murmuration", "default-agent"), { recursive: true });
   for (const agent of agents) {
     await mkdir(join(targetDir, "agents", agent.dir), { recursive: true });
   }
   if (groups.length > 0) {
     await mkdir(join(targetDir, "governance", "groups"), { recursive: true });
   }
+
+  // Copy default-agent templates. These are used by IdentityLoader (ADR-0027)
+  // when an agent directory is missing soul.md / role.md. Shipping a copy
+  // into the operator's murmuration makes the defaults discoverable and
+  // editable — operators tune the fallback character by hand rather than
+  // through CLI flags.
+  await copyDefaultAgentTemplates(join(targetDir, "murmuration", "default-agent"));
 
   // murmuration/soul.md
   await writeFile(
@@ -383,6 +418,8 @@ ${members.map((m) => `- ${m}`).join("\n")}
   ${targetDir}/
     murmuration/soul.md
     murmuration/harness.yaml
+    murmuration/default-agent/soul.md  (fallback identity — ADR-0027)
+    murmuration/default-agent/role.md  (fallback identity — ADR-0027)
 ${agentList}${groupList}
     .env (0600)
     .gitignore
@@ -393,7 +430,10 @@ Next steps:
 
 1. Edit .env — add your real API keys
 2. Edit the soul.md and role.md files — fill in the placeholders
-3. Boot the daemon:
+3. Review murmuration/default-agent/{soul,role}.md — these are used as
+   the fallback identity for any agent directory that's missing its
+   own files. Tune them to your murmuration's defaults.
+4. Boot the daemon:
    murmuration start --name ${sessionName}${governanceNote}${githubNote}
 `);
 };

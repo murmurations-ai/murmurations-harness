@@ -614,7 +614,22 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     );
   }
 
-  const loader = new IdentityLoader({ rootDir: exampleRoot });
+  // ADR-0027: fallback identity for incomplete agent directories.
+  // Operators can scaffold empty dirs during iteration; the loader
+  // synthesizes a generic identity with a visible daemon WARN instead
+  // of crashing boot.
+  const loader = new IdentityLoader({
+    rootDir: exampleRoot,
+    fallbackOnMissing: true,
+    onFallback: (agentDir, reason) => {
+      logger.warn("daemon.agent.fallback", {
+        agentDir,
+        reason: reason.reason,
+        missingFiles: reason.missingFiles,
+        ...(reason.detail !== undefined ? { detail: reason.detail } : {}),
+      });
+    },
+  });
 
   // -------------------------------------------------------------------
   // Agent discovery: when --agent is set, boot one; when omitted, boot

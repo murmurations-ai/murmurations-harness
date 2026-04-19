@@ -308,6 +308,30 @@ export interface IdentityLoaderConfig {
   readonly agentsDir?: string;
   /** Path to the groups directory relative to `rootDir`. Defaults to `"governance/groups"`. */
   readonly groupsDir?: string;
+  /**
+   * When true (ADR-0027), {@link IdentityLoader.load} will synthesize a
+   * generic fallback identity when `role.md` or `soul.md` are missing
+   * or `role.md` lacks YAML frontmatter. Use during iterative
+   * scaffolding so operators can create empty agent folders and fill
+   * them in later without crashing boot.
+   *
+   * Defaults to `false` — production boot paths (daemon, CLI) set it
+   * to `true` and pass an `onFallback` callback to surface warnings.
+   */
+  readonly fallbackOnMissing?: boolean;
+  /**
+   * Called when {@link load} returns a fallback identity. The callback
+   * receives the agent dir and the reason for falling back so the
+   * host process can log a visible warning (`daemon.agent.fallback`).
+   */
+  readonly onFallback?: (agentDir: string, reason: IdentityFallbackReason) => void;
+}
+
+/** Why a fallback identity was synthesized for an agent directory. */
+export interface IdentityFallbackReason {
+  readonly missingFiles: readonly string[];
+  readonly reason: "missing-files" | "missing-frontmatter" | "invalid-frontmatter";
+  readonly detail?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +343,12 @@ export interface LoadedAgentIdentity {
   readonly agentId: AgentId;
   readonly chain: IdentityChain;
   readonly frontmatter: RoleFrontmatterParsed;
+  /**
+   * Populated when the loader synthesized a generic identity because
+   * the agent's on-disk files were missing or malformed (ADR-0027).
+   * `undefined` for fully-defined agents.
+   */
+  readonly fallback?: IdentityFallbackReason;
 }
 
 /**
@@ -335,12 +365,16 @@ export class IdentityLoader {
   readonly #murmurationSoulPath: string;
   readonly #agentsDir: string;
   readonly #groupsDir: string;
+  readonly #fallbackOnMissing: boolean;
+  readonly #onFallback: ((agentDir: string, reason: IdentityFallbackReason) => void) | undefined;
 
   public constructor(config: IdentityLoaderConfig) {
     this.#rootDir = resolve(config.rootDir);
     this.#murmurationSoulPath = config.murmurationSoulPath ?? "murmuration/soul.md";
     this.#agentsDir = config.agentsDir ?? "agents";
     this.#groupsDir = config.groupsDir ?? "governance/groups";
+    this.#fallbackOnMissing = config.fallbackOnMissing ?? false;
+    this.#onFallback = config.onFallback;
   }
 
   /**
@@ -375,47 +409,158 @@ export class IdentityLoader {
   }
 
   /**
+   * Resolve the default `soul.md` content for an agent that doesn't
+   * have one on disk. Prefers the operator-provided template at
+   * `<root>/murmuration/default-agent/soul.md`; falls back to the
+   * built-in when absent.
+   */
+  async #resolveDefaultAgentSoul(agentDir: string): Promise<string> {
+    const templatePath = join(this.#rootDir, DEFAULT_AGENT_SOUL_TEMPLATE);
+    try {
+      const raw = await readFile(templatePath, "utf8");
+      return interpolateTemplate(raw, agentDir);
+    } catch {
+      return interpolateTemplate(BUILTIN_AGENT_SOUL, agentDir);
+    }
+  }
+
+  /**
+   * Resolve the default `role.md` content for an agent that doesn't
+   * have one on disk. Prefers the operator-provided template at
+   * `<root>/murmuration/default-agent/role.md`; falls back to the
+   * built-in when absent.
+   */
+  async #resolveDefaultAgentRole(agentDir: string): Promise<string> {
+    const templatePath = join(this.#rootDir, DEFAULT_AGENT_ROLE_TEMPLATE);
+    try {
+      const raw = await readFile(templatePath, "utf8");
+      return interpolateTemplate(raw, agentDir);
+    } catch {
+      return buildBuiltinRoleDocument(agentDir);
+    }
+  }
+
+  /**
    * Load one agent's identity. `agentDir` is the subdirectory name
    * under `agents/` (e.g. `"01-research"`, `"my-agent"`). The loader expects the
    * conventional files `soul.md` and `role.md` inside that directory.
+   *
+   * When the loader is constructed with `fallbackOnMissing: true`
+   * (ADR-0027), a generic fallback identity is synthesized in place of
+   * throwing when `role.md` / `soul.md` are missing or `role.md`
+   * lacks YAML frontmatter. The returned `LoadedAgentIdentity.fallback`
+   * field is populated so callers can surface a visible warning.
    */
   public async load(agentDir: string): Promise<LoadedAgentIdentity> {
     const murmurationSoulPath = join(this.#rootDir, this.#murmurationSoulPath);
     const agentSoulPath = join(this.#rootDir, this.#agentsDir, agentDir, "soul.md");
     const agentRolePath = join(this.#rootDir, this.#agentsDir, agentDir, "role.md");
 
+    // Murmuration soul is a hard requirement — the fallback path is
+    // per-agent, not murmuration-wide.
     const murmurationSoul = await readRequired(murmurationSoulPath);
-    const agentSoul = await readRequired(agentSoulPath);
-    const agentRole = await readRequired(agentRolePath);
 
-    const { frontmatter: roleFrontmatterText, body: roleBody } = splitFrontmatter(agentRole);
+    const missingFiles: string[] = [];
+    let agentSoul: string;
+    let agentRole: string;
+
+    try {
+      agentSoul = await readRequired(agentSoulPath);
+    } catch (err) {
+      if (!(err instanceof IdentityFileMissingError) || !this.#fallbackOnMissing) throw err;
+      missingFiles.push("soul.md");
+      agentSoul = await this.#resolveDefaultAgentSoul(agentDir);
+    }
+
+    try {
+      agentRole = await readRequired(agentRolePath);
+    } catch (err) {
+      if (!(err instanceof IdentityFileMissingError) || !this.#fallbackOnMissing) throw err;
+      missingFiles.push("role.md");
+      agentRole = await this.#resolveDefaultAgentRole(agentDir);
+    }
+
+    const { frontmatter: roleFrontmatterText } = splitFrontmatter(agentRole);
+
+    let fallbackReason: IdentityFallbackReason | undefined;
 
     if (!roleFrontmatterText) {
-      throw new FrontmatterInvalidError(agentRolePath, [
-        "role.md must begin with a YAML frontmatter block (between `---` fences)",
-      ]);
+      if (!this.#fallbackOnMissing) {
+        throw new FrontmatterInvalidError(agentRolePath, [
+          "role.md must begin with a YAML frontmatter block (between `---` fences)",
+        ]);
+      }
+      fallbackReason = {
+        reason: "missing-frontmatter",
+        missingFiles,
+      };
+      agentRole = await this.#resolveDefaultAgentRole(agentDir);
     }
+
+    const parsedRole = splitFrontmatter(agentRole);
+    const effectiveFrontmatterText = parsedRole.frontmatter ?? "";
+    const effectiveRoleBody = parsedRole.body;
 
     let frontmatterRaw: unknown;
     try {
-      frontmatterRaw = parseYaml(roleFrontmatterText);
+      frontmatterRaw = parseYaml(effectiveFrontmatterText);
     } catch (cause) {
-      throw new FrontmatterInvalidError(
-        agentRolePath,
-        ["YAML parse failed; see `cause` for details"],
-        { cause },
+      if (!this.#fallbackOnMissing) {
+        throw new FrontmatterInvalidError(
+          agentRolePath,
+          ["YAML parse failed; see `cause` for details"],
+          { cause },
+        );
+      }
+      fallbackReason = {
+        reason: "invalid-frontmatter",
+        missingFiles,
+        detail: "YAML parse failed",
+      };
+      frontmatterRaw = parseYaml(
+        splitFrontmatter(await this.#resolveDefaultAgentRole(agentDir)).frontmatter ?? "",
       );
     }
 
     const parsed = roleFrontmatterSchema.safeParse(frontmatterRaw);
     if (!parsed.success) {
-      const issues = parsed.error.issues.map(
-        (issue) => `${issue.path.map((p) => String(p)).join(".")}: ${issue.message}`,
+      if (!this.#fallbackOnMissing) {
+        const issues = parsed.error.issues.map(
+          (issue) => `${issue.path.map((p) => String(p)).join(".")}: ${issue.message}`,
+        );
+        throw new FrontmatterInvalidError(agentRolePath, issues);
+      }
+      fallbackReason = {
+        reason: "invalid-frontmatter",
+        missingFiles,
+        detail: parsed.error.issues.map((i) => i.message).join("; "),
+      };
+      frontmatterRaw = parseYaml(
+        splitFrontmatter(await this.#resolveDefaultAgentRole(agentDir)).frontmatter ?? "",
       );
-      throw new FrontmatterInvalidError(agentRolePath, issues);
     }
 
-    const frontmatter = parsed.data;
+    if (missingFiles.length > 0 && !fallbackReason) {
+      fallbackReason = {
+        reason: "missing-files",
+        missingFiles: [...missingFiles],
+      };
+    }
+
+    // Re-parse after any fallback substitution so downstream types are
+    // consistent whether we fell back or not.
+    const finalParsed = roleFrontmatterSchema.parse(frontmatterRaw);
+    const frontmatter = finalParsed;
+    const effectiveRole = fallbackReason
+      ? await this.#resolveDefaultAgentRole(agentDir)
+      : agentRole;
+    const finalRoleBody = fallbackReason ? splitFrontmatter(effectiveRole).body : effectiveRoleBody;
+
+    // Emit the warning callback so the host process can log a visible
+    // WARN (ADR-0027 §Warnings).
+    if (fallbackReason && this.#onFallback) {
+      this.#onFallback(agentDir, fallbackReason);
+    }
     const agentId = makeAgentId(frontmatter.agent_id);
     const groupMemberships: readonly GroupId[] = frontmatter.group_memberships.map((c) =>
       makeGroupId(c),
@@ -451,7 +596,7 @@ export class IdentityLoader {
       {
         kind: "agent-role",
         agentId,
-        content: roleBody,
+        content: finalRoleBody,
         sourcePath: agentRolePath,
       },
       ...groupLayers,
@@ -470,9 +615,119 @@ export class IdentityLoader {
       layers,
     };
 
-    return { agentId, chain, frontmatter };
+    return {
+      agentId,
+      chain,
+      frontmatter,
+      ...(fallbackReason ? { fallback: fallbackReason } : {}),
+    };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Fallback identity templates (ADR-0027)
+//
+// Two layers:
+//   1. Operator-provided templates at
+//      `<rootDir>/murmuration/default-agent/{soul.md,role.md}` — read at
+//      load time so operators can edit the defaults without forking.
+//      Any token `{{agent_id}}` in the template is replaced with the
+//      actual agent directory name.
+//   2. Built-in defaults (below) — used when the operator hasn't
+//      provided templates. Designed to be *functional* rather than
+//      inert: the agent can participate in governance (via the per-agent
+//      plugin auto-include for local collaboration, v0.4.3) and acts
+//      conservatively when given a wake.
+// ---------------------------------------------------------------------------
+
+const BUILTIN_AGENT_SOUL = `# Generic Helper — Soul
+
+I am a generic helper agent. My specific character has not yet been
+defined by Source. Until it is, I act with these principles:
+
+- I surface ambiguity rather than invent intent. When a directive or
+  signal is unclear, I say so and ask what Source actually wants.
+- I prefer small, reversible actions to bold moves. Source has not
+  yet told me what is and isn't safe; I err toward cautious.
+- I acknowledge my limits. If I lack a tool, a skill, or context to do
+  a task well, I report that honestly rather than fabricate output.
+
+Source can replace this soul by editing \`agents/{{agent_id}}/soul.md\`
+directly, or by editing the shared template at
+\`murmuration/default-agent/soul.md\`.
+`;
+
+/** Minimal but functional `role.md`. Declares no plugins (empty
+ *  `plugins: []` still gets backward-compat full tools; local-gov
+ *  auto-includes the files plugin per v0.4.3). Budget is modest so a
+ *  fallback agent cannot spend unboundedly. */
+const buildBuiltinRoleDocument = (agentDir: string): string =>
+  [
+    "---",
+    `agent_id: "${agentDir}"`,
+    `name: "Generic Helper (${agentDir})"`,
+    `model_tier: "balanced"`,
+    `max_wall_clock_ms: 60000`,
+    "",
+    "group_memberships: []",
+    "",
+    "signals:",
+    "  sources:",
+    '    - "github-issue"',
+    '    - "private-note"',
+    "",
+    "github:",
+    "  write_scopes:",
+    "    issue_comments: []",
+    "    branch_commits: []",
+    "    labels: []",
+    "    issues: []",
+    "",
+    "budget:",
+    "  max_cost_micros: 50000",
+    "  max_github_api_calls: 5",
+    '  on_breach: "warn"',
+    "",
+    "secrets:",
+    "  required: []",
+    '  optional: ["GITHUB_TOKEN"]',
+    "",
+    "plugins: []",
+    "---",
+    "",
+    `# Generic Helper — Role`,
+    "",
+    "## Accountabilities",
+    "",
+    "I respond to Source directives and signals. When a directive arrives,",
+    "I acknowledge it, identify what I have the tools to do, and either",
+    "attempt the task or report honestly why I can't.",
+    "",
+    "## Decision tiers",
+    "",
+    "- **Autonomous:** read files, query signals, post reports, close",
+    "  tensions I've filed myself.",
+    "- **Notify:** anything that edits shared state (agent souls, governance",
+    "  items, other agents' files) — I describe what I'd do and wait.",
+    "- **Consent:** changes to the murmuration soul, bright lines, or",
+    "  governance model require a consent round.",
+    "",
+    "Source can replace this role by editing `agents/" + agentDir + "/role.md`",
+    "directly, or by editing the shared template at",
+    "`murmuration/default-agent/role.md`.",
+    "",
+  ].join("\n");
+
+/** Interpolate the agent-dir name into any `{{agent_id}}` tokens the
+ *  operator left in their template. Keeps the template reusable across
+ *  agent directories. */
+const interpolateTemplate = (template: string, agentDir: string): string =>
+  template.replace(/\{\{\s*agent_id\s*\}\}/g, agentDir);
+
+/** Operator-provided template path for the shared default agent. Used
+ *  ahead of the built-in default when it exists. */
+const DEFAULT_AGENT_SOUL_TEMPLATE = "murmuration/default-agent/soul.md";
+const DEFAULT_AGENT_ROLE_TEMPLATE = "murmuration/default-agent/role.md";
 
 // ---------------------------------------------------------------------------
 // Helpers
