@@ -379,8 +379,7 @@ wake_schedule:
   ${formatScheduleYaml(agent.schedule)}
 
 signals:
-  sources:
-    - "github-issue"
+  sources:${collaboration === "github" ? '\n    - "github-issue"' : ""}
     - "private-note"${ghScopes}
 
 github:
@@ -393,7 +392,7 @@ budget:
 
 secrets:
   required: [${secretName ? `"${secretName}"` : ""}]
-  optional: ["GITHUB_TOKEN"]
+  ${collaboration === "github" ? '\n  optional: ["GITHUB_TOKEN"]' : ""}
 ---
 
 # ${agent.name} — Role
