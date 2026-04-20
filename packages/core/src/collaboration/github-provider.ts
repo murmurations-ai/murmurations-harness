@@ -262,24 +262,53 @@ export class GitHubCollaborationProvider implements CollaborationProvider {
   // Error mapping
   // -------------------------------------------------------------------------
 
+  /**
+   * Map a GitHub client error to a CollaborationError.
+   *
+   * The GitHub client (`@murmurations-ai/github`) emits hyphen-case codes
+   * (`"not-found"`, `"unauthorized"`, `"write-scope-denied"`). Earlier
+   * versions of this adapter checked for upper-case + underscore codes
+   * (`"UNAUTHORIZED"`, `"NOT_FOUND"`), so every real error fell through
+   * to `"UNKNOWN"` and operators saw `create-issue: UNKNOWN` with no
+   * useful signal. v0.5.0 Milestone 1 — error legibility.
+   *
+   * Also tolerates upper-case + underscore codes for forward compat with
+   * any callers that hand-roll error objects.
+   */
   #mapError(err?: { code: string; message: string }): CollaborationError {
     if (!err) return new CollaborationError("github", "UNKNOWN", "Unknown error");
     const code = err.code;
-    if (code === "UNAUTHORIZED" || code === "FORBIDDEN" || code === "WRITE_SCOPE") {
+    // Hyphen-case (GithubClientErrorCode, actual shape emitted by the client)
+    if (
+      code === "unauthorized" ||
+      code === "forbidden" ||
+      code === "write-scope-denied" ||
+      code === "UNAUTHORIZED" ||
+      code === "FORBIDDEN" ||
+      code === "WRITE_SCOPE"
+    ) {
       return new CollaborationError("github", "PERMISSION_DENIED", err.message);
     }
-    if (code === "NOT_FOUND") {
+    if (code === "not-found" || code === "NOT_FOUND") {
       return new CollaborationError("github", "NOT_FOUND", err.message);
     }
-    if (code === "VALIDATION") {
+    if (code === "validation" || code === "conflict" || code === "VALIDATION") {
       return new CollaborationError("github", "INVALID_INPUT", err.message);
     }
-    if (code === "RATE_LIMIT") {
+    if (code === "rate-limited" || code === "RATE_LIMIT") {
       return new CollaborationError("github", "RATE_LIMITED", err.message);
     }
-    if (code === "TRANSPORT") {
+    if (
+      code === "transport" ||
+      code === "parse" ||
+      code === "aborted" ||
+      code === "mutation-aborted" ||
+      code === "TRANSPORT"
+    ) {
       return new CollaborationError("github", "TRANSPORT", err.message);
     }
+    // internal / unknown upstream — preserve the real message so the
+    // operator can act on it even without a named code.
     return new CollaborationError("github", "UNKNOWN", err.message);
   }
 }

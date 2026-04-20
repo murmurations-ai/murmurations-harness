@@ -220,6 +220,104 @@ model_tier: galactic
     await expect(loader.load("13-badtier")).rejects.toBeInstanceOf(FrontmatterInvalidError);
   });
 
+  describe("Zod issue annotation (v0.5.0 Milestone 1)", () => {
+    it("numeric agent_id: error message names the file path AND suggests the fix", async () => {
+      await writeFixture("murmuration/soul.md", "# Soul\n");
+      await writeFixture("agents/facilitator/soul.md", "# Soul\n");
+      await writeFixture(
+        "agents/facilitator/role.md",
+        `---
+agent_id: 22
+name: "Facilitator"
+model_tier: balanced
+---
+
+# Body
+`,
+      );
+
+      const loader = new IdentityLoader({ rootDir });
+      try {
+        await loader.load("facilitator");
+        throw new Error("expected FrontmatterInvalidError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(FrontmatterInvalidError);
+        if (err instanceof FrontmatterInvalidError) {
+          // File path present
+          expect(err.path).toContain("agents/facilitator/role.md");
+          // Remediation hint explicitly names the directory-matching slug
+          const joined = err.issues.join("\n");
+          expect(joined).toContain("agent_id");
+          expect(joined).toContain('"facilitator"');
+          expect(joined).toContain("quoted string");
+        }
+      }
+    });
+
+    it("wrong model_tier: issue names the valid enum values", async () => {
+      await writeFixture("murmuration/soul.md", "# Soul\n");
+      await writeFixture("agents/badtier/soul.md", "# Soul\n");
+      await writeFixture(
+        "agents/badtier/role.md",
+        `---
+agent_id: "badtier"
+name: "BadTier"
+model_tier: galactic
+---
+
+# BadTier
+`,
+      );
+
+      const loader = new IdentityLoader({ rootDir });
+      try {
+        await loader.load("badtier");
+        throw new Error("expected FrontmatterInvalidError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(FrontmatterInvalidError);
+        if (err instanceof FrontmatterInvalidError) {
+          const joined = err.issues.join("\n");
+          expect(joined).toContain("fast");
+          expect(joined).toContain("balanced");
+          expect(joined).toContain("deep");
+        }
+      }
+    });
+
+    it("wrong llm.provider: issue names the valid provider list", async () => {
+      await writeFixture("murmuration/soul.md", "# Soul\n");
+      await writeFixture("agents/badllm/soul.md", "# Soul\n");
+      await writeFixture(
+        "agents/badllm/role.md",
+        `---
+agent_id: "badllm"
+name: "BadLLM"
+model_tier: balanced
+llm:
+  provider: "Claude"
+---
+
+# BadLLM
+`,
+      );
+
+      const loader = new IdentityLoader({ rootDir });
+      try {
+        await loader.load("badllm");
+        throw new Error("expected FrontmatterInvalidError");
+      } catch (err) {
+        expect(err).toBeInstanceOf(FrontmatterInvalidError);
+        if (err instanceof FrontmatterInvalidError) {
+          const joined = err.issues.join("\n");
+          expect(joined).toContain("gemini");
+          expect(joined).toContain("anthropic");
+          expect(joined).toContain("openai");
+          expect(joined).toContain("ollama");
+        }
+      }
+    });
+  });
+
   it("frontmatter schema defaults apply when optional fields are omitted", async () => {
     await writeFixture("murmuration/soul.md", "# Soul\n");
     await writeFixture("agents/14-defaults/soul.md", "# Soul\n");
