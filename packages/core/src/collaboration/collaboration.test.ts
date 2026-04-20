@@ -11,6 +11,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { GitHubCollaborationProvider, type GitHubClientLike } from "./github-provider.js";
 import { LocalCollaborationProvider } from "./local-provider.js";
 import { CollaborationError } from "./types.js";
 import type { CollaborationProvider, ItemRef } from "./types.js";
@@ -299,5 +300,92 @@ describe("CollaborationError", () => {
     const cause = new Error("underlying");
     const err = new CollaborationError("test", "UNKNOWN", "Wrapped", { cause });
     expect(err.cause).toBe(cause);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GitHubCollaborationProvider error mapping (v0.5.0 Milestone 1)
+//
+// The GitHub client emits hyphen-case codes (e.g. "not-found"). Earlier
+// #mapError only recognized upper-case + underscore codes, so every real
+// error fell through to UNKNOWN and operators saw `create-issue: UNKNOWN`
+// with no useful signal. These tests lock in the new mapping + message
+// preservation behavior.
+// ---------------------------------------------------------------------------
+
+describe("GitHubCollaborationProvider error mapping (v0.5.0 Milestone 1)", () => {
+  const makeFailingClient = (code: string, message: string): GitHubClientLike => ({
+    createIssue: () => Promise.resolve({ ok: false, error: { code, message } }),
+    listIssues: () => Promise.resolve({ ok: false, error: { code, message } }),
+    createIssueComment: () => Promise.resolve({ ok: false, error: { code, message } }),
+    updateIssueState: () => Promise.resolve({ ok: false, error: { code, message } }),
+    addLabels: () => Promise.resolve({ ok: false, error: { code, message } }),
+    removeLabel: () => Promise.resolve({ ok: false, error: { code, message } }),
+    getRef: () => Promise.resolve({ ok: false, error: { code, message } }),
+    createCommitOnBranch: () => Promise.resolve({ ok: false, error: { code, message } }),
+  });
+
+  type HyphenCase = readonly [
+    string,
+    "NOT_FOUND" | "PERMISSION_DENIED" | "INVALID_INPUT" | "RATE_LIMITED" | "TRANSPORT" | "UNKNOWN",
+  ];
+
+  const cases: readonly HyphenCase[] = [
+    ["not-found", "NOT_FOUND"],
+    ["unauthorized", "PERMISSION_DENIED"],
+    ["forbidden", "PERMISSION_DENIED"],
+    ["write-scope-denied", "PERMISSION_DENIED"],
+    ["validation", "INVALID_INPUT"],
+    ["conflict", "INVALID_INPUT"],
+    ["rate-limited", "RATE_LIMITED"],
+    ["transport", "TRANSPORT"],
+    ["parse", "TRANSPORT"],
+    ["aborted", "TRANSPORT"],
+    ["mutation-aborted", "TRANSPORT"],
+    ["internal", "UNKNOWN"],
+  ];
+
+  for (const [upstreamCode, mappedCode] of cases) {
+    it(`maps upstream "${upstreamCode}" → ${mappedCode} and preserves the message`, async () => {
+      const originalMessage = `${upstreamCode}-original-message`;
+      const gh = new GitHubCollaborationProvider({
+        client: makeFailingClient(upstreamCode, originalMessage),
+        repo: { owner: "o", name: "r" },
+      });
+      const result = await gh.createItem({ title: "t", body: "b" });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe(mappedCode);
+        expect(result.error.message).toBe(originalMessage);
+      }
+    });
+  }
+
+  it("still accepts legacy upper-case codes for forward compat", async () => {
+    const gh = new GitHubCollaborationProvider({
+      client: makeFailingClient("UNAUTHORIZED", "legacy upper-case"),
+      repo: { owner: "o", name: "r" },
+    });
+    const result = await gh.createItem({ title: "t", body: "b" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("PERMISSION_DENIED");
+      expect(result.error.message).toBe("legacy upper-case");
+    }
+  });
+
+  it("falls back to UNKNOWN with the real message when code is unrecognized", async () => {
+    const gh = new GitHubCollaborationProvider({
+      client: makeFailingClient("brand-new-code", "not in the map"),
+      repo: { owner: "o", name: "r" },
+    });
+    const result = await gh.createItem({ title: "t", body: "b" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("UNKNOWN");
+      // Defense in depth: even for unknown codes, the underlying message
+      // is preserved rather than replaced with "Unknown error".
+      expect(result.error.message).toBe("not in the map");
+    }
   });
 });

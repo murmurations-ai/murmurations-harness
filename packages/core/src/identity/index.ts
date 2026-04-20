@@ -57,6 +57,57 @@ export class IdentityFileMissingError extends IdentityLoaderError {
   }
 }
 
+/**
+ * Render a Zod issue with a remediation hint when the failure matches
+ * a well-known pattern a new operator is likely to hit (numeric
+ * `agent_id`, wrong `model_tier` spelling, etc.). Unknown patterns fall
+ * back to Zod's default message — which is already reasonable.
+ *
+ * v0.5.0 Milestone 1 — error legibility. The goal is that a tester who
+ * sees the error can fix it without opening Stack Overflow.
+ */
+const annotateZodIssue = (
+  issue: z.core.$ZodIssue,
+  agentDir: string,
+  frontmatterRaw: unknown,
+): string => {
+  const fieldPath = issue.path.map((p) => String(p)).join(".");
+  const base = `${fieldPath}: ${issue.message}`;
+
+  const rawFm =
+    typeof frontmatterRaw === "object" && frontmatterRaw !== null
+      ? (frontmatterRaw as Record<string, unknown>)
+      : {};
+
+  // Pattern: agent_id is not a string (e.g. operators with a pre-v0.5
+  // repo used `agent_id: 22` which YAML parses as a number).
+  if (fieldPath === "agent_id" && issue.code === "invalid_type") {
+    const rawAgentId = rawFm.agent_id;
+    const displayValue =
+      typeof rawAgentId === "string" || typeof rawAgentId === "number"
+        ? String(rawAgentId)
+        : "<value>";
+    return `${base} — change \`agent_id: ${displayValue}\` to \`agent_id: "${agentDir}"\` (quoted string matching this agent's directory name)`;
+  }
+
+  // Pattern: model_tier misspelled (common: "medium", "small", "large").
+  if (fieldPath === "model_tier" && issue.code === "invalid_value") {
+    return `${base} — valid values: "fast", "balanced", "deep"`;
+  }
+
+  // Pattern: llm.provider misspelled or capitalized.
+  if (fieldPath === "llm.provider" && issue.code === "invalid_value") {
+    return `${base} — valid providers: "gemini", "anthropic", "openai", "ollama"`;
+  }
+
+  // Pattern: missing required top-level field.
+  if (issue.code === "invalid_type" && "received" in issue && issue.received === "undefined") {
+    return `${base} — add this field to ${agentDir}/role.md frontmatter`;
+  }
+
+  return base;
+};
+
 /** Frontmatter validation failed (missing field, wrong type, etc). */
 export class FrontmatterInvalidError extends IdentityLoaderError {
   public readonly path: string;
@@ -525,8 +576,8 @@ export class IdentityLoader {
     const parsed = roleFrontmatterSchema.safeParse(frontmatterRaw);
     if (!parsed.success) {
       if (!this.#fallbackOnMissing) {
-        const issues = parsed.error.issues.map(
-          (issue) => `${issue.path.map((p) => String(p)).join(".")}: ${issue.message}`,
+        const issues = parsed.error.issues.map((issue) =>
+          annotateZodIssue(issue, agentDir, frontmatterRaw),
         );
         throw new FrontmatterInvalidError(agentRolePath, issues);
       }

@@ -15,8 +15,11 @@ import { resolve, join } from "node:path";
 import {
   makeSecretKey,
   IdentityLoader,
+  IdentityFileMissingError,
+  FrontmatterInvalidError,
   runGroupWake,
   type CollaborationProvider,
+  type CollaborationError,
   type GroupConfig,
   type GroupWakeContext,
   type GroupWakeKind,
@@ -36,22 +39,110 @@ import {
   findDefaultRepo,
 } from "./collaboration-factory.js";
 
-/** Resolve LLM provider + model from the facilitator's role.md. */
-const resolveLLMConfig = async (
+/**
+ * Discriminated result for resolving the facilitator's LLM config.
+ *
+ * The reason field distinguishes the three things that can actually
+ * go wrong when a tester first runs `group-wake`, so the CLI can
+ * print a specific remediation instead of a generic "could not read
+ * LLM config" catch-all. (v0.5.0 Milestone 1 — error legibility.)
+ */
+type ResolveLLMResult =
+  | { readonly ok: true; readonly config: { provider: string; model: string } }
+  | { readonly ok: false; readonly reason: "no-llm-block"; readonly rolePath: string }
+  | { readonly ok: false; readonly reason: "file-not-found"; readonly path: string }
+  | {
+      readonly ok: false;
+      readonly reason: "frontmatter-invalid";
+      readonly path: string;
+      readonly issues: readonly string[];
+    }
+  | { readonly ok: false; readonly reason: "other"; readonly message: string };
+
+/**
+ * Resolve LLM provider + model from the facilitator's role.md.
+ *
+ * Exported for unit tests; callers inside this module use it directly.
+ */
+export const resolveLLMConfig = async (
   rootDir: string,
   facilitatorId: string,
-): Promise<{ provider: string; model: string } | null> => {
+): Promise<ResolveLLMResult> => {
+  const rolePath = resolve(rootDir, "agents", facilitatorId, "role.md");
   try {
     const loader = new IdentityLoader({ rootDir });
     const identity = await loader.load(facilitatorId);
     const llm = identity.frontmatter.llm;
     if (llm) {
-      return { provider: llm.provider, model: llm.model ?? getDefaultModel(llm.provider) };
+      return {
+        ok: true,
+        config: { provider: llm.provider, model: llm.model ?? getDefaultModel(llm.provider) },
+      };
     }
-  } catch {
-    /* skip */
+    return { ok: false, reason: "no-llm-block", rolePath };
+  } catch (err) {
+    if (err instanceof IdentityFileMissingError) {
+      return { ok: false, reason: "file-not-found", path: err.path };
+    }
+    if (err instanceof FrontmatterInvalidError) {
+      return {
+        ok: false,
+        reason: "frontmatter-invalid",
+        path: err.path,
+        issues: err.issues,
+      };
+    }
+    return {
+      ok: false,
+      reason: "other",
+      message: err instanceof Error ? err.message : String(err),
+    };
   }
-  return null;
+};
+
+/**
+ * Print a tester-legible failure message for a non-ok
+ * {@link ResolveLLMResult}. Each reason names the real problem and
+ * the fix, so operators aren't left googling "could not read LLM
+ * config".
+ */
+const printLLMResolveFailure = (
+  facilitatorId: string,
+  result: Exclude<ResolveLLMResult, { readonly ok: true }>,
+): void => {
+  const prefix = "murmuration group-wake:";
+  switch (result.reason) {
+    case "no-llm-block":
+      console.error(`${prefix} facilitator "${facilitatorId}" role.md has no llm: block`);
+      console.error(`  File: ${result.rolePath}`);
+      console.error(`  Fix:  add an llm: block to the facilitator's role.md. Example:`);
+      console.error(`          llm:`);
+      console.error(`            provider: "gemini"   # or anthropic, openai, ollama`);
+      console.error(`  Alternative: the harness default in murmuration/harness.yaml applies`);
+      console.error(`               only when the daemon spawns agents — group-wake needs`);
+      console.error(`               the facilitator's role.md to set the llm explicitly.`);
+      break;
+    case "file-not-found":
+      console.error(`${prefix} facilitator role.md not found`);
+      console.error(`  Expected: ${result.path}`);
+      console.error(
+        `  Fix:  check that the facilitator id "${facilitatorId}" matches an agents/<id>/ directory,`,
+      );
+      console.error(`        and that agents/${facilitatorId}/role.md exists.`);
+      break;
+    case "frontmatter-invalid":
+      console.error(`${prefix} facilitator role.md has invalid frontmatter`);
+      console.error(`  File: ${result.path}`);
+      for (const issue of result.issues) {
+        console.error(`    - ${issue}`);
+      }
+      console.error(`  Hint: run 'murmuration doctor' to auto-diagnose (coming in v0.5.0).`);
+      break;
+    case "other":
+      console.error(`${prefix} unexpected error resolving facilitator's LLM config`);
+      console.error(`  ${result.message}`);
+      break;
+  }
 };
 
 const getDefaultModel = (provider: string): string => {
@@ -69,11 +160,23 @@ const getDefaultModel = (provider: string): string => {
   }
 };
 
+/**
+ * Format a CollaborationError as `CODE: message` so operators see the
+ * real underlying problem instead of just `UNKNOWN`. v0.5.0 Milestone 1.
+ *
+ * Exported for unit tests.
+ */
+export const formatCollaborationError = (err: CollaborationError): string => {
+  const msg = err.message.trim();
+  if (!msg || msg === "Unknown error") return err.code;
+  return `${err.code}: ${msg}`;
+};
+
 /** Fetch the group's open items backlog via the collaboration provider. */
 const fetchGroupBacklog = async (provider: CollaborationProvider): Promise<string> => {
   try {
     const result = await provider.listItems({ state: "open", limit: 30 });
-    if (!result.ok) return `(backlog fetch failed: ${result.error.code})`;
+    if (!result.ok) return `(backlog fetch failed: ${formatCollaborationError(result.error)})`;
     const items = result.value;
     if (items.length === 0) return "(no open items)";
     return items.map((i) => `- ${i.ref.id} ${i.title} [${i.labels.join(", ")}]`).join("\n");
@@ -136,9 +239,13 @@ const executeActions = async (
             receipts.push({ action, success: true });
           } else {
             console.log(
-              `    \x1b[31m✗\x1b[0m label-issue #${String(action.issueNumber)}: ${result.error.code}`,
+              `    \x1b[31m✗\x1b[0m label-issue #${String(action.issueNumber)}: ${formatCollaborationError(result.error)}`,
             );
-            receipts.push({ action, success: false, error: result.error.code });
+            receipts.push({
+              action,
+              success: false,
+              error: formatCollaborationError(result.error),
+            });
           }
           break;
         }
@@ -163,8 +270,14 @@ const executeActions = async (
               ...(id !== undefined ? { issueNumber: id } : {}),
             });
           } else {
-            console.log(`    \x1b[31m✗\x1b[0m create-issue: ${result.error.code}`);
-            receipts.push({ action, success: false, error: result.error.code });
+            console.log(
+              `    \x1b[31m✗\x1b[0m create-issue: ${formatCollaborationError(result.error)}`,
+            );
+            receipts.push({
+              action,
+              success: false,
+              error: formatCollaborationError(result.error),
+            });
           }
           break;
         }
@@ -182,9 +295,13 @@ const executeActions = async (
             receipts.push({ action, success: true });
           } else {
             console.log(
-              `    \x1b[31m✗\x1b[0m close-issue #${String(action.issueNumber)}: ${result.error.code}`,
+              `    \x1b[31m✗\x1b[0m close-issue #${String(action.issueNumber)}: ${formatCollaborationError(result.error)}`,
             );
-            receipts.push({ action, success: false, error: result.error.code });
+            receipts.push({
+              action,
+              success: false,
+              error: formatCollaborationError(result.error),
+            });
           }
           break;
         }
@@ -202,9 +319,13 @@ const executeActions = async (
             receipts.push({ action, success: true });
           } else {
             console.log(
-              `    \x1b[31m✗\x1b[0m comment-issue #${String(action.issueNumber)}: ${result.error.code}`,
+              `    \x1b[31m✗\x1b[0m comment-issue #${String(action.issueNumber)}: ${formatCollaborationError(result.error)}`,
             );
-            receipts.push({ action, success: false, error: result.error.code });
+            receipts.push({
+              action,
+              success: false,
+              error: formatCollaborationError(result.error),
+            });
           }
           break;
         }
@@ -292,16 +413,15 @@ export const runGroupWakeCommand = async (
   console.log("");
 
   // Resolve LLM provider from facilitator's role.md
-  const llmConfig = await resolveLLMConfig(root, config.facilitator);
-  if (!llmConfig) {
-    console.error(
-      `murmuration group-wake: could not read LLM config from facilitator "${config.facilitator}" role.md`,
-    );
+  const llmResult = await resolveLLMConfig(root, config.facilitator);
+  if (!llmResult.ok) {
+    printLLMResolveFailure(config.facilitator, llmResult);
     throw new GroupWakeError(
       "LLM_CONFIG_FAILED",
       `could not read LLM config from facilitator "${config.facilitator}" role.md`,
     );
   }
+  const llmConfig = llmResult.config;
   console.log(`  LLM: ${llmConfig.provider}/${llmConfig.model}`);
 
   // Load secrets + clients
