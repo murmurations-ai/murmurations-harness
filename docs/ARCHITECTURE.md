@@ -604,6 +604,38 @@ Empty catch blocks (`catch { /* best effort */ }`) hide real failures. If an err
 
 The `/api/status` response shape is a public API consumed by the web dashboard, TUI, and future external tools. Define it as a TypeScript interface. Don't compute it with ad-hoc object literals scattered across closures.
 
+### 11. Reasonable defaults everywhere except for identity and secrets
+
+The harness boots and runs against **sparse configuration**. Every field that isn't a secret or a unique identity claim has a reasonable default; missing ≠ broken. Operators should be able to scaffold a murmuration with the minimum frontmatter and have the harness fill in the rest.
+
+The only fields that legitimately require operator input:
+
+- **Secrets** — API keys, tokens. These can't be defaulted by definition; `init` captures them interactively, `doctor` verifies them.
+- **Unique identity claims** — a directory name that means something to the operator (agent slug, group id). The harness can't invent these; but when it has the directory in hand at load time (e.g., `IdentityLoader.load(agentDir)`), it derives reasonable defaults from that context rather than demanding duplicate declarations.
+
+Everything else inherits, cascades, or has a sensible built-in:
+
+- Missing `harness.yaml` → `loadHarnessConfig` returns documented defaults
+- Missing `role.md` → ADR-0027 fallback identity with a visible `daemon.agent.fallback` warning
+- Missing `agent_id` in role.md → derived from the agent directory slug
+- Missing `name` → humanized directory slug (`research-agent` → `"Research Agent"`)
+- Missing `model_tier` → `"balanced"`
+- Missing `soul_file` → `"soul.md"` (relative to the agent directory)
+- Missing `llm.provider` in role.md → cascade to `harness.yaml` `llm.provider`; then to the harness-wide built-in default
+- Missing `signals.sources` → `["github-issue", "private-note"]`
+- Missing `group_memberships` → `[]`
+- Missing `wake_schedule` → dispatch-only (no cron registration; the daemon won't wake this agent on a timer)
+- Missing `governance.plugin` → no-op plugin that allows every action and emits no events
+- Missing `tools.mcp` / `plugins` → `[]`
+
+**Anti-pattern:** Require every operator to list `llm.provider` on every agent even though they already set it in `harness.yaml`. Mistake → init boot-time failure with a cryptic schema error.
+**Fix:** `role.md` `llm:` is optional; if absent, the agent inherits `harness.yaml`'s `llm:`.
+
+**Anti-pattern:** Require `agent_id` in the frontmatter even though the loader already knows the directory name.
+**Fix:** Loader fills `agent_id` from the directory slug before Zod validation runs; explicit operator value still wins.
+
+This principle is what makes `murmuration init` → `murmuration group-wake` a 4-command experience instead of a 40-minute tour of every YAML field.
+
 ---
 
 ## What We Don't Build

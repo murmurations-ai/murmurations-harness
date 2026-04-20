@@ -104,6 +104,13 @@ body
   });
 
   it("returns ok=false reason=no-llm-block when role.md is missing the llm: key", async () => {
+    // v0.5.0 Engineering Standard #11: when role.md has no llm: block,
+    // the loader cascades from harness.yaml. If harness.yaml is present
+    // with an llm: block, the cascade fills in the agent. If neither
+    // role.md nor harness.yaml set llm, and loadHarnessConfig returns
+    // its built-in default (gemini), cascade still succeeds — so
+    // `no-llm-block` is now a degenerate case that requires explicit
+    // setup to produce.
     await writeAgent(
       "facilitator",
       `---
@@ -115,12 +122,11 @@ body
 `,
     );
     const result = await resolveLLMConfig(rootDir, "facilitator");
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toBe("no-llm-block");
-      if (result.reason === "no-llm-block") {
-        expect(result.rolePath).toContain("agents/facilitator/role.md");
-      }
+    // With harness.yaml built-in defaults cascading in, the facilitator
+    // inherits gemini and resolveLLMConfig succeeds.
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.provider).toBe("gemini");
     }
   });
 
@@ -136,12 +142,13 @@ body
   });
 
   it("returns ok=false reason=frontmatter-invalid with the Zod issues when schema fails", async () => {
+    // Numeric agent_id used to trigger schema failure. v0.5.0 coerces
+    // numerics to strings (Engineering Standard #11). To exercise the
+    // frontmatter-invalid path today, use an actually-invalid enum.
     await writeAgent(
       "facilitator",
       `---
-agent_id: 22
-name: "Facilitator"
-model_tier: balanced
+model_tier: galactic
 ---
 body
 `,
@@ -152,10 +159,9 @@ body
       expect(result.reason).toBe("frontmatter-invalid");
       if (result.reason === "frontmatter-invalid") {
         expect(result.path).toContain("agents/facilitator/role.md");
-        // Issue list carries both the Zod message and the v0.5.0 remediation hint
         const joined = result.issues.join("\n");
-        expect(joined).toContain("agent_id");
-        expect(joined).toContain('"facilitator"');
+        expect(joined).toContain("model_tier");
+        expect(joined).toContain("balanced");
       }
     }
   });

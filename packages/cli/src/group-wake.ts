@@ -70,7 +70,18 @@ export const resolveLLMConfig = async (
 ): Promise<ResolveLLMResult> => {
   const rolePath = resolve(rootDir, "agents", facilitatorId, "role.md");
   try {
-    const loader = new IdentityLoader({ rootDir });
+    // Engineering Standard #11: cascade harness.yaml's `llm:` into the
+    // facilitator's role.md when absent.
+    const { loadHarnessConfig } = await import("./harness-config.js");
+    const harness = await loadHarnessConfig(rootDir);
+    const loader = new IdentityLoader({
+      rootDir,
+      roleDefaults: {
+        llm: harness.llm.model
+          ? { provider: harness.llm.provider, model: harness.llm.model }
+          : { provider: harness.llm.provider },
+      },
+    });
     const identity = await loader.load(facilitatorId);
     const llm = identity.frontmatter.llm;
     if (llm) {
