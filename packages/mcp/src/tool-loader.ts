@@ -143,6 +143,8 @@ export class McpToolLoader {
           env[k] = parentEnv[v.substring(1)]!;
         } else if (v.startsWith("$") && process.env[v.substring(1)]) {
           env[k] = process.env[v.substring(1)]!;
+        } else {
+          env[k] = v;
         }
       }
     }
