@@ -262,6 +262,7 @@ murmuration — Murmuration Harness CLI
 Usage:
   murmuration start [options]           Boot the daemon
   murmuration init [dir]                Create a new murmuration (interactive)
+  murmuration doctor [--live] [--fix] [--json]  Diagnose a murmuration's setup
   murmuration directive [options] "msg" Send a directive to agents/groups
   murmuration directive --list          Show all directives and responses
   murmuration group-wake [options]     Convene a group meeting (on demand)
@@ -468,6 +469,21 @@ const main = async (): Promise<void> => {
     }
     case "directive": {
       await runDirective(argv.slice(1), resolveRoot(argv.slice(1)));
+      break;
+    }
+    case "doctor": {
+      const { runDoctorCli } = await import("./doctor.js");
+      const rest = argv.slice(1);
+      const liveFlag = rest.includes("--live");
+      const fixFlag = rest.includes("--fix");
+      const jsonFlag = rest.includes("--json");
+      const exitCode = await runDoctorCli({
+        rootDir: resolveRoot(rest),
+        live: liveFlag,
+        fix: fixFlag,
+        json: jsonFlag,
+      });
+      process.exit(exitCode);
       break;
     }
     case "providers": {
