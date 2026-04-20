@@ -1197,7 +1197,9 @@ const buildSpawnContext = async (
       signalSources: agent.signalScopes?.sources ?? [],
     },
     mcpServerConfigs: agent.tools.mcp,
-    environment: {},
+    environment: agent.secrets
+      ? Object.fromEntries(Object.entries(agent.secrets).map(([k, v]) => [k, v.reveal()]))
+      : {},
   };
 };
 
