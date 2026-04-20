@@ -262,6 +262,7 @@ murmuration — Murmuration Harness CLI
 Usage:
   murmuration start [options]           Boot the daemon
   murmuration init [dir]                Create a new murmuration (interactive)
+  murmuration init --example <name> [dir]  Scaffold a bundled example (e.g. hello)
   murmuration doctor [--live] [--fix] [--json]  Diagnose a murmuration's setup
   murmuration directive [options] "msg" Send a directive to agents/groups
   murmuration directive --list          Show all directives and responses
@@ -374,7 +375,27 @@ const main = async (): Promise<void> => {
       break;
     }
     case "init": {
-      await runInit(argv[1]);
+      // Parse `--example <name>` out of the rest of argv. The first
+      // non-flag positional is the target dir.
+      const rest = argv.slice(1);
+      const exampleFlagIdx = rest.indexOf("--example");
+      let example: string | undefined;
+      let targetArg: string | undefined;
+      if (exampleFlagIdx >= 0) {
+        example = rest[exampleFlagIdx + 1];
+        if (!example || example.startsWith("--")) {
+          console.error("murmuration init --example: a name is required (e.g. `--example hello`).");
+          process.exit(2);
+        }
+        const positionals = rest.filter((_, i) => i !== exampleFlagIdx && i !== exampleFlagIdx + 1);
+        targetArg = positionals.find((p) => !p.startsWith("--"));
+      } else {
+        targetArg = rest.find((p) => !p.startsWith("--"));
+      }
+      await runInit({
+        ...(targetArg !== undefined ? { targetArg } : {}),
+        ...(example !== undefined ? { example } : {}),
+      });
       break;
     }
     case "agents": {

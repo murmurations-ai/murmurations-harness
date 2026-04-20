@@ -1,0 +1,19 @@
+# Hello-circle — example harness configuration
+# Shipped with @murmurations-ai/cli via `murmuration init --example hello`.
+#
+# Local collaboration (no GitHub token needed) — items go to
+# .murmuration/items/ on disk. No governance plugin — meetings run
+# without a state machine. Both choices minimize setup friction so a
+# tester can get a meeting running in under 5 minutes.
+
+llm:
+  provider: "gemini"
+
+governance:
+  model: none
+
+collaboration:
+  provider: local
+
+logging:
+  level: info
