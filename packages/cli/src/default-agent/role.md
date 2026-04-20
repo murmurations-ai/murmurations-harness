@@ -27,6 +27,14 @@ secrets:
   required: []
   optional: ["GITHUB_TOKEN"]
 
+tools:
+  mcp:
+    - name: github
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-github"]
+      env:
+        GITHUB_TOKEN: "$GITHUB_TOKEN"
+
 plugins: []
 ---
 
