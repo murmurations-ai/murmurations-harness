@@ -126,23 +126,27 @@ export class McpToolLoader {
   ): Promise<{ client: Client; transport: StdioClientTransport }> {
     // Merge parent environment (resolved secrets) with server-specific env.
     // Server env wins on conflict.
-    const env: Record<string, string> = {
-      ...(parentEnv ?? {}),
-      ...(server.env ?? {}),
-    };
+    const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) {
       if (v !== undefined) {
         env[k] = v;
       }
     }
+    Object.assign(env, parentEnv ?? {});
+    Object.assign(env, server.env ?? {});
 
     // Evaluate shell-variable syntax in server.env
     if (server.env) {
       for (const [k, v] of Object.entries(server.env)) {
-        if (v.startsWith("$") && parentEnv && parentEnv[v.substring(1)]) {
-          env[k] = parentEnv[v.substring(1)]!;
-        } else if (v.startsWith("$") && process.env[v.substring(1)]) {
-          env[k] = process.env[v.substring(1)]!;
+        if (v.startsWith("$")) {
+          const varName = v.substring(1);
+          if (parentEnv && parentEnv[varName] !== undefined) {
+            env[k] = parentEnv[varName];
+          } else if (process.env[varName] !== undefined) {
+            env[k] = process.env[varName];
+          } else {
+            env[k] = v;
+          }
         } else {
           env[k] = v;
         }
