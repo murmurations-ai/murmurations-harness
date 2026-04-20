@@ -45,7 +45,6 @@ import {
   type SecretDeclaration,
   type SecretsProvider,
   type SecretValue,
-  type SecretKey,
   makeSecretKey,
 } from "../secrets/index.js";
 import {
@@ -524,6 +523,11 @@ export class Daemon {
           if (provider.has(makeSecretKey(opt))) {
             agent.secrets.resolved[opt] = provider.get(makeSecretKey(opt));
           }
+        }
+        // Force inject GITHUB_TOKEN if present in daemon, even if not declared in agent frontmatter
+        // (to handle migrated Phase 2C roles that don't have secrets.optional: ["GITHUB_TOKEN"] yet)
+        if (provider.has(makeSecretKey("GITHUB_TOKEN"))) {
+          agent.secrets.resolved["GITHUB_TOKEN"] = provider.get(makeSecretKey("GITHUB_TOKEN"));
         }
       }
     }
