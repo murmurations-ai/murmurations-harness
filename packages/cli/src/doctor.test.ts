@@ -140,6 +140,18 @@ describe("runDoctor (v0.5.0 Milestone 3)", () => {
     expect(ids).not.toContain("layout.env.mode");
   });
 
+  it("flags missing relative-path governance plugin as error (Milestone 4.6)", async () => {
+    await writeHealthy();
+    // Overwrite harness.yaml to reference a nonexistent plugin
+    await writeFile2(
+      "murmuration/harness.yaml",
+      `llm:\n  provider: "gemini"\ngovernance:\n  model: self-organizing\n  plugin: "./murmuration/governance-s3/index.mjs"\ncollaboration:\n  provider: local\n`,
+    );
+    const report = await runDoctor({ rootDir });
+    const ids = report.findings.map((f) => f.checkId);
+    expect(ids).toContain("governance.plugin-missing");
+  });
+
   it("live category is skipped by default", async () => {
     await writeHealthy();
     const report = await runDoctor({ rootDir });

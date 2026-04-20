@@ -31,7 +31,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc --build tsconfig.build.json && mkdir -p dist/spirit/skills && cp src/spirit/skills/*.md dist/spirit/skills/ && mkdir -p dist/builtin-extensions/files && cp src/builtin-extensions/files/*.json src/builtin-extensions/files/*.mjs dist/builtin-extensions/files/ && mkdir -p dist/builtin-extensions/memory && cp src/builtin-extensions/memory/*.json src/builtin-extensions/memory/*.mjs dist/builtin-extensions/memory/ && mkdir -p dist/default-agent && cp src/default-agent/*.md dist/default-agent/ && mkdir -p dist/examples && cp -R src/examples/. dist/examples/",
+    "build": "tsc --build tsconfig.build.json && mkdir -p dist/spirit/skills && cp src/spirit/skills/*.md dist/spirit/skills/ && mkdir -p dist/builtin-extensions/files && cp src/builtin-extensions/files/*.json src/builtin-extensions/files/*.mjs dist/builtin-extensions/files/ && mkdir -p dist/builtin-extensions/memory && cp src/builtin-extensions/memory/*.json src/builtin-extensions/memory/*.mjs dist/builtin-extensions/memory/ && mkdir -p dist/default-agent && cp src/default-agent/*.md dist/default-agent/ && mkdir -p dist/examples && cp -R src/examples/. dist/examples/ && mkdir -p dist/governance-plugins/s3 && cp src/governance-plugins/s3/index.mjs dist/governance-plugins/s3/",
     "clean": "rm -rf dist .tsbuildinfo .tsbuildinfo.build",
     "typecheck": "tsc --noEmit",
     "start": "node dist/bin.js start"

@@ -85,6 +85,20 @@ const resolveExamplesDir = (): string => {
   return join(here, "..", "src", "examples");
 };
 
+/**
+ * Resolve the bundled S3 governance plugin shipped with the CLI.
+ * v0.5.0 Milestone 4.6: S3 (and any future governance plugins we
+ * author) ship with the CLI so operators don't need to install or
+ * author them from scratch. Copied into the scaffolded murmuration
+ * at init time so the repo is self-contained.
+ */
+const resolveBundledS3Plugin = (): string => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const shipped = join(here, "governance-plugins", "s3", "index.mjs");
+  if (existsSync(shipped)) return shipped;
+  return join(here, "..", "src", "governance-plugins", "s3", "index.mjs");
+};
+
 /** List the example names bundled with this CLI. */
 export const listExamples = (): readonly string[] => {
   const dir = resolveExamplesDir();
@@ -540,10 +554,14 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
   }
 
   // 5. Governance model
+  // Default: self-organizing (Sociocracy 3.0). The S3 plugin ships with
+  // the CLI and is copied into the scaffolded repo below, so this works
+  // out of the box. Operators who want something else can pick from
+  // the menu; those plugins still need to be authored separately.
   const govInput = await ask(
-    "\nGovernance model (self-organizing / chain-of-command / meritocratic / consensus / parliamentary / none) [none]: ",
+    "\nGovernance model (self-organizing / chain-of-command / meritocratic / consensus / parliamentary / none) [self-organizing]: ",
   );
-  const governance = govInput.trim().toLowerCase() || "none";
+  const governance = govInput.trim().toLowerCase() || "self-organizing";
 
   rl?.close();
 
@@ -611,17 +629,32 @@ _What does this murmuration optimize for?_
   );
 
   // murmuration/harness.yaml
-  const governancePluginMap: Record<string, string> = {
-    "self-organizing": "@murmurations-ai/governance-s3",
-    "chain-of-command": "@murmurations-ai/governance-command",
-    meritocratic: "@murmurations-ai/governance-meritocratic",
-    consensus: "@murmurations-ai/governance-consensus",
-    parliamentary: "@murmurations-ai/governance-parliamentary",
-  };
-  const governancePlugin = governancePluginMap[governance];
+  // v0.5.0 Milestone 4.6: the S3 plugin ships bundled with the CLI and
+  // is copied into murmuration/governance-s3/ on init. The plugin path
+  // in harness.yaml is relative so the scaffolded repo is self-contained
+  // (no npm install of an external plugin package needed).
+  let governancePluginPath = "";
+  if (governance === "self-organizing") {
+    governancePluginPath = "./murmuration/governance-s3/index.mjs";
+    await mkdir(join(targetDir, "murmuration", "governance-s3"), { recursive: true });
+    await copyFile(
+      resolveBundledS3Plugin(),
+      join(targetDir, "murmuration", "governance-s3", "index.mjs"),
+    );
+  } else if (governance !== "none") {
+    // Other models don't ship a bundled plugin yet — leave a reference
+    // to a conventional npm package name the operator can install.
+    const placeholders: Record<string, string> = {
+      "chain-of-command": "@murmurations-ai/governance-command",
+      meritocratic: "@murmurations-ai/governance-meritocratic",
+      consensus: "@murmurations-ai/governance-consensus",
+      parliamentary: "@murmurations-ai/governance-parliamentary",
+    };
+    governancePluginPath = placeholders[governance] ?? governance;
+  }
   const governanceBlock =
     governance !== "none"
-      ? `governance:\n  model: "${governance}"\n  plugin: "${governancePlugin ?? governance}"`
+      ? `governance:\n  model: "${governance}"\n  plugin: "${governancePluginPath}"`
       : `governance:\n  model: none`;
 
   const collabBlock =
@@ -845,7 +878,7 @@ ${members.map((m) => `- ${m}`).join("\n")}
 
   const governanceNote =
     governance !== "none"
-      ? `\n  Governance plugin: ${governancePlugin ?? governance} (configured in murmuration/harness.yaml)`
+      ? `\n  Governance plugin: ${governancePluginPath || governance} (configured in murmuration/harness.yaml)`
       : "";
 
   console.log(`
