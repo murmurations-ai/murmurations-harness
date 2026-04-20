@@ -60,6 +60,17 @@ describe("init --example (v0.5.0 Milestone 4)", () => {
     );
   });
 
+  it("ships the S3 governance plugin and wires it in harness.yaml (Milestone 4.6)", async () => {
+    const target = join(parent, "hello-s3");
+    await runInitFromExample("hello-circle", target);
+
+    expect(existsSync(join(target, "murmuration", "governance-s3", "index.mjs"))).toBe(true);
+
+    const harnessYaml = await readFile(join(target, "murmuration", "harness.yaml"), "utf8");
+    expect(harnessYaml).toContain("model: self-organizing");
+    expect(harnessYaml).toContain("./murmuration/governance-s3/index.mjs");
+  });
+
   it("materializes .env from .env.example at 0600 (Milestone 4.5)", async () => {
     const target = join(parent, "hello-env");
     await runInitFromExample("hello-circle", target);

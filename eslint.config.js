@@ -24,6 +24,13 @@ export default tseslint.config(
       // Bundled extensions are plain JS (.mjs) loaded at runtime via
       // the extension loader — they don't participate in the TS project.
       "packages/*/src/builtin-extensions/**",
+      // Bundled governance plugins (v0.5.0 Milestone 4.6) — plain .mjs
+      // shipped with the CLI and copied into operator repos. Not part
+      // of the TS project; format and runtime-check only.
+      "packages/*/src/governance-plugins/**",
+      // Bundled CLI examples (v0.5.0 Milestone 4) — template .mjs files
+      // inside example trees are not part of the TS project either.
+      "packages/*/src/examples/**",
     ],
   },
   js.configs.recommended,

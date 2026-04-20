@@ -514,7 +514,7 @@ const isTrackedByGit = (rootDir: string, relPath: string): boolean => {
 // ---------------------------------------------------------------------------
 
 const runGovernanceChecks = (ctx: CheckContext): void => {
-  const { findings, harness } = ctx;
+  const { rootDir, findings, harness } = ctx;
   const plugin = harness.governance.plugin;
   if (plugin === undefined || plugin === "" || plugin === "none") {
     findings.push({
@@ -525,7 +525,25 @@ const runGovernanceChecks = (ctx: CheckContext): void => {
       detail: "group-wake meetings will run with no state machine (no-op plugin).",
       remediation: `Set \`governance.plugin\` in murmuration/harness.yaml when you're ready to use S3 (or another model).`,
     });
+    return;
   }
+  // If plugin looks like a relative file path, verify it resolves.
+  if (plugin.startsWith("./") || plugin.startsWith("../")) {
+    const resolved = join(rootDir, plugin.replace(/^\.\//, ""));
+    if (!existsSync(resolved)) {
+      findings.push({
+        checkId: "governance.plugin-missing",
+        category: "governance",
+        severity: "error",
+        title: `Governance plugin not found: ${plugin}`,
+        detail: `Expected a file at ${resolved}. boot.ts will fail to load the plugin.`,
+        remediation: `Check the path in murmuration/harness.yaml, or remove the \`governance.plugin\` line to fall back to the no-op plugin.`,
+      });
+    }
+  }
+  // npm package paths are not verified here — that would require a
+  // full `require.resolve`. boot.ts will surface the real error if
+  // the package is missing. Doctor stays fast.
 };
 
 // ---------------------------------------------------------------------------
