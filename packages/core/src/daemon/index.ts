@@ -40,7 +40,14 @@ import {
   validateWake,
 } from "../execution/index.js";
 import type { LoadedAgentIdentity } from "../identity/index.js";
-import { REDACT, type SecretDeclaration, type SecretsProvider } from "../secrets/index.js";
+import {
+  REDACT,
+  type SecretDeclaration,
+  type SecretsProvider,
+  type SecretValue,
+  type SecretKey,
+  makeSecretKey,
+} from "../secrets/index.js";
 import {
   TimerScheduler,
   type Scheduler,
@@ -163,6 +170,7 @@ export interface RegisteredAgent {
   readonly secrets: {
     readonly required: readonly string[];
     readonly optional: readonly string[];
+    resolved?: Record<string, SecretValue>;
   };
 
   /**
@@ -502,6 +510,24 @@ export class Daemon {
       loadedKeys: provider.loadedKeys().map((k) => k.value),
       missingOptional: result.missingOptional.map((k) => k.value),
     });
+
+    // Stitch loaded secrets into agent records
+    for (const agent of this.#agents) {
+      if (agent.secrets) {
+        agent.secrets.resolved = {};
+        for (const req of agent.secrets.required) {
+          if (provider.has(makeSecretKey(req))) {
+            agent.secrets.resolved[req] = provider.get(makeSecretKey(req));
+          }
+        }
+        for (const opt of agent.secrets.optional) {
+          if (provider.has(makeSecretKey(opt))) {
+            agent.secrets.resolved[opt] = provider.get(makeSecretKey(opt));
+          }
+        }
+      }
+    }
+
     return true;
   }
 
@@ -1197,9 +1223,12 @@ const buildSpawnContext = async (
       signalSources: agent.signalScopes?.sources ?? [],
     },
     mcpServerConfigs: agent.tools.mcp,
-    environment: agent.secrets
-      ? Object.fromEntries(Object.entries(agent.secrets).map(([k, v]) => [k, v.reveal()]))
-      : {},
+    environment:
+      agent.secrets && agent.secrets.resolved
+        ? Object.fromEntries(
+            Object.entries(agent.secrets.resolved).map(([k, v]) => [k, v.reveal()]),
+          )
+        : {},
   };
 };
 
