@@ -28,6 +28,12 @@ import { createInterface, type Interface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { buildBuiltinProviderRegistry } from "./builtin-providers/index.js";
+import {
+  captureSecret,
+  GITHUB_TOKEN_SPEC,
+  LLM_KEY_SPECS,
+  type KnownProvider,
+} from "./init-secrets.js";
 
 // DO NOT create readline at module scope — it grabs stdin and corrupts
 // terminal mode for other commands (e.g., attach REPL double echo).
@@ -139,6 +145,67 @@ const askAgentQuestions = async (
   return { name: name.trim(), dir, provider, group, schedule };
 };
 
+/**
+ * Resolve the interactive key-capture spec for a given LLM provider.
+ * Returns null for `ollama` (locally hosted; no key) and for unknown
+ * providers (no interactive capture — the operator edits .env by hand).
+ */
+const getLLMKeySpec = (
+  provider: string,
+): (typeof LLM_KEY_SPECS)[keyof typeof LLM_KEY_SPECS] | null => {
+  if (provider === "gemini" || provider === "anthropic" || provider === "openai") {
+    return LLM_KEY_SPECS[provider satisfies Exclude<KnownProvider, "ollama">];
+  }
+  return null;
+};
+
+/**
+ * What kind of murmuration layout (if any) lives at targetDir.
+ * Used to tell the operator what they're about to run against so they
+ * don't accidentally overwrite half-migrated work. v0.5.0 Milestone 2.
+ */
+export type ExistingStateKind =
+  | "empty-or-missing"
+  | "current" // ADR-0026 compliant (murmuration/ + agents/)
+  | "legacy-circles" // governance/circles/ predating ADR-0026
+  | "partial"; // some ADR-0026 pieces but missing either murmuration/ or agents/
+
+export interface ExistingStateInfo {
+  readonly kind: ExistingStateKind;
+  /** Specific signals that informed the classification. */
+  readonly signals: readonly string[];
+}
+
+export const detectExistingState = (targetDir: string): ExistingStateInfo => {
+  if (!existsSync(targetDir)) {
+    return { kind: "empty-or-missing", signals: ["directory does not exist"] };
+  }
+  const hasMurmurationDir = existsSync(join(targetDir, "murmuration"));
+  const hasAgentsDir = existsSync(join(targetDir, "agents"));
+  const hasCirclesDir = existsSync(join(targetDir, "governance", "circles"));
+  const hasGroupsDir = existsSync(join(targetDir, "governance", "groups"));
+
+  const signals: string[] = [];
+  if (hasMurmurationDir) signals.push("murmuration/ present");
+  if (hasAgentsDir) signals.push("agents/ present");
+  if (hasCirclesDir) signals.push("governance/circles/ present (pre-ADR-0026)");
+  if (hasGroupsDir) signals.push("governance/groups/ present (ADR-0026)");
+
+  if (!hasMurmurationDir && !hasAgentsDir && !hasCirclesDir && !hasGroupsDir) {
+    return {
+      kind: "empty-or-missing",
+      signals: signals.length > 0 ? signals : ["no murmuration/governance artifacts found"],
+    };
+  }
+  if (hasCirclesDir && !hasGroupsDir) {
+    return { kind: "legacy-circles", signals };
+  }
+  if (hasMurmurationDir && hasAgentsDir) {
+    return { kind: "current", signals };
+  }
+  return { kind: "partial", signals };
+};
+
 const formatScheduleYaml = (schedule: string): string => {
   if (schedule === "daily") return 'cron: "0 9 * * *"  # daily at 9am UTC';
   if (schedule === "hourly") return 'cron: "0 * * * *"  # every hour';
@@ -158,8 +225,33 @@ export const runInit = async (targetArg?: string): Promise<void> => {
   const target = targetArg ?? (await ask("Directory to create (e.g. ../my-murmuration): "));
   const targetDir = resolve(target.trim());
 
-  if (existsSync(targetDir)) {
-    const existing = await ask(`${targetDir} already exists. Continue? (y/N): `);
+  // v0.5.0 Milestone 2: detect existing state so the operator knows what
+  // they're about to run against before anything is overwritten.
+  const existingState = detectExistingState(targetDir);
+  if (existingState.kind !== "empty-or-missing") {
+    console.log(`\n${targetDir} already exists.`);
+    for (const signal of existingState.signals) {
+      console.log(`  - ${signal}`);
+    }
+    let warning = "";
+    switch (existingState.kind) {
+      case "current":
+        warning =
+          "This looks like a current (ADR-0026) murmuration. Running init here will overwrite files.";
+        break;
+      case "legacy-circles":
+        warning =
+          "This looks like a pre-ADR-0026 murmuration (governance/circles/). Running init here will overwrite files. A migration tool is planned (see ADR-0026).";
+        break;
+      case "partial":
+        warning =
+          "This looks like a partially-initialized murmuration. Running init here will overwrite any files it generates.";
+        break;
+      default:
+        break;
+    }
+    console.log(`\n${warning}`);
+    const existing = await ask(`Continue anyway? (y/N): `);
     if (existing.trim().toLowerCase() !== "y") {
       console.log("Aborted.");
       rl?.close();
@@ -177,8 +269,23 @@ export const runInit = async (targetArg?: string): Promise<void> => {
   );
   const defaultProvider = normalizeProvider(defaultProviderInput, "gemini");
 
+  // 3a. Capture the LLM API key interactively (v0.5.0 Milestone 2).
+  //     Writes to .env at the end; empty string = operator skipped and
+  //     will populate .env by hand.
+  const capturedSecrets = new Map<string, string>();
+  const llmSpec = getLLMKeySpec(defaultProvider);
+  if (llmSpec) {
+    console.log(
+      `\nLet's capture your ${llmSpec.displayName} API key. Input is hidden; press ENTER to skip.`,
+    );
+    const key = await captureSecret({ spec: llmSpec, askYN: ask });
+    if (key) capturedSecrets.set(llmSpec.envVar, key);
+  } else {
+    console.log(`\nOllama is locally-hosted — no API key needed.`);
+  }
+
   // 4. Collaboration & Products
-  const collabInput = await ask("Collaboration provider (github / local) [github]: ");
+  const collabInput = await ask("\nCollaboration provider (github / local) [github]: ");
   const collaboration = collabInput.trim().toLowerCase() === "local" ? "local" : "github";
 
   let githubOwner = "";
@@ -191,6 +298,13 @@ export const runInit = async (targetArg?: string): Promise<void> => {
       githubOwner = parts[0] ?? "";
       githubRepoName = parts[1] ?? "";
     }
+
+    // 4a. Capture GITHUB_TOKEN (v0.5.0 Milestone 2).
+    console.log(
+      `\nLet's capture your GitHub personal access token. It needs "repo" scope. Input is hidden; press ENTER to skip.`,
+    );
+    const token = await captureSecret({ spec: GITHUB_TOKEN_SPEC, askYN: ask });
+    if (token) capturedSecrets.set(GITHUB_TOKEN_SPEC.envVar, token);
   }
 
   const productInput = await ask(
@@ -393,6 +507,13 @@ budget:
 secrets:
   required: [${secretName ? `"${secretName}"` : ""}]
   ${collaboration === "github" ? '\n  optional: ["GITHUB_TOKEN"]' : ""}
+
+# MCP tools and OpenClaw plugins this agent relies on. Empty = none.
+# See ADR-0020 (MCP tool integration) and ADR-0023 (extension system).
+tools:
+  mcp: []
+
+plugins: []
 ---
 
 # ${agent.name} — Role
@@ -434,22 +555,41 @@ ${members.map((m) => `- ${m}`).join("\n")}
   // uncovered on disk even for a moment. If a .gitignore already
   // exists (e.g. running init against an existing repo), append
   // only the missing entries instead of overwriting.
-  await ensureGitignoreCovers(targetDir, [".env", ".murmuration/"]);
+  await ensureGitignoreCovers(targetDir, [".env", ".env.*", "!.env.example", ".murmuration/"]);
 
-  // .env
+  // v0.5.0 Milestone 2: .env uses captured secrets when available,
+  // placeholder when the operator skipped. .env.example ships the
+  // same keys with empty values so operators committing the repo have
+  // a template to share.
+  const secretNamesToDeclare = new Set<string>(secretNames);
+  if (githubOwner) secretNamesToDeclare.add("GITHUB_TOKEN");
+  const orderedSecretNames = [...secretNamesToDeclare].sort();
+
   const envLines: string[] = [];
-  for (const secret of secretNames) {
-    envLines.push(`${secret}=your-api-key-here`);
+  for (const name of orderedSecretNames) {
+    const captured = capturedSecrets.get(name) ?? "";
+    if (captured) {
+      envLines.push(`${name}=${captured}`);
+    } else if (name === "GITHUB_TOKEN" && !githubOwner) {
+      envLines.push(`# ${name}=ghp_your-token-here`);
+    } else {
+      envLines.push(`${name}=your-api-key-here`);
+    }
   }
-  if (githubOwner) {
-    envLines.push("GITHUB_TOKEN=ghp_your-token-here");
-  } else {
-    envLines.push("# GITHUB_TOKEN=ghp_your-token-here");
-  }
-  const envContent = envLines.join("\n") + "\n";
   const envPath = join(targetDir, ".env");
-  await writeFile(envPath, envContent, "utf8");
+  await writeFile(envPath, envLines.join("\n") + "\n", "utf8");
   await chmod(envPath, 0o600);
+
+  // .env.example — commit-friendly template. Never carries captured values.
+  const envExampleLines: string[] = [
+    "# Copy to .env and fill in. Never commit .env — .gitignore covers it.",
+    "# Permissions: chmod 600 .env",
+    "",
+  ];
+  for (const name of orderedSecretNames) {
+    envExampleLines.push(`${name}=`);
+  }
+  await writeFile(join(targetDir, ".env.example"), envExampleLines.join("\n") + "\n", "utf8");
 
   // Register session
   const sessionName = targetDir.split("/").pop() ?? "murmuration";
@@ -464,39 +604,37 @@ ${members.map((m) => `- ${m}`).join("\n")}
   // Print next steps
   // -------------------------------------------------------------------
 
-  const agentList = agents.map((a) => `    agents/${a.dir}/soul.md + role.md`).join("\n");
-  const groupList =
-    groups.length > 0 ? "\n" + groups.map((g) => `    governance/groups/${g}.md`).join("\n") : "";
+  // v0.5.0 Milestone 2: lead with the hero command a tester runs next.
+  // Optional per-agent tuning hints follow; no step-by-step chore list.
+  const firstGroup = groups[0];
+  const heroCommand = firstGroup
+    ? `  murmuration group-wake --name ${sessionName} --group ${firstGroup}\n`
+    : `  murmuration start --name ${sessionName}\n`;
+
+  const capturedSecretsSummary = [...capturedSecrets.keys()].sort();
+  const capturedHint =
+    capturedSecretsSummary.length > 0
+      ? `  ✓ Captured: ${capturedSecretsSummary.join(", ")} (written to .env at 0600)\n`
+      : `  ⚠ No secrets captured — edit .env before running any command.\n`;
 
   const governanceNote =
     governance !== "none"
-      ? `\n4. To use governance, point to the plugin:\n   murmuration start --name ${sessionName} --governance examples/governance-s3/index.mjs`
+      ? `\n  Governance plugin: ${governancePlugin ?? governance} (configured in murmuration/harness.yaml)`
       : "";
 
-  const githubNote = githubOwner
-    ? `\n${governance !== "none" ? "5" : "4"}. Ensure GITHUB_TOKEN has repo scope for ${githubOwner}/${githubRepoName}`
-    : "";
+  console.log(`
+✓ Murmuration initialized at ${targetDir}
+  Registered as "${sessionName}".${governanceNote}
 
-  console.log(`Done! Created:
-  ${targetDir}/
-    murmuration/soul.md
-    murmuration/harness.yaml
-    murmuration/default-agent/soul.md  (fallback identity — ADR-0027)
-    murmuration/default-agent/role.md  (fallback identity — ADR-0027)
-${agentList}${groupList}
-    .env (0600)
-    .gitignore
+${capturedHint}
+Try it now:
 
-Registered as "${sessionName}".
+  murmuration doctor --name ${sessionName}   # validate the setup
+${heroCommand}
+Next:
 
-Next steps:
-
-1. Edit .env — add your real API keys
-2. Edit the soul.md and role.md files — fill in the placeholders
-3. Review murmuration/default-agent/{soul,role}.md — these are used as
-   the fallback identity for any agent directory that's missing its
-   own files. Tune them to your murmuration's defaults.
-4. Boot the daemon:
-   murmuration start --name ${sessionName}${governanceNote}${githubNote}
+  - Edit agents/<id>/soul.md and role.md to flesh out each agent's voice
+  - Edit governance/groups/<id>.md to flesh out each group's domain
+  - Edit murmuration/default-agent/{soul,role}.md to tune fallback identity
 `);
 };
