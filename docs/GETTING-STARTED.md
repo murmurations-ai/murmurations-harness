@@ -1,221 +1,182 @@
 # Getting Started with the Murmuration Harness
 
-The Murmuration Harness is a generic agent coordination runtime. It runs any number of AI agents on scheduled wakes, each with their own LLM provider, GitHub access scopes, signal sources, and governance model. You bring the agents; the harness handles scheduling, cost tracking, artifact capture, and governance lifecycle.
+The Murmuration Harness is a generic AI-agent coordination runtime. One human (the **Source**) runs any number of AI agents as a coordinated "murmuration" — scheduling wakes, convening group meetings, tracking costs, and producing artifacts.
 
-This guide walks you from zero to a running murmuration in ~10 minutes.
+This guide walks you from zero to a running meeting in under 10 minutes. No prior harness experience required.
+
+---
 
 ## Prerequisites
 
-- **Node.js 20+**
-- **pnpm 9+** (`npm install -g pnpm`)
-- An API key for at least one LLM provider (Gemini, Anthropic, OpenAI) — or Ollama running locally for free
+- **Node.js 20+** (`node --version`)
+- **npm** (ships with Node)
+- **An API key** for your LLM provider of choice. Free-tier Gemini works great for testing — get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (no credit card required).
+- **Optional: a GitHub personal access token** if you want agents to read/write GitHub Issues. For the tutorial you can skip it — the example uses local-only collaboration.
 
-## 1. Clone and build
+---
 
-```sh
-git clone https://github.com/murmurations-ai/murmurations-harness.git
-cd murmurations-harness
-pnpm install
-pnpm build
-```
+## Path A — Fast: run the bundled example (5 minutes)
 
-Verify: `pnpm check` should report all tests passing.
+The fastest way to see the harness work is to scaffold the bundled `hello-circle` example. Two agents, one group, no GitHub required.
 
-## 2. Create your murmuration
+### 1. Install the CLI
 
 ```sh
-node packages/cli/dist/bin.js init ../my-murmuration
+npm install -g @murmurations-ai/cli
 ```
 
-The interactive wizard asks:
+Expected output: `added 123 packages` (varies).
 
-1. **Target directory** — where to create the murmuration
-2. **Purpose** — one sentence describing what this murmuration does
-3. **First agent name** — e.g. `researcher`, `coordinator`, `builder`
-4. **LLM provider** — `gemini`, `anthropic`, `openai`, or `ollama`
-5. **Circle** — optional organizational unit (leave blank for none)
-6. **Governance model** — `self-organizing`, `chain-of-command`, `meritocratic`, `consensus`, `parliamentary`, or `none`
-
-This creates:
-
-```
-my-murmuration/
-  murmuration/soul.md          ← your murmuration's purpose + values
-  agents/<name>/soul.md        ← agent identity
-  agents/<name>/role.md        ← agent config (LLM, schedule, scopes, budget)
-  governance/circles/<circle>.md  ← if you named a circle
-  .env                         ← API key placeholders (chmod 0600)
-  .gitignore
-```
-
-## 3. Configure
-
-### Add your API key
-
-Edit `my-murmuration/.env`:
-
-```
-GEMINI_API_KEY=your-real-key-here
-# GITHUB_TOKEN=ghp_your-token-here  ← uncomment if the agent writes to GitHub
-```
-
-The `.env` file must be `chmod 0600` — the harness refuses to load it otherwise.
-
-### Edit the role
-
-Open `agents/<name>/role.md` and customize the frontmatter:
-
-```yaml
-agent_id: "my-agent"
-name: "My Agent"
-model_tier: "balanced"
-
-llm:
-  provider: "gemini"
-  model: "gemini-2.5-flash" # optional; resolved from tier if absent
-
-wake_schedule:
-  delayMs: 2000 # fires 2s after boot (for testing)
-  # cron: "0 18 * * *"        # daily at 18:00 UTC (for production)
-  # tz: "America/Vancouver"   # optional timezone for cron
-
-signals:
-  sources:
-    - "github-issue"
-    - "private-note"
-
-budget:
-  max_cost_micros: 100000 # 10¢ per wake
-  max_github_api_calls: 10
-  on_breach: "warn" # or "abort"
-```
-
-### That's it — no code required
-
-You do not need to write any code for a standard agent. The harness
-reads your `soul.md` / `role.md`, loads signals, calls the configured
-LLM, and captures the output. Governance participants, researchers,
-builders — all of them work from markdown identity alone.
-
-If an agent has no `llm:` block yet, the daemon still boots — the
-wake just records a "skipped — no LLM client" summary. Add an `llm:`
-block to `role.md` when you're ready and the next wake will call it.
-
-## 4. Boot
+### 2. Scaffold the example
 
 ```sh
-node packages/cli/dist/bin.js start --root ../my-murmuration
+murmuration init --example hello my-first-murm
+cd my-first-murm
 ```
 
-The daemon:
-
-1. Discovers all agents in `agents/*/role.md`
-2. Loads their identities (soul → role → circle contexts)
-3. Constructs per-agent LLM clients + GitHub clients with write-scope enforcement
-4. Registers each agent on its declared wake schedule
-5. Fires wakes, captures artifacts to `.murmuration/runs/<agent>/`
-6. Stays alive until SIGINT
-
-### What you'll see in the logs
-
-```json
-{"event":"daemon.boot.config","rootDir":"...","agentDirs":["my-agent"]}
-{"event":"daemon.compose.agent","agentId":"my-agent","llm":{"provider":"gemini","instantiated":true}}
-{"event":"daemon.agent.registered","agentId":"my-agent","trigger":{"kind":"delay-once","delayMs":2000}}
-{"event":"daemon.wake.fire","agentId":"my-agent","signalCount":0}
-{"event":"daemon.wake.completed","outcome":"completed","cost":{"costMicros":5000}}
-```
-
-### Artifacts
-
-After each wake, the harness writes:
-
-- `.murmuration/runs/<agent>/<YYYY-MM-DD>/digest-<wakeId>.md` — the agent's wake summary with a YAML provenance header
-- `.murmuration/runs/<agent>/index.jsonl` — one structured line per wake with full cost + LLM + GitHub metrics
-
-## 5. Add more agents
-
-Just create more directories under `agents/`:
+Expected output:
 
 ```
-my-murmuration/agents/
-  researcher/role.md     ← already exists
-  coordinator/role.md    ← new agent
-  builder/role.md        ← another new agent
+✓ Copied example "hello-circle" to /path/to/my-first-murm
+  Registered as "my-first-murm".
+
+Next:
+
+  cd my-first-murm
+  cp .env.example .env
+  chmod 600 .env
+  # edit .env and paste your GEMINI_API_KEY
+
+  murmuration doctor --name my-first-murm
+  murmuration group-wake --name my-first-murm --group example --directive "what should we scout next?"
 ```
 
-Each agent gets its own wake schedule, LLM provider, signal scopes, and budget. Restart the daemon and all agents are discovered automatically.
-
-## 6. Add governance (optional)
-
-The harness ships with a pluggable governance interface. Boot with a governance plugin to enable decision tracking, state machines, and review dates:
+### 3. Paste your Gemini API key
 
 ```sh
-# Self-Organizing (Sociocracy 3.0)
-node packages/cli/dist/bin.js start --root ../my-murmuration \
-  --governance examples/governance-s3/index.mjs
+cp .env.example .env
+chmod 600 .env
 ```
 
-When agents emit governance events during wakes (e.g. tensions, proposals), the plugin routes them, tracks items through states, and sets review dates. Five governance models are supported by the interface:
+Then open `.env` in your editor and paste your key:
 
-| Model                | Style                             |
-| -------------------- | --------------------------------- |
-| **Self-Organizing**  | Consent-based, circles (S3)       |
-| **Chain of Command** | Hierarchical approvals            |
-| **Meritocratic**     | Track-record-based authority      |
-| **Consensus**        | Collective agreement              |
-| **Parliamentary**    | Motions + voting (Robert's Rules) |
+```
+GEMINI_API_KEY=AIzaSy...your-actual-key...
+```
 
-Write your own plugin by implementing the `GovernancePlugin` interface from `@murmurations-ai/core`.
-
-## 7. Useful flags
+### 4. Validate the setup
 
 ```sh
-# Boot one specific agent (instead of discovering all)
-murmuration start --root ../my-murmuration --agent my-agent
-
-# Dry-run mode — GitHub mutations are default-denied
-murmuration start --root ../my-murmuration --dry-run
-
-# Exit after the first wake completes (useful for CI/scripting)
-murmuration start --root ../my-murmuration --once
+murmuration doctor
 ```
 
-## 8. Run on a schedule
+Expected output:
 
-For production, use `cron` in the role.md frontmatter instead of `delayMs`:
+```
+murmuration doctor — checking /path/to/my-first-murm
 
-```yaml
-wake_schedule:
-  cron: "0 18 * * *" # daily at 18:00 UTC
-  tz: "America/Vancouver" # optional: interpret cron in local time
+  Layout .................. ✓
+  Schema .................. ✓
+  Secrets ................. ✓
+  Governance .............. ℹ 1 info
+  Live validation ......... (skipped; pass --live to enable)
+  Drift / best-practice ... ✓
+
+  Summary
+  ✓ No errors. Your murmuration should run.
 ```
 
-Then run the daemon as a long-lived process:
+The one info notice is about the no-op governance plugin — expected for hello-circle.
+
+Want to verify your API key actually works? Add `--live`:
 
 ```sh
-# nohup (survives terminal close)
-nohup node packages/cli/dist/bin.js start --root ../my-murmuration \
-  >> ../my-murmuration/.murmuration/daemon.log 2>&1 &
-
-# or tmux (can reattach later)
-tmux new -d -s harness 'node packages/cli/dist/bin.js start --root ../my-murmuration'
+murmuration doctor --live
 ```
 
-The daemon's cron scheduler fires wakes on time. If the machine sleeps, the wake fires immediately when it wakes up.
+### 5. Run your first meeting
 
-## Reference
+```sh
+murmuration group-wake --group example --directive "what should we scout next?"
+```
 
-| Package                           | What it does                                                                       |
-| --------------------------------- | ---------------------------------------------------------------------------------- |
-| `@murmurations-ai/core`           | Daemon, scheduler, executors, identity loader, cost tracking, governance interface |
-| `@murmurations-ai/llm`            | Four-provider LLM client (Gemini, Anthropic, OpenAI, Ollama)                       |
-| `@murmurations-ai/github`         | Typed GitHub REST + GraphQL client with write-scope enforcement                    |
-| `@murmurations-ai/signals`        | Signal aggregator (GitHub issues, private notes, inbox messages, custom)           |
-| `@murmurations-ai/secrets-dotenv` | .env file loader with permission enforcement                                       |
+The facilitator (`host-agent`) invites the scout (`scout-agent`) to contribute. The scout offers observations. The facilitator synthesizes a summary and names a next step. You'll see a streaming transcript in your terminal.
 
-| Example                       | What it demonstrates                                   |
-| ----------------------------- | ------------------------------------------------------ |
-| `examples/hello-world-agent/` | Minimal subprocess agent (no LLM)                      |
-| `examples/research-agent/`    | Full LLM agent with real Gemini calls + GitHub commits |
-| `examples/governance-s3/`     | Self-Organizing governance plugin with state machine   |
+Meeting minutes land in `.murmuration/items/` locally. That's it — you've run a meeting.
+
+---
+
+## Path B — Real: create your own murmuration (~20 minutes)
+
+Once the example works, scaffold a real murmuration tailored to your use case:
+
+```sh
+murmuration init my-production-murm
+```
+
+The interactive interview will ask:
+
+1. **Purpose** — a sentence describing what this murmuration is for
+2. **Default LLM provider** — gemini / anthropic / openai / ollama
+3. **API key** — paste it; input is hidden; you'll see a last-4 confirmation
+4. **Collaboration provider** — `github` (recommended) or `local`
+5. **GitHub repo + token** (if github chosen)
+6. **Agent definitions** — name, provider override, group, wake schedule (one loop per agent)
+7. **Governance model** — self-organizing (S3) / chain-of-command / meritocratic / consensus / parliamentary / none
+
+Every question has a reasonable default you can ENTER through. API keys are validated for shape before confirmation (the init rejects an obviously wrong paste and lets you try again).
+
+After init, run `murmuration doctor` to validate, edit the scaffolded `role.md` / `soul.md` / `governance/groups/*.md` to flesh out your agents and groups, then `murmuration start` to boot the daemon (or `murmuration group-wake` for on-demand meetings).
+
+---
+
+## What to do when…
+
+The top things that can go wrong, with the exact fix.
+
+| Symptom                                                  | What it means                                                               | Fix                                                                                           |
+| -------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `murmuration: command not found`                         | CLI isn't installed or PATH doesn't include npm's global bin                | `npm install -g @murmurations-ai/cli`; verify with `which murmuration`                        |
+| `doctor` reports `layout.murmuration.missing`            | You're not in a murmuration directory                                       | `cd` into the directory you created with `init`, or pass `--root <path>`                      |
+| `doctor` reports `secrets.env.<KEY>.missing`             | Your `.env` has the placeholder but not a real key                          | Edit `.env` and paste your actual key; save                                                   |
+| `doctor` reports `layout.env.mode`                       | `.env` is group/world-readable                                              | `chmod 600 .env`, or run `murmuration doctor --fix`                                           |
+| `doctor` reports `schema.role.<slug>.model_tier`         | A role.md has a non-enum `model_tier`                                       | Use one of `"fast"`, `"balanced"`, `"deep"`                                                   |
+| `doctor` reports `schema.role.<slug>.llm.provider`       | A role.md has an unrecognized provider                                      | Use one of `"gemini"`, `"anthropic"`, `"openai"`, `"ollama"`                                  |
+| `doctor` reports `layout.legacy-circles.only`            | You migrated from pre-ADR-0026 but still have `governance/circles/`         | `murmuration doctor --fix` renames it to `governance/groups/`                                 |
+| `group-wake: could not read LLM config from facilitator` | The facilitator agent's `role.md` has a schema issue                        | Run `murmuration doctor` — the real error is reported there                                   |
+| `create-issue: PERMISSION_DENIED`                        | Your `GITHUB_TOKEN` lacks `repo` scope, or the repo is wrong                | Regenerate token with `repo` scope; verify `collaboration.repo` in `murmuration/harness.yaml` |
+| `group-wake` runs but the facilitator fails mid-turn     | Usually hit rate limit or out of quota on the LLM provider                  | Check the provider's dashboard; try again, or switch providers per-agent in role.md           |
+| Meeting minutes don't appear in GitHub Issues            | Collaboration provider is `local` (writes to `.murmuration/items/` instead) | Check `collaboration.provider` in `murmuration/harness.yaml`                                  |
+
+When in doubt, `murmuration doctor` is the first thing to run. It validates against the full rubric and auto-fixes what it can.
+
+---
+
+## Key commands reference
+
+| Command                                                 | What it does                                  |
+| ------------------------------------------------------- | --------------------------------------------- |
+| `murmuration init [dir]`                                | Interactive scaffold of a new murmuration     |
+| `murmuration init --example hello [dir]`                | Scaffold the bundled hello-circle example     |
+| `murmuration doctor [--live] [--fix] [--json]`          | Diagnose a murmuration's setup                |
+| `murmuration start [--root\|--name]`                    | Boot the daemon                               |
+| `murmuration group-wake --group <id> --directive "..."` | Convene a group meeting on demand             |
+| `murmuration directive --agent <id> "..."`              | Send a directive to a specific agent          |
+| `murmuration agents`                                    | List registered agents and their state        |
+| `murmuration attach <name>`                             | Interactive REPL attached to a running daemon |
+| `murmuration status`                                    | Show daemon + agent state summary             |
+| `murmuration stop`                                      | Graceful shutdown                             |
+
+Pass `--help` to any command for full flag documentation.
+
+---
+
+## Next steps
+
+- **Flesh out your agents.** Each `agents/<slug>/role.md` and `soul.md` is yours to edit. The init scaffolds sensible defaults; you make them specific.
+- **Pick a governance model.** v0.5.0 ships with five: S3 (self-organizing), chain-of-command, meritocratic, consensus, parliamentary. Declare one in `murmuration/harness.yaml`.
+- **Set real wake schedules.** By default, new agents are dispatch-only. Add `wake_schedule.cron` when you're ready for autonomous wakes.
+- **Tune budgets and write scopes** per agent as you observe what they actually need.
+- **Read the architecture docs.** [docs/ARCHITECTURE.md](./ARCHITECTURE.md) covers the engineering standards; ADRs under [docs/adr/](./adr/) cover every load-bearing design decision.
+
+Questions, bugs, feedback: open an issue on [murmurations-ai/murmurations-harness](https://github.com/murmurations-ai/murmurations-harness/issues).
