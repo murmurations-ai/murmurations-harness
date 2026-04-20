@@ -280,14 +280,53 @@ const formatScheduleYaml = (schedule: string): string => {
 // ---------------------------------------------------------------------------
 
 /**
+ * Best-effort read of the example's `murmuration/harness.yaml` to
+ * figure out which LLM provider it uses. Used by runInitFromExample
+ * to prompt for the right `<PROVIDER>_API_KEY`. Defaults to "gemini"
+ * on any parse or read failure — harmless, since captureSecret's
+ * shape validation will reject a pasted wrong-provider key.
+ */
+const detectExampleProvider = async (targetDir: string): Promise<string> => {
+  const harnessPath = join(targetDir, "murmuration", "harness.yaml");
+  if (!existsSync(harnessPath)) return "gemini";
+  try {
+    const content = await readFile(harnessPath, "utf8");
+    const match = /^llm:\s*\n\s*provider:\s*["']?([a-z]+)["']?/m.exec(content);
+    return match?.[1] ?? "gemini";
+  } catch {
+    return "gemini";
+  }
+};
+
+/**
+ * Replace a single `KEY=value` line in an existing .env file, or
+ * append it if absent. Preserves surrounding comments and ordering.
+ * Writes with 0600 in case the caller changed the mode in the interim.
+ */
+const writeEnvKey = async (envPath: string, key: string, value: string): Promise<void> => {
+  let current = "";
+  if (existsSync(envPath)) {
+    current = await readFile(envPath, "utf8");
+  }
+  const keyPattern = new RegExp(`^${key.replace(/[^A-Z0-9_]/g, "")}=.*$`, "m");
+  const newLine = `${key}=${value}`;
+  const next = keyPattern.test(current)
+    ? current.replace(keyPattern, newLine)
+    : current.trimEnd() + (current.length > 0 ? "\n" : "") + newLine + "\n";
+  await writeFile(envPath, next, "utf8");
+  await chmod(envPath, 0o600);
+};
+
+/**
  * Non-interactive init from a bundled example. Copies the example's
- * directory tree into targetDir (creating targetDir if absent), then
- * prints a hero-command block. v0.5.0 Milestone 4.
+ * directory tree into targetDir, materializes `.env` from the
+ * example's `.env.example` (0600), optionally captures the LLM API
+ * key interactively, and prints a hero-command block.
+ * v0.5.0 Milestones 4 + 4.5.
  *
- * The example's own `.env.example` + `.gitignore` ship alongside its
- * murmuration/, agents/, and governance/ — no interactive secrets
- * capture, because the operator typically just wants to paste a key
- * into .env and run group-wake.
+ * UX goal: from 6 commands to 4 for the tester path. Operator runs
+ * `murmuration init --example hello`, pastes a key at the prompt
+ * (or presses ENTER to paste later), and is ready to run `doctor`.
  */
 export const runInitFromExample = async (
   example: string,
@@ -317,6 +356,38 @@ export const runInitFromExample = async (
 
   await copyExample(example, targetDir);
 
+  // v0.5.0 Milestone 4.5: materialize .env from .env.example at 0600
+  // so the operator doesn't have to `cp .env.example .env && chmod 600 .env`.
+  // Then offer to capture the LLM key interactively — same UX as
+  // interactive init. If they skip, .env still carries the placeholder
+  // and doctor will flag it.
+  const envExamplePath = join(targetDir, ".env.example");
+  const envPath = join(targetDir, ".env");
+  if (existsSync(envExamplePath) && !existsSync(envPath)) {
+    await copyFile(envExamplePath, envPath);
+    await chmod(envPath, 0o600);
+  }
+
+  // Determine the provider the example uses (best-effort read of
+  // its harness.yaml). Default to gemini when we can't tell.
+  const exampleProvider = await detectExampleProvider(targetDir);
+  const llmSpec = getLLMKeySpec(exampleProvider);
+  let capturedKey = "";
+  // Only attempt interactive capture when we have a real TTY.
+  // In CI, tests, or piped input the prompt would hang; the operator
+  // can always edit .env by hand later.
+  if (llmSpec && process.stdin.isTTY) {
+    console.log(
+      `\nLet's capture your ${llmSpec.displayName} API key now so you can run a meeting right away.\nInput is hidden; press ENTER to skip and paste it into .env later.`,
+    );
+    capturedKey = await captureSecret({ spec: llmSpec, askYN: ask });
+    if (capturedKey) {
+      await writeEnvKey(envPath, llmSpec.envVar, capturedKey);
+    }
+  }
+
+  rl?.close();
+
   const sessionName = targetDir.split("/").pop() ?? "murmuration";
   try {
     const { registerSession } = await import("./sessions.js");
@@ -325,18 +396,22 @@ export const runInitFromExample = async (
     // sessions module may not be available in all contexts
   }
 
+  const capturedNote = capturedKey
+    ? `\n  ✓ ${llmSpec?.envVar ?? "API key"} captured into .env (0600). You can run doctor and group-wake immediately.\n`
+    : `\n  ⚠ No key captured. Edit .env before running any command.\n`;
+
+  const editStep = capturedKey
+    ? ""
+    : `  # edit .env and paste your ${llmSpec?.envVar ?? "API key"} (https://aistudio.google.com/apikey)\n\n`;
+
   console.log(`
 ✓ Copied example "${example}" to ${targetDir}
   Registered as "${sessionName}".
-
-Next:
+${capturedNote}
+Try it now:
 
   cd ${target}
-  cp .env.example .env
-  chmod 600 .env
-  # edit .env and paste your GEMINI_API_KEY (https://aistudio.google.com/apikey)
-
-  murmuration doctor --name ${sessionName}
+${editStep}  murmuration doctor --name ${sessionName}
   murmuration group-wake --name ${sessionName} --group example --directive "what should we scout next?"
 `);
 };

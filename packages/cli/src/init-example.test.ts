@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+const readFileText = (p: string): Promise<string> => readFile(p, "utf8");
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -58,12 +60,26 @@ describe("init --example (v0.5.0 Milestone 4)", () => {
     );
   });
 
-  it("produces a doctor-clean murmuration after paste of GEMINI_API_KEY", async () => {
+  it("materializes .env from .env.example at 0600 (Milestone 4.5)", async () => {
+    const target = join(parent, "hello-env");
+    await runInitFromExample("hello-circle", target);
+
+    const { stat } = await import("node:fs/promises");
+    const envPath = join(target, ".env");
+    expect(existsSync(envPath)).toBe(true);
+    const mode = (await stat(envPath)).mode & 0o777;
+    expect(mode).toBe(0o600);
+    // Placeholder is present (captured only when stdin is TTY — not in tests)
+    const envContent = await readFileText(envPath);
+    expect(envContent).toContain("GEMINI_API_KEY=");
+  });
+
+  it("produces a doctor-clean murmuration after editing .env with a real key", async () => {
     const target = join(parent, "hello-clean");
     await runInitFromExample("hello-circle", target);
 
-    // Simulate the operator's paste step. hello-circle uses local
-    // collaboration so GITHUB_TOKEN isn't required.
+    // Operator's paste step: overwrite the placeholder with a real key.
+    // Simulates what they'd do in their editor after init.
     await writeFile(
       join(target, ".env"),
       "GEMINI_API_KEY=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXX123\n",
