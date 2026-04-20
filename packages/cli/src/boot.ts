@@ -70,6 +70,7 @@ import {
 import { resolveLLMCost } from "@murmurations-ai/llm/pricing";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
+import { McpToolLoader } from "@murmurations-ai/mcp";
 
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 
@@ -255,6 +256,7 @@ export interface InProcessRunnerClients {
   readonly github?: GithubClient;
   readonly targetRepo?: RepoCoordinate;
   readonly targetBranch?: string;
+  readonly mcpToolLoader?: McpToolLoader;
   /** Operator-defined extension fields. The harness passes these
    *  through without interpretation — runners cast them at the call
    *  site based on their own type knowledge. */
@@ -1143,6 +1145,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               ...(wakeClients.github ? { github: wakeClients.github } : {}),
               ...(targetRepo ? { targetRepo } : {}),
               targetBranch: "main",
+              mcpToolLoader: new McpToolLoader(),
             };
           },
         }),
