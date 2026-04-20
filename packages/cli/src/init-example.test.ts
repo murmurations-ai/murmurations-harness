@@ -53,6 +53,13 @@ describe("init --example (v0.5.0 Milestone 4)", () => {
     );
   });
 
+  it("accepts the `hello` short-name alias for hello-circle", async () => {
+    const target = join(parent, "hello-alias");
+    await runInitFromExample("hello", target);
+    expect(existsSync(join(target, "murmuration", "harness.yaml"))).toBe(true);
+    expect(existsSync(join(target, "agents", "host-agent", "role.md"))).toBe(true);
+  });
+
   it("rejects unknown example names", async () => {
     const target = join(parent, "fresh");
     await expect(runInitFromExample("not-a-real-example", target)).rejects.toThrow(

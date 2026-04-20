@@ -99,6 +99,30 @@ const resolveBundledS3Plugin = (): string => {
   return join(here, "..", "src", "governance-plugins", "s3", "index.mjs");
 };
 
+/**
+ * Short-name → canonical-directory aliases for `--example`. Lets the
+ * operator type the docs-friendly name (`hello`) and get the full
+ * bundled directory (`hello-circle`). Safe to extend as new examples
+ * ship.
+ */
+const EXAMPLE_ALIASES: Readonly<Record<string, string>> = {
+  hello: "hello-circle",
+};
+
+/**
+ * Resolve a user-supplied `--example <name>` to the canonical example
+ * directory. Accepts both aliases (`hello`) and exact directory names
+ * (`hello-circle`). Returns null if neither resolves to a bundled
+ * example.
+ */
+export const resolveExampleName = (name: string): string | null => {
+  const examples = listExamples();
+  if (examples.includes(name)) return name;
+  const aliased = EXAMPLE_ALIASES[name];
+  if (aliased && examples.includes(aliased)) return aliased;
+  return null;
+};
+
 /** List the example names bundled with this CLI. */
 export const listExamples = (): readonly string[] => {
   const dir = resolveExamplesDir();
@@ -346,13 +370,16 @@ export const runInitFromExample = async (
   example: string,
   targetArg: string | undefined,
 ): Promise<void> => {
-  const examples = listExamples();
-  if (!examples.includes(example)) {
+  const resolvedExample = resolveExampleName(example);
+  if (!resolvedExample) {
+    const available = [...new Set([...listExamples(), ...Object.keys(EXAMPLE_ALIASES)])].sort();
     console.error(
-      `murmuration init: no example named "${example}". Available: ${examples.join(", ") || "(none)"}`,
+      `murmuration init: no example named "${example}". Available: ${available.join(", ") || "(none)"}`,
     );
     throw new Error(`unknown example: ${example}`);
   }
+  // From here on, use the canonical directory name.
+  example = resolvedExample;
 
   const target = targetArg ?? `my-${example}-murmuration`;
   const targetDir = resolve(target);
