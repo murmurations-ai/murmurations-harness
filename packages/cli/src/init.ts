@@ -27,6 +27,8 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
+import { humanizeSlug } from "@murmurations-ai/core";
+
 import { buildBuiltinProviderRegistry } from "./builtin-providers/index.js";
 import {
   captureSecret,
@@ -477,18 +479,28 @@ _Define the agent-specific bright lines beyond the murmuration soul._
     labels: []
     issues: []`;
 
+    // Engineering Standard #11 — emit only fields the operator explicitly
+    // chose or that differ from schema/cascade defaults. Omitted fields
+    // inherit: agent_id from dir; name humanized from dir; model_tier
+    // "balanced"; soul_file "soul.md"; llm from harness.yaml.
+    const llmOverride =
+      agent.provider !== defaultProvider ? `\nllm:\n  provider: "${agent.provider}"\n` : "";
+
     await writeFile(
       join(targetDir, "agents", agent.dir, "role.md"),
       `---
-agent_id: "${agent.dir}"
-name: "${agent.name}"
-model_tier: "balanced"
+# Minimum-viable frontmatter. Anything omitted inherits reasonable
+# defaults per docs/ARCHITECTURE.md Engineering Standard #11:
+#   agent_id    → directory name ("${agent.dir}")
+#   name        → humanized directory ("${humanizeSlug(agent.dir)}")
+#   model_tier  → "balanced"
+#   soul_file   → "soul.md"
+#   llm         → inherits murmuration/harness.yaml
+# Uncomment any line to override.
+
 max_wall_clock_ms: 120000
 group_memberships:${groupLine || "\n  []"}
-
-llm:
-  provider: "${agent.provider}"
-
+${llmOverride}
 wake_schedule:
   ${formatScheduleYaml(agent.schedule)}
 
@@ -508,8 +520,7 @@ secrets:
   required: [${secretName ? `"${secretName}"` : ""}]
   ${collaboration === "github" ? '\n  optional: ["GITHUB_TOKEN"]' : ""}
 
-# MCP tools and OpenClaw plugins this agent relies on. Empty = none.
-# See ADR-0020 (MCP tool integration) and ADR-0023 (extension system).
+# MCP tools and OpenClaw plugins. Empty = none.
 tools:
   mcp: []
 

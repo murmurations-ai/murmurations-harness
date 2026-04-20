@@ -174,7 +174,9 @@ group_memberships:
     await expect(loader.load("11-bad")).rejects.toBeInstanceOf(FrontmatterInvalidError);
   });
 
-  it("throws FrontmatterInvalidError when required fields are missing", async () => {
+  it("fills in missing agent_id from the directory name (Reasonable defaults)", async () => {
+    // Engineering Standard #11: operators shouldn't have to repeat the
+    // directory name as agent_id. The loader derives it automatically.
     await writeFixture("murmuration/soul.md", "# Soul\n");
     await writeFixture("agents/12-incomplete/soul.md", "# Soul\n");
     await writeFixture(
@@ -188,16 +190,10 @@ name: "Incomplete"
     );
 
     const loader = new IdentityLoader({ rootDir });
-
-    try {
-      await loader.load("12-incomplete");
-      throw new Error("expected FrontmatterInvalidError");
-    } catch (err) {
-      expect(err).toBeInstanceOf(FrontmatterInvalidError);
-      if (err instanceof FrontmatterInvalidError) {
-        expect(err.issues.some((i) => i.includes("agent_id"))).toBe(true);
-      }
-    }
+    const loaded = await loader.load("12-incomplete");
+    expect(loaded.frontmatter.agent_id).toBe("12-incomplete");
+    expect(loaded.frontmatter.name).toBe("Incomplete");
+    expect(loaded.frontmatter.model_tier).toBe("balanced");
   });
 
   it("throws FrontmatterInvalidError when model_tier is invalid", async () => {
@@ -221,7 +217,11 @@ model_tier: galactic
   });
 
   describe("Zod issue annotation (v0.5.0 Milestone 1)", () => {
-    it("numeric agent_id: error message names the file path AND suggests the fix", async () => {
+    it("numeric agent_id is coerced to a string rather than rejected (Engineering Standard #11)", async () => {
+      // A legacy `agent_id: 22` (YAML integer) used to crash boot with a
+      // schema error. v0.5.0 coerces to string before validation — the
+      // operator's intent was clearly "a string ID", and the harness
+      // doesn't enforce agent_id === dirname, so 22 is accepted as "22".
       await writeFixture("murmuration/soul.md", "# Soul\n");
       await writeFixture("agents/facilitator/soul.md", "# Soul\n");
       await writeFixture(
@@ -237,21 +237,8 @@ model_tier: balanced
       );
 
       const loader = new IdentityLoader({ rootDir });
-      try {
-        await loader.load("facilitator");
-        throw new Error("expected FrontmatterInvalidError");
-      } catch (err) {
-        expect(err).toBeInstanceOf(FrontmatterInvalidError);
-        if (err instanceof FrontmatterInvalidError) {
-          // File path present
-          expect(err.path).toContain("agents/facilitator/role.md");
-          // Remediation hint explicitly names the directory-matching slug
-          const joined = err.issues.join("\n");
-          expect(joined).toContain("agent_id");
-          expect(joined).toContain('"facilitator"');
-          expect(joined).toContain("quoted string");
-        }
-      }
+      const loaded = await loader.load("facilitator");
+      expect(loaded.frontmatter.agent_id).toBe("22");
     });
 
     it("wrong model_tier: issue names the valid enum values", async () => {
@@ -315,6 +302,70 @@ llm:
           expect(joined).toContain("ollama");
         }
       }
+    });
+  });
+
+  describe("Reasonable defaults cascade (Engineering Standard #11)", () => {
+    it("derives agent_id from directory when omitted", async () => {
+      await writeFixture("murmuration/soul.md", "# Soul\n");
+      await writeFixture("agents/my-agent/soul.md", "# Soul\n");
+      await writeFixture(
+        "agents/my-agent/role.md",
+        `---
+name: "My Agent"
+---
+
+body
+`,
+      );
+      const loader = new IdentityLoader({ rootDir });
+      const loaded = await loader.load("my-agent");
+      expect(loaded.frontmatter.agent_id).toBe("my-agent");
+    });
+
+    it("humanizes the directory name when name is omitted", async () => {
+      await writeFixture("murmuration/soul.md", "# Soul\n");
+      await writeFixture("agents/research-agent/soul.md", "# Soul\n");
+      await writeFixture(
+        "agents/research-agent/role.md",
+        "---\n# minimum frontmatter\n---\nbody\n",
+      );
+      const loader = new IdentityLoader({ rootDir });
+      const loaded = await loader.load("research-agent");
+      expect(loaded.frontmatter.name).toBe("Research Agent");
+    });
+
+    it("cascades llm from harness.yaml when role.md omits it", async () => {
+      await writeFixture("murmuration/soul.md", "# Soul\n");
+      await writeFixture("agents/silent/soul.md", "# Soul\n");
+      await writeFixture("agents/silent/role.md", "---\n# minimum frontmatter\n---\nbody\n");
+      const loader = new IdentityLoader({
+        rootDir,
+        roleDefaults: { llm: { provider: "anthropic" } },
+      });
+      const loaded = await loader.load("silent");
+      expect(loaded.frontmatter.llm?.provider).toBe("anthropic");
+    });
+
+    it("role.md llm wins over harness-level default when both are set", async () => {
+      await writeFixture("murmuration/soul.md", "# Soul\n");
+      await writeFixture("agents/opinionated/soul.md", "# Soul\n");
+      await writeFixture(
+        "agents/opinionated/role.md",
+        `---
+llm:
+  provider: "openai"
+---
+
+body
+`,
+      );
+      const loader = new IdentityLoader({
+        rootDir,
+        roleDefaults: { llm: { provider: "gemini" } },
+      });
+      const loaded = await loader.load("opinionated");
+      expect(loaded.frontmatter.llm?.provider).toBe("openai");
     });
   });
 

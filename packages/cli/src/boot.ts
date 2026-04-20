@@ -631,6 +631,13 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         ...(reason.detail !== undefined ? { detail: reason.detail } : {}),
       });
     },
+    // Engineering Standard #11: cascade harness.yaml `llm:` into each
+    // agent's role.md when the agent omits it.
+    roleDefaults: {
+      llm: config.llm.model
+        ? { provider: config.llm.provider, model: config.llm.model }
+        : { provider: config.llm.provider },
+    },
   });
 
   // -------------------------------------------------------------------

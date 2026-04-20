@@ -58,6 +58,73 @@ export class IdentityFileMissingError extends IdentityLoaderError {
 }
 
 /**
+ * Convert a kebab-case directory slug into a human-readable name.
+ * `engineering-lead-agent` → `"Engineering Lead Agent"`.
+ * Used by {@link enrichRoleFrontmatter} when role.md doesn't declare
+ * a `name` — per Engineering Standard #11 (Reasonable defaults).
+ */
+export const humanizeSlug = (slug: string): string =>
+  slug
+    .split(/[-_]/)
+    .filter((s) => s.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+/**
+ * Enrich a parsed role.md frontmatter with directory-derived and
+ * harness-level defaults per Engineering Standard #11.
+ *
+ * Cascade rules (operator explicit > directory context > harness
+ * default > schema default):
+ *   - `agent_id` — defaults to the agent directory slug
+ *   - `name` — defaults to the humanized directory slug
+ *   - `model_tier` — defaults to `"balanced"`
+ *   - `soul_file` — defaults to `"soul.md"` (relative to the agent dir)
+ *   - `llm` — inherits from `harness.yaml`'s `llm:` when role.md
+ *     omits it; preserves role.md's value when present.
+ *
+ * The returned value is intentionally pre-validation so the schema
+ * still enforces type correctness on everything (including the
+ * defaults). Exported for unit tests.
+ */
+export const enrichRoleFrontmatter = (
+  raw: unknown,
+  agentDir: string,
+  roleDefaults?: { readonly llm?: { readonly provider: LLMProvider; readonly model?: string } },
+): Record<string, unknown> => {
+  const base =
+    typeof raw === "object" && raw !== null ? { ...(raw as Record<string, unknown>) } : {};
+
+  // Coerce numeric values to strings before deciding whether to default.
+  // A legacy `agent_id: 22` parses as a number; operators clearly meant
+  // that as a string ID, so stringify rather than blocking or replacing.
+  if (typeof base.agent_id === "number") base.agent_id = String(base.agent_id);
+  if (typeof base.name === "number") base.name = String(base.name);
+
+  if (typeof base.agent_id !== "string" || base.agent_id.length === 0) {
+    base.agent_id = agentDir;
+  }
+  if (typeof base.name !== "string" || base.name.length === 0) {
+    base.name = humanizeSlug(agentDir);
+  }
+  if (typeof base.model_tier !== "string" || base.model_tier.length === 0) {
+    base.model_tier = "balanced";
+  }
+  if (typeof base.soul_file !== "string" || base.soul_file.length === 0) {
+    base.soul_file = "soul.md";
+  }
+  // `llm` cascade: inherit harness-level default only when role.md
+  // declared nothing. Explicit operator override always wins.
+  if ((base.llm === undefined || base.llm === null) && roleDefaults?.llm !== undefined) {
+    base.llm =
+      roleDefaults.llm.model !== undefined
+        ? { provider: roleDefaults.llm.provider, model: roleDefaults.llm.model }
+        : { provider: roleDefaults.llm.provider };
+  }
+  return base;
+};
+
+/**
  * Render a Zod issue with a remediation hint when the failure matches
  * a well-known pattern a new operator is likely to hit (numeric
  * `agent_id`, wrong `model_tier` spelling, etc.). Unknown patterns fall
@@ -134,6 +201,10 @@ const modelTierSchema = z.enum(["fast", "balanced", "deep"]);
  * `ProviderId`. Extended in ADR-0016 (Phase 2C role template).
  */
 const llmProviderSchema = z.enum(["gemini", "anthropic", "openai", "ollama"]);
+
+/** LLM provider enum surface used by harness-level defaults. Kept in
+ *  sync with `llmProviderSchema` above. */
+export type LLMProvider = z.infer<typeof llmProviderSchema>;
 
 /**
  * Cron expression validator. Uses `cron-parser` at load time; any
@@ -376,6 +447,20 @@ export interface IdentityLoaderConfig {
    * host process can log a visible warning (`daemon.agent.fallback`).
    */
   readonly onFallback?: (agentDir: string, reason: IdentityFallbackReason) => void;
+  /**
+   * Harness-level defaults that cascade into each agent's role.md
+   * frontmatter when the agent didn't declare them locally. Per
+   * Engineering Standard #11 (Reasonable defaults), any field absent
+   * from role.md should inherit from this block rather than blocking
+   * boot. Today the only cascading field is `llm` — if role.md has no
+   * `llm:` block, the agent inherits the harness-level provider.
+   *
+   * Callers (boot.ts, group-wake.ts) load `harness.yaml` and pass its
+   * `llm:` block here. Undefined means "no cascade" (legacy behavior).
+   */
+  readonly roleDefaults?: {
+    readonly llm?: { readonly provider: LLMProvider; readonly model?: string };
+  };
 }
 
 /** Why a fallback identity was synthesized for an agent directory. */
@@ -418,6 +503,7 @@ export class IdentityLoader {
   readonly #groupsDir: string;
   readonly #fallbackOnMissing: boolean;
   readonly #onFallback: ((agentDir: string, reason: IdentityFallbackReason) => void) | undefined;
+  readonly #roleDefaults: IdentityLoaderConfig["roleDefaults"];
 
   public constructor(config: IdentityLoaderConfig) {
     this.#rootDir = resolve(config.rootDir);
@@ -426,6 +512,7 @@ export class IdentityLoader {
     this.#groupsDir = config.groupsDir ?? "governance/groups";
     this.#fallbackOnMissing = config.fallbackOnMissing ?? false;
     this.#onFallback = config.onFallback;
+    this.#roleDefaults = config.roleDefaults;
   }
 
   /**
@@ -573,6 +660,12 @@ export class IdentityLoader {
       );
     }
 
+    // Engineering Standard #11 — fill in reasonable defaults BEFORE
+    // schema validation. Explicit operator values always win; missing
+    // fields get directory-derived (agent_id, name) or harness-level
+    // (llm) fallbacks.
+    frontmatterRaw = enrichRoleFrontmatter(frontmatterRaw, agentDir, this.#roleDefaults);
+
     const parsed = roleFrontmatterSchema.safeParse(frontmatterRaw);
     if (!parsed.success) {
       if (!this.#fallbackOnMissing) {
@@ -586,8 +679,12 @@ export class IdentityLoader {
         missingFiles,
         detail: parsed.error.issues.map((i) => i.message).join("; "),
       };
-      frontmatterRaw = parseYaml(
-        splitFrontmatter(await this.#resolveDefaultAgentRole(agentDir)).frontmatter ?? "",
+      frontmatterRaw = enrichRoleFrontmatter(
+        parseYaml(
+          splitFrontmatter(await this.#resolveDefaultAgentRole(agentDir)).frontmatter ?? "",
+        ),
+        agentDir,
+        this.#roleDefaults,
       );
     }
 
