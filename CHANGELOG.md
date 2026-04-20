@@ -3,6 +3,72 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.0] — Unreleased (in tester validation)
+
+**"Out of the box" — a non-technical tester can go from `npm install` to a running meeting in under 10 minutes with zero file editing beyond pasting one API key.**
+
+The v0.5.0 work started from a lived failure: on 2026-04-20, a motivated operator hit seven distinct failure points between `murmuration init` and a working circle meeting. v0.5.0 makes each of those failures impossible to reproduce.
+
+### Added
+
+- **`murmuration doctor`** — preflight diagnosis command with six check categories (layout, schema, secrets, governance, live, drift). `--fix` applies safe auto-remediations (rename `circles/` → `groups/`, `chmod 600 .env`, patch missing `.gitignore` entries). `--live` opts into provider API calls that verify credentials actually authenticate. `--json` emits machine-readable output for CI. 12 integration tests.
+- **`murmuration init --example hello`** — scaffold the bundled `hello-circle` example (2 agents, 1 group, local collaboration, Gemini default) into a fresh directory. From npm install to first meeting in 6 commands.
+- **Interactive secret capture in `init`** — after the LLM provider question, init prompts for the matching `<PROVIDER>_API_KEY` with echo-off, provider-specific shape validation (`AIza…` for Gemini, `sk-ant-…` for Anthropic, `sk-…` for OpenAI, `ghp_…` / `gho_…` / `github_pat_…` for GitHub), and masked-last-4 confirmation. Written directly to `.env` at `0600`; never echoed.
+- **Pre-init state detection** — `init` classifies an existing target directory as `empty-or-missing`, `current` (ADR-0026), `legacy-circles` (pre-ADR-0026), or `partial` before anything is overwritten. Operators see what's there with a specific warning per kind.
+- **`.env.example` on init** — commit-friendly template shipped alongside the 0600-permissioned `.env`. `.gitignore` updated to cover `.env.*` but preserve `.env.example`.
+- **Engineering Standard #11: Reasonable defaults** — codified in `docs/ARCHITECTURE.md`. Any field that isn't a secret or a unique identity claim has a reasonable default; the harness boots against sparse configuration.
+- **Engineering Standard #11 cascade in `role.md`**:
+  - `agent_id` defaults to the directory slug
+  - Numeric `agent_id: 22` coerces to `"22"` (no crash)
+  - `name` defaults to the humanized directory slug
+  - `model_tier` defaults to `"balanced"`
+  - `soul_file` defaults to `"soul.md"`
+  - `llm` cascades from `harness.yaml`'s `llm:` block when role.md omits it
+- **`humanizeSlug(slug)` + `enrichRoleFrontmatter(raw, agentDir, roleDefaults)`** exported from `@murmurations-ai/core` for programmatic use.
+- **`IdentityLoaderConfig.roleDefaults`** — threads the harness-level `llm:` block into the loader so the cascade runs everywhere (boot.ts, group-wake.ts).
+- **`murmuration doctor --name <session>` + hero-command post-init message** — init's final output shows the next command to run verbatim, with the session registered so `--name` shortcuts work immediately.
+- **`tools.mcp: []` + `plugins: []`** emitted in init-generated `role.md` for parity with the default-agent template.
+- **`docs/GETTING-STARTED.md`** rewritten as a tester walkthrough with expected output and a "what to do when…" table for the top 10 failure modes.
+- **`docs/MIGRATION-GUIDE.md`** — upgrade path from pre-v0.5 murmurations, including the Emergent Praxis migration case study.
+
+### Changed
+
+- **Generated `role.md` is ~15 lines shorter.** Init emits minimum-viable frontmatter; Engineering Standard #11 fills in the rest at load time.
+- **`murmuration/default-agent/` fallback role.md** now uses Engineering Standard #11 shape (no duplicated agent_id/name/model_tier when defaults are correct).
+- **README quickstart** leads with the 6-command tester flow instead of the developer-from-source install. Developer install moved to its own section below.
+- **Facilitator LLM resolution** (`group-wake.ts`) — new `ResolveLLMResult` discriminated union replaces the catch-all return-null. Each failure mode (`no-llm-block`, `file-not-found`, `frontmatter-invalid`, `other`) prints targeted remediation instead of `could not read LLM config`.
+- **`IdentityLoader` error messages** — Zod issues for role.md are annotated with remediation hints when the failure matches a common new-operator pattern (numeric `agent_id`, wrong `model_tier`, wrong `llm.provider`, missing required field).
+- **`GitHubCollaborationProvider` error mapping** — GitHub client's hyphen-case codes (`"not-found"`, `"unauthorized"`, `"write-scope-denied"`) now map correctly to `CollaborationErrorCode`. The previous upper-case-only check meant every real GitHub error rendered as `UNKNOWN`. Legacy upper-case codes still accepted for forward compat. Defense in depth: `executeActions` now prints `CODE: message` so even unmapped codes carry the real underlying error.
+
+### Fixed
+
+- **Operators saw `could not read LLM config from facilitator` when the real failure was a schema validation error.** The catch-all in `resolveLLMConfig` swallowed the actual Zod error. Fixed to distinguish and report the true cause.
+- **Operators saw `create-issue: UNKNOWN` on every GitHub action failure.** GitHub provider error codes now map correctly.
+- **`FrontmatterInvalidError` for numeric `agent_id`** used to be cryptic. Now explicitly suggests `agent_id: "<directory-name>"` as the fix (and in v0.5.0, the loader coerces automatically so operators rarely see the error at all).
+
+### Engineering
+
+- 631 tests pass (+86 net from v0.4.5), 0 lint errors, format clean.
+- New modules: `packages/cli/src/init-secrets.ts`, `packages/cli/src/doctor.ts`, `packages/cli/src/examples/hello-circle/` (12 files).
+- New tests: `init-secrets.test.ts`, `init.test.ts`, `doctor.test.ts`, `init-example.test.ts` (+ updated `group-wake.test.ts`, `identity.test.ts`, `collaboration.test.ts`).
+
+### Deferred to v0.5.1+
+
+- **Cross-repo write scopes in `CollaborationProvider`** — the engineering circle's attempt to cross-post meeting minutes onto a different repo's PR failed silently because providers are scoped to one repo. Design via ADR after v0.5.0 ships.
+- **S3 governance plugin as a standalone npm package** — v0.5.0 ships with the no-op plugin as default; real pluggable governance is v0.5.1 material.
+- **`murmuration init` live credential validation** — spec'd for M2 but deferred to `murmuration doctor --live` where it unifies with the other live checks.
+
+### Not yet released
+
+This entry documents the v0.5.0 scope. Source (Nori) wants to test locally before publishing to npm. When ready:
+
+```sh
+pnpm version minor            # bumps 0.4.5 → 0.5.0 across packages
+git tag v0.5.0
+git push --tags
+pnpm -F '@murmurations-ai/*' publish --access public
+```
+
 ## [0.4.5] - 2026-04-19
 
 ### Added

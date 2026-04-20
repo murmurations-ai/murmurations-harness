@@ -4,7 +4,36 @@
 
 The Murmuration Harness is an open-source TypeScript runtime that lets a single human — the **Source** — coordinate a murmuration of AI agents to do real work. It is not an autonomous agent framework. It is a tool that amplifies human agency.
 
-> **v0.3.5** — Extensions (OpenClaw-compatible), web search, `harness.yaml` config, local collaboration, `cd && murmuration`. 8 packages on npm, 486 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
+> **v0.5.0** (in testing) — Out-of-the-box init UX, `murmuration doctor` preflight, hello-circle example, reasonable defaults everywhere. 8 packages, 631 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
+
+## Quickstart (5 minutes, 6 commands)
+
+```sh
+# 1. Install
+npm install -g @murmurations-ai/cli
+
+# 2. Scaffold a working murmuration from the bundled example
+murmuration init --example hello my-first-murm
+cd my-first-murm
+
+# 3. Paste your Gemini API key (free tier is plenty — https://aistudio.google.com/apikey)
+cp .env.example .env
+chmod 600 .env
+# edit .env and paste GEMINI_API_KEY=AIza...
+
+# 4. Verify the setup
+murmuration doctor
+
+# 5. Run your first meeting
+murmuration group-wake --group example --directive "what should we scout next?"
+```
+
+You'll see the facilitator invite the scout, the scout contribute, and the facilitator synthesize a next step. Meeting minutes land in `.murmuration/items/` locally.
+
+For a real murmuration (no example), run `murmuration init` without `--example` and answer the interview.
+
+→ Full walkthrough: [docs/GETTING-STARTED.md](./docs/GETTING-STARTED.md)
+→ Upgrading from pre-v0.5: [docs/MIGRATION-GUIDE.md](./docs/MIGRATION-GUIDE.md)
 
 ## Philosophy: Source as a human role
 
@@ -33,44 +62,22 @@ The harness runs any number of AI agents as a coordinated "murmuration" — sche
 6. **Real work, not theater** — every action produces artifacts; meetings execute structured actions against GitHub
 7. **Identity is inherited** — murmuration soul → agent soul → role; governance and operations are separate concerns
 
-## Quick start
+## Developer install from source
 
-```bash
-# Prerequisites: Node 20+, pnpm 9+
-npm install -g @murmurations-ai/cli
-
-murmuration init my-murmuration
-cd my-murmuration
-
-# Add API keys to .env:
-#   GEMINI_API_KEY=...    (or ANTHROPIC_API_KEY, OPENAI_API_KEY)
-#   GITHUB_TOKEN=...      (optional — use --collaboration local for offline)
-
-murmuration start
-```
-
-That's it. The harness auto-detects the `murmuration/` directory and loads all configuration from `murmuration/harness.yaml`. No flags needed for governance, collaboration, or log level — they're all in the config file.
-
-For offline development (no GitHub):
-
-```bash
-murmuration start --collaboration local
-```
-
-Or install from source:
+For contributors working against the harness directly:
 
 ```bash
 git clone https://github.com/murmurations-ai/murmurations-harness.git
 cd murmurations-harness
 pnpm install && pnpm build
-
 alias murmuration="node $(pwd)/packages/cli/dist/bin.js"
-murmuration init ../my-murmuration
-cd ../my-murmuration
-murmuration start
+
+# Then iterate:
+murmuration init --example hello ../test-murm
+cd ../test-murm
 ```
 
-See [docs/GETTING-STARTED.md](./docs/GETTING-STARTED.md) for the full walkthrough.
+The harness auto-detects the `murmuration/` directory and loads all configuration from `murmuration/harness.yaml` — no flags needed for governance, collaboration, or log level. Use `murmuration doctor` to validate a setup before running.
 
 ## LLM providers
 
