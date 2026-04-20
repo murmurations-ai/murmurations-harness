@@ -40,7 +40,12 @@ import {
   validateWake,
 } from "../execution/index.js";
 import type { LoadedAgentIdentity } from "../identity/index.js";
-import { REDACT, type SecretDeclaration, type SecretsProvider } from "../secrets/index.js";
+import {
+  makeSecretKey,
+  REDACT,
+  type SecretDeclaration,
+  type SecretsProvider,
+} from "../secrets/index.js";
 import {
   TimerScheduler,
   type Scheduler,
@@ -659,7 +664,13 @@ export class Daemon {
   }
 
   async #runWake(agent: RegisteredAgent, event: ScheduledWakeEvent): Promise<void> {
-    const baseContext = await buildSpawnContext(agent, event, this.#signalAggregator, this.#logger);
+    const baseContext = await buildSpawnContext(
+      agent,
+      event,
+      this.#signalAggregator,
+      this.#secrets?.provider,
+      this.#logger,
+    );
 
     // Inject any queued governance events from the inbox into the
     // signal bundle as `custom` signals with sourceId
@@ -1113,6 +1124,7 @@ const buildSpawnContext = async (
   agent: RegisteredAgent,
   event: ScheduledWakeEvent,
   aggregator: SignalAggregator | undefined,
+  secretsProvider: SecretsProvider | undefined,
   logger: DaemonLogger,
 ): Promise<AgentSpawnContext> => {
   const agentId = makeAgentId(agent.agentId);
@@ -1197,10 +1209,31 @@ const buildSpawnContext = async (
       signalSources: agent.signalScopes?.sources ?? [],
     },
     mcpServerConfigs: agent.tools.mcp,
-    environment: agent.secrets
-      ? Object.fromEntries(Object.entries(agent.secrets).map(([k, v]) => [k, v.reveal()]))
-      : {},
+    environment: resolveAgentEnvironment(agent, secretsProvider),
   };
+};
+
+/**
+ * Build the per-wake environment map from this agent's declared secrets.
+ * Required keys that aren't loaded are skipped (boot already refused to
+ * start if a required key was missing); optional keys are included only
+ * when actually present. Names not in `agent.secrets.{required,optional}`
+ * are never read, so the spawn context can't leak unrelated secrets.
+ */
+const resolveAgentEnvironment = (
+  agent: RegisteredAgent,
+  provider: SecretsProvider | undefined,
+): Readonly<Record<string, string>> => {
+  if (!provider) return {};
+  const environment: Record<string, string> = {};
+  const declared = [...agent.secrets.required, ...agent.secrets.optional];
+  for (const name of declared) {
+    const key = makeSecretKey(name);
+    if (provider.has(key)) {
+      environment[name] = provider.get(key).reveal();
+    }
+  }
+  return environment;
 };
 
 /**

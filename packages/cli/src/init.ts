@@ -245,13 +245,13 @@ export const runInit = async (targetArg?: string): Promise<void> => {
   // If local collaboration, remove the github MCP tool from the default agent role.md
   if (collaboration === "local") {
     const defaultRolePath = join(targetDir, "murmuration", "default-agent", "role.md");
-    if (fs.existsSync(defaultRolePath)) {
-      let roleContent = fs.readFileSync(defaultRolePath, "utf8");
-      roleContent = roleContent.replace(
-        /tools:\n  mcp:\n    - name: github\n      command: npx\n      args: \["-y", "@modelcontextprotocol\/server-github"\]\n      env:\n        GITHUB_TOKEN: "\$GITHUB_TOKEN"\n/g,
+    if (existsSync(defaultRolePath)) {
+      const roleContent = await readFile(defaultRolePath, "utf8");
+      const stripped = roleContent.replace(
+        /tools:\n {2}mcp:\n {4}- name: github\n {6}command: npx\n {6}args: \["-y", "@modelcontextprotocol\/server-github"\]\n {6}env:\n {8}GITHUB_TOKEN: "\$GITHUB_TOKEN"\n/g,
         "",
       );
-      fs.writeFileSync(defaultRolePath, roleContent);
+      await writeFile(defaultRolePath, stripped);
     }
   }
 
@@ -298,7 +298,7 @@ _What does this murmuration optimize for?_
       ? `collaboration:\n  provider: "${collaboration}"\n  repo: "${githubOwner}/${githubRepoName}"`
       : `collaboration:\n  provider: "${collaboration}"`;
 
-  const productName = productPath.split("/").pop() || "workspace";
+  const productName = productPath.split("/").pop() ?? "workspace";
   const productBlock = productPath
     ? `\n\nproducts:\n  - name: "${productName}"\n    repo: "${productPath}"`
     : "";
