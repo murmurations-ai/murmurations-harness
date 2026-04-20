@@ -21,7 +21,7 @@
  * scaffolding with inline comments guiding later hand-edits.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { mkdir, writeFile, readFile, appendFile, chmod, copyFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
@@ -64,6 +64,66 @@ const resolveDefaultAgentTemplatesDir = (): string => {
   if (existsSync(shipped)) return shipped;
   // Source-tree fallback for `pnpm -C packages/cli run dev`-style execution.
   return join(here, "..", "src", "default-agent");
+};
+
+// ---------------------------------------------------------------------------
+// Examples — bundled templates copied by `murmuration init --example <name>`.
+// v0.5.0 Milestone 4. A new operator can run
+//   `murmuration init --example hello my-test-dir`
+// and watch a meeting happen in under 5 minutes.
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the shipped examples directory. Mirrors the dist/src
+ * resolution of default-agent templates — dist/examples/ in published
+ * packages, src/examples/ when running from source.
+ */
+const resolveExamplesDir = (): string => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const shipped = join(here, "examples");
+  if (existsSync(shipped)) return shipped;
+  return join(here, "..", "src", "examples");
+};
+
+/** List the example names bundled with this CLI. */
+export const listExamples = (): readonly string[] => {
+  const dir = resolveExamplesDir();
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+};
+
+/**
+ * Recursively copy the bundled example named `name` into targetDir.
+ * Preserves directory structure and file permissions. Silently skips
+ * files that collide — bail out at the caller level if that's a
+ * problem (v0.5.0 Milestone 2 detection kicks in before we get here).
+ */
+const copyExample = async (name: string, targetDir: string): Promise<void> => {
+  const src = join(resolveExamplesDir(), name);
+  if (!existsSync(src)) {
+    const available = listExamples();
+    throw new Error(
+      `No bundled example named "${name}". Available: ${available.join(", ") || "(none)"}`,
+    );
+  }
+  await copyDirRecursive(src, targetDir);
+};
+
+const copyDirRecursive = async (src: string, dest: string): Promise<void> => {
+  await mkdir(dest, { recursive: true });
+  const entries = readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = join(src, entry.name);
+    const destPath = join(dest, entry.name);
+    if (entry.isDirectory()) {
+      await copyDirRecursive(srcPath, destPath);
+    } else if (entry.isFile()) {
+      await copyFile(srcPath, destPath);
+    }
+  }
 };
 
 const copyDefaultAgentTemplates = async (destDir: string): Promise<void> => {
@@ -219,7 +279,87 @@ const formatScheduleYaml = (schedule: string): string => {
 // Main init
 // ---------------------------------------------------------------------------
 
-export const runInit = async (targetArg?: string): Promise<void> => {
+/**
+ * Non-interactive init from a bundled example. Copies the example's
+ * directory tree into targetDir (creating targetDir if absent), then
+ * prints a hero-command block. v0.5.0 Milestone 4.
+ *
+ * The example's own `.env.example` + `.gitignore` ship alongside its
+ * murmuration/, agents/, and governance/ — no interactive secrets
+ * capture, because the operator typically just wants to paste a key
+ * into .env and run group-wake.
+ */
+export const runInitFromExample = async (
+  example: string,
+  targetArg: string | undefined,
+): Promise<void> => {
+  const examples = listExamples();
+  if (!examples.includes(example)) {
+    console.error(
+      `murmuration init: no example named "${example}". Available: ${examples.join(", ") || "(none)"}`,
+    );
+    throw new Error(`unknown example: ${example}`);
+  }
+
+  const target = targetArg ?? `my-${example}-murmuration`;
+  const targetDir = resolve(target);
+
+  const existingState = detectExistingState(targetDir);
+  if (existingState.kind !== "empty-or-missing") {
+    console.error(
+      `murmuration init: ${targetDir} already exists; refusing to overwrite an example scaffold.`,
+    );
+    console.error(
+      `  Remove the directory first, or pass a fresh target path: \`murmuration init --example ${example} some-other-dir\`.`,
+    );
+    throw new Error(`target directory not empty: ${targetDir}`);
+  }
+
+  await copyExample(example, targetDir);
+
+  const sessionName = targetDir.split("/").pop() ?? "murmuration";
+  try {
+    const { registerSession } = await import("./sessions.js");
+    registerSession(sessionName, targetDir);
+  } catch {
+    // sessions module may not be available in all contexts
+  }
+
+  console.log(`
+✓ Copied example "${example}" to ${targetDir}
+  Registered as "${sessionName}".
+
+Next:
+
+  cd ${target}
+  cp .env.example .env
+  chmod 600 .env
+  # edit .env and paste your GEMINI_API_KEY (https://aistudio.google.com/apikey)
+
+  murmuration doctor --name ${sessionName}
+  murmuration group-wake --name ${sessionName} --group example --directive "what should we scout next?"
+`);
+};
+
+export interface RunInitOptions {
+  /** Positional target dir. If omitted, the interactive prompt asks. */
+  readonly targetArg?: string;
+  /** If set, bypass the interactive interview and copy the named example. */
+  readonly example?: string;
+}
+
+export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Promise<void> => {
+  const options: RunInitOptions =
+    typeof optionsOrTargetArg === "string"
+      ? { targetArg: optionsOrTargetArg }
+      : (optionsOrTargetArg ?? {});
+  const { targetArg, example } = options;
+
+  if (example !== undefined) {
+    await runInitFromExample(example, targetArg);
+    return;
+  }
+
   const providerRegistry = buildBuiltinProviderRegistry();
   console.log("\nmurmuration init — create a new murmuration\n");
 
