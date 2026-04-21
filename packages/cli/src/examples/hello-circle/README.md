@@ -37,7 +37,7 @@ chmod 600 .env
 murmuration doctor --root .
 
 # 3. Wake the group with a directive
-murmuration group-wake --root . --group example --directive "what should we scout next?"
+murmuration convene --root . --group example --directive "what should we scout next?"
 ```
 
 The host invites scout's observation, synthesizes a summary, names a next step. Meeting minutes land in `.murmuration/items/` locally (no GitHub needed).

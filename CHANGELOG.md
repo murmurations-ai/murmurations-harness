@@ -33,6 +33,7 @@ The v0.5.0 work started from a lived failure: on 2026-04-20, a motivated operato
 
 ### Changed
 
+- **`murmuration convene` replaces `murmuration group-wake`** — unified with the REPL's `:convene` so the operator has one verb for "start a group meeting" regardless of surface. `group-wake` still works as a deprecated alias (prints a deprecation notice) and will be removed in a future release.
 - **Generated `role.md` is ~15 lines shorter.** Init emits minimum-viable frontmatter; Engineering Standard #11 fills in the rest at load time.
 - **`murmuration/default-agent/` fallback role.md** now uses Engineering Standard #11 shape (no duplicated agent_id/name/model_tier when defaults are correct).
 - **README quickstart** leads with the 6-command tester flow instead of the developer-from-source install. Developer install moved to its own section below.

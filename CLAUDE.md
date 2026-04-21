@@ -142,7 +142,7 @@ murmuration cost   [--root|--name] [--json]
 
 # Actions
 murmuration directive --root <path> --agent <id> "message"
-murmuration group-wake --root <path> --group <id> [--governance] [--directive "msg"]
+murmuration convene --root <path> --group <id> [--governance] [--directive "msg"]
 murmuration backlog --root <path> --group <id> [--repo owner/repo] [--refresh]
 murmuration init [dir]
 

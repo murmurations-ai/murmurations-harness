@@ -1,10 +1,10 @@
 /**
- * `murmuration group-wake` — trigger a group meeting on demand.
+ * `murmuration convene` — trigger a group meeting on demand.
  *
  * Usage:
- *   murmuration group-wake --root ../my-murmuration --group content
- *   murmuration group-wake --root ../my-murmuration --group content --governance
- *   murmuration group-wake --root ../my-murmuration --group content --directive "What's our top priority?"
+ *   murmuration convene --root ../my-murmuration --group content
+ *   murmuration convene --root ../my-murmuration --group content --governance
+ *   murmuration convene --root ../my-murmuration --group content --directive "What's our top priority?"
  */
 
 import { randomUUID } from "node:crypto";
@@ -121,7 +121,7 @@ const printLLMResolveFailure = (
   facilitatorId: string,
   result: Exclude<ResolveLLMResult, { readonly ok: true }>,
 ): void => {
-  const prefix = "murmuration group-wake:";
+  const prefix = "murmuration convene:";
   switch (result.reason) {
     case "no-llm-block":
       console.error(`${prefix} facilitator "${facilitatorId}" role.md has no llm: block`);
@@ -130,7 +130,7 @@ const printLLMResolveFailure = (
       console.error(`          llm:`);
       console.error(`            provider: "gemini"   # or anthropic, openai, ollama`);
       console.error(`  Alternative: the harness default in murmuration/harness.yaml applies`);
-      console.error(`               only when the daemon spawns agents — group-wake needs`);
+      console.error(`               only when the daemon spawns agents — convene needs`);
       console.error(`               the facilitator's role.md to set the llm explicitly.`);
       break;
     case "file-not-found":
@@ -388,10 +388,7 @@ export const runGroupWakeCommand = async (
   const groupIdx = args.indexOf("--group");
   const groupId = groupIdx >= 0 ? args[groupIdx + 1] : undefined;
   if (!groupId) {
-    throw new GroupWakeError(
-      "MISSING_GROUP_ID",
-      "murmuration group-wake: --group <id> is required",
-    );
+    throw new GroupWakeError("MISSING_GROUP_ID", "murmuration convene: --group <id> is required");
   }
 
   const isGovernance = args.includes("--governance");
@@ -411,7 +408,7 @@ export const runGroupWakeCommand = async (
   if (!existsSync(groupDocPath)) {
     throw new GroupWakeError(
       "GROUP_NOT_FOUND",
-      `murmuration group-wake: group doc not found at ${groupDocPath}`,
+      `murmuration convene: group doc not found at ${groupDocPath}`,
     );
   }
   const groupContent = await readFile(groupDocPath, "utf8");
@@ -468,7 +465,7 @@ export const runGroupWakeCommand = async (
   if (!llmClient) {
     throw new GroupWakeError(
       "MISSING_LLM_TOKEN",
-      `murmuration group-wake: ${secretKeyName ?? "LLM token"} not found in .env`,
+      `murmuration convene: ${secretKeyName ?? "LLM token"} not found in .env`,
     );
   }
 

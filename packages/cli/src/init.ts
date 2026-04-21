@@ -488,7 +488,7 @@ export const runInitFromExample = async (
   }
 
   const capturedNote = capturedKey
-    ? `\n  ✓ ${llmSpec?.envVar ?? "API key"} captured into .env (0600). You can run doctor and group-wake immediately.\n`
+    ? `\n  ✓ ${llmSpec?.envVar ?? "API key"} captured into .env (0600). You can run doctor and convene immediately.\n`
     : `\n  ⚠ No key captured. Edit .env before running any command.\n`;
 
   const editStep = capturedKey
@@ -503,7 +503,7 @@ Try it now:
 
   cd ${target}
 ${editStep}  murmuration doctor --name ${sessionName}
-  murmuration group-wake --name ${sessionName} --group example --directive "what should we scout next?"
+  murmuration convene --name ${sessionName} --group example --directive "what should we scout next?"
 `);
 };
 
@@ -981,7 +981,7 @@ ${members.map((m) => `- ${m}`).join("\n")}
   // Optional per-agent tuning hints follow; no step-by-step chore list.
   const firstGroup = groups[0];
   const heroCommand = firstGroup
-    ? `  murmuration group-wake --name ${sessionName} --group ${firstGroup}\n`
+    ? `  murmuration convene --name ${sessionName} --group ${firstGroup}\n`
     : `  murmuration start --name ${sessionName}\n`;
 
   const capturedSecretsSummary = [...capturedSecrets.keys()].sort();
