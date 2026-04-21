@@ -875,7 +875,14 @@ export class DaemonCommandExecutor {
     if (!id) throw new Error("directive.close requires an id");
 
     const result = await this.#deps.collaborationProvider.updateItemState({ id }, "closed");
-    if (!result.ok) throw new Error(result.error.message);
+    if (!result.ok) {
+      if (result.error.code === "NOT_FOUND") {
+        throw new Error(
+          `could not close directive ${id}: GitHub returned "not found". If :directive list showed this item, the token likely lacks write access. Regenerate a PAT with \`repo\` scope (classic) or Issues: Read and write (fine-grained) and update .env.`,
+        );
+      }
+      throw new Error(result.error.message);
+    }
     return { closed: true, id };
   }
 
@@ -894,7 +901,18 @@ export class DaemonCommandExecutor {
       // Fall back to closing if file delete fails (e.g. GitHub provider)
       if (this.#deps.collaborationProvider) {
         const result = await this.#deps.collaborationProvider.updateItemState({ id }, "closed");
-        if (!result.ok) throw new Error(result.error.message);
+        if (!result.ok) {
+          // 404 on a write that just listed successfully almost always
+          // means the token lacks write access — GitHub returns 404
+          // instead of 403 for unauthorized writes. Annotate so the
+          // operator knows where to look.
+          if (result.error.code === "NOT_FOUND") {
+            throw new Error(
+              `could not close directive ${id}: GitHub returned "not found". If :directive list showed this item, the token likely lacks write access. Regenerate a PAT with \`repo\` scope (classic) or Issues: Read and write (fine-grained) and update .env.`,
+            );
+          }
+          throw new Error(result.error.message);
+        }
         return { deleted: true, id, method: "closed" };
       }
       throw new Error(`Could not delete directive ${id}`);
