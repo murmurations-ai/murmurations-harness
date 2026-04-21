@@ -1617,9 +1617,11 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     },
     onWakeNow: async (rootDir, agentId) => {
       const { spawn: cpSpawn } = await import("node:child_process");
-      const { openSync: openF } = await import("node:fs");
+      const { openSync: openF, mkdirSync } = await import("node:fs");
+      const { wakeLogPath } = await import("@murmurations-ai/core");
       const binPath = resolve(dirname(import.meta.url.replace("file://", "")), "bin.js");
-      const logPath = join(rootDir, ".murmuration", `wake-${agentId}.log`);
+      const logPath = wakeLogPath(rootDir, agentId);
+      mkdirSync(dirname(logPath), { recursive: true });
       const child = cpSpawn(
         process.execPath,
         [binPath, "start", "--root", rootDir, "--agent", agentId, "--now"],

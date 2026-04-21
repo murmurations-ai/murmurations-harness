@@ -349,16 +349,12 @@ export const readRecentActivity = async (
   }
 
   // Fallback: parse daemon.log
-  const logPath = join(rootDir, ".murmuration", "daemon.log");
+  const logPath = join(rootDir, ".murmuration", "logs", "daemon.log");
   let contents: string;
   try {
     contents = await readFile(logPath, "utf8");
   } catch {
-    try {
-      contents = await readFile(join(rootDir, ".murmuration", "cron.log"), "utf8");
-    } catch {
-      return [];
-    }
+    return [];
   }
 
   const lines = contents

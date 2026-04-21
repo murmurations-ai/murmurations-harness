@@ -51,9 +51,10 @@ Methods include: `status`, `agents.list`, `groups.list`, `events.history`, `cost
 
 ## Wake logs and digests
 
-- Per-wake log: `<root>/.murmuration/wake-<agent>.log` — JSONL of events for that agent's last wake.
-- Digests: `<root>/.murmuration/runs/<agent>/<YYYY-MM-DD>/digest-<hash>.md` — agent's written artifact.
-- Group meetings: `<root>/.murmuration/runs/group-<groupId>/<YYYY-MM-DD>/meeting-*.md` (fallback when meeting minutes can't be posted to the collaboration provider).
+- Daemon log: `<root>/.murmuration/logs/daemon.log` — stdout/stderr of the daemon process.
+- Per-wake log: `<root>/.murmuration/logs/wake-<agent>.log` — JSONL of events for that agent's last wake.
+- Digests: `<root>/runs/<agent>/<YYYY-MM-DD>/digest-<hash>.md` — agent's written artifact.
+- Group meetings: `<root>/runs/group-<groupId>/<YYYY-MM-DD>/meeting-*.md` (fallback when meeting minutes can't be posted to the collaboration provider).
 
 ## Circuit breaker
 
