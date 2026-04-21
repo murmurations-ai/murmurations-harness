@@ -10,6 +10,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve, join } from "node:path";
 
+import { findRunningSessionByName, listRunningSessionNamesSync } from "./running-sessions.js";
+
 interface SessionEntry {
   readonly root: string;
   readonly registered: string; // ISO date
@@ -127,15 +129,38 @@ export const heartbeatSession = (rootDir: string): void => {
   }
 };
 
-/** Resolve --name to --root from the session registry. */
+/**
+ * Resolve --name to --root. Two sources, in order:
+ *   1. Running-sessions registry (~/.murmuration/sockets/) — tmux-style
+ *      live symlinks. Always right when present; works from any
+ *      directory without prior `register` or `init`.
+ *   2. sessions.json — registered names (useful when the daemon is
+ *      stopped but the operator wants to start it by name).
+ *
+ * v0.5.0 Milestone 4.8 tester feedback: `murmuration attach <name>`
+ * should work whenever a daemon is running, regardless of whether
+ * anyone registered it first.
+ */
 export const resolveSessionRoot = (name: string): string => {
+  // 1. Running-sessions: live symlinks are authoritative when present.
+  //    Works from any directory without prior register/init.
+  const hit = findRunningSessionByName(name);
+  if (hit) return hit.root;
+
+  // 2. sessions.json fallback: the operator registered this name
+  //    (possibly before the daemon was started).
   const registry = loadRegistry();
   const entry = registry[name];
-  if (!entry) {
-    console.error(
-      `murmuration: unknown session "${name}". Run \`murmuration list\` to see registered sessions.`,
-    );
-    process.exit(1);
-  }
-  return entry.root;
+  if (entry) return entry.root;
+
+  // Neither source has it — give the operator a useful error.
+  const available = listRunningSessionNamesSync();
+  const registered = Object.keys(registry).sort();
+  const allNames = [...new Set([...available, ...registered])].sort();
+  const hint =
+    allNames.length > 0
+      ? `Known sessions: ${allNames.join(", ")}.`
+      : `No running or registered sessions found. Start one with \`murmuration start --root <path>\`.`;
+  console.error(`murmuration: unknown session "${name}". ${hint}`);
+  process.exit(1);
 };

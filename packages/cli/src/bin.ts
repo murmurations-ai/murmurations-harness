@@ -17,7 +17,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { runAttach } from "./attach.js";
+import { runAttach, runUnattachedRepl } from "./attach.js";
 import { runBacklog } from "./backlog.js";
 import { bootDaemon } from "./boot.js";
 import { runGroupWakeCommand } from "./group-wake.js";
@@ -327,22 +327,11 @@ const main = async (): Promise<void> => {
       break;
     }
     case undefined: {
-      // Bare `murmuration` with no command:
-      // - If cwd has murmuration/, start the daemon (same as `murmuration start`)
-      // - Otherwise, show registered murmurations and help
-      if (existsSync(resolve(process.cwd(), "murmuration"))) {
-        console.log("Murmuration detected in current directory. Starting...\n");
-        const startArgs = parseStartArgs([]);
-        await bootDaemon({
-          rootDir: startArgs.rootDir,
-          logLevel: startArgs.logLevel,
-        });
-      } else {
-        // Show registered murmurations then help
-        await listSessions();
-        console.log("");
-        process.stdout.write(usage());
-      }
+      // v0.5.0 Milestone 4.9: bare `murmuration` launches an unattached
+      // REPL where the operator can `list` / `attach`. Explicit
+      // `murmuration start` is the only path that boots a daemon. No
+      // cwd magic — surprising auto-starts are gone.
+      await runUnattachedRepl();
       break;
     }
     case "-h":
