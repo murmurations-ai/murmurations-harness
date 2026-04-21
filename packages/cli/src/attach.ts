@@ -347,7 +347,14 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
           partial,
         );
       }
-      if (cmd === ":convene" || cmd === "convene" || cmd === ":groups" || cmd === "groups") {
+      if (
+        cmd === ":convene" ||
+        cmd === "convene" ||
+        cmd === ":groups" ||
+        cmd === "groups" ||
+        cmd === ":events" ||
+        cmd === "events"
+      ) {
         const partial = parts[1] ?? "";
         return finalize(
           groupIds.filter((g) => g.startsWith(partial)),
@@ -1012,18 +1019,30 @@ const handleCommand = async (
     if (resp.error) {
       console.log(`Error: ${resp.error}`);
     } else {
-      console.log(
-        formatEventsTable(
-          resp.result as {
-            groupId: string;
-            date: string;
-            kind: string;
-            minutesUrl?: string;
-            status: string;
-          }[],
-          [],
-        ),
-      );
+      const events = resp.result as {
+        groupId: string;
+        date: string;
+        kind: string;
+        minutesUrl?: string;
+        status: string;
+      }[];
+      // :events <text> — filter by substring on groupId or kind.
+      // Events are group-level meetings so group ids are the natural
+      // filter key. Parallel to :agents/:groups.
+      const filterVal = parts[1];
+      const filtered =
+        filterVal === undefined
+          ? events
+          : events.filter((e) => {
+              const needle = filterVal.toLowerCase();
+              return (
+                e.groupId.toLowerCase().includes(needle) || e.kind.toLowerCase().includes(needle)
+              );
+            });
+      console.log(formatEventsTable(filtered, []));
+      if (filterVal !== undefined && filtered.length === 0) {
+        console.log(`  (no events matched "${filterVal}")`);
+      }
     }
   } else if (verb === "cost") {
     const { formatCostTable } = await import("./formatters.js");
@@ -1127,7 +1146,7 @@ const handleCommand = async (
   :status (s)                       Agent status + governance summary
   :agents [<substring>]             Agent list; optional case-insensitive id filter
   :groups [<substring>]             Group list; optional case-insensitive id filter
-  :events                           Recent meetings + in-flight
+  :events [<substring>]             Recent meetings + in-flight; optional group/kind filter
   :cost                             Cost summary per agent
   :directive (d) [message]          Send a Source directive
   :directive list                   List open directives
