@@ -62,61 +62,44 @@ export const unregisterSession = (name: string): void => {
   console.log(`Unregistered "${name}" (was ${entry?.root ?? "unknown"})`);
 };
 
-/** List all registered murmurations with status. */
+/**
+ * List running murmurations (v0.5.0 Milestone 4.8 — tmux-style).
+ *
+ * Source of truth: `~/.murmuration/sockets/*.sock` symlinks pointing
+ * at each daemon's live control socket. Stopped murmurations are not
+ * shown — they're noise. Stale symlinks (daemon crashed without
+ * cleanup) are pruned as a side effect of listing.
+ *
+ * sessions.json remains the `--name` → `--root` mapping for CLI
+ * shortcuts; it's consulted as a fallback for names not in the
+ * sockets dir (rare).
+ */
 export const listSessions = async (): Promise<void> => {
-  const registry = loadRegistry();
-  const names = Object.keys(registry);
-  if (names.length === 0) {
+  const { listRunningSessions } = await import("./running-sessions.js");
+  const { HARNESS_VERSION, AgentStateStore } = await import("@murmurations-ai/core");
+
+  const running = await listRunningSessions();
+  console.log("murmuration-harness v" + HARNESS_VERSION + "\n");
+
+  if (running.length === 0) {
     console.log(
-      "No murmurations registered. Use `murmuration register <name> --root <path>` to add one.",
+      "No running murmurations.\n\n" +
+        "  Start one with:   murmuration start --root <path>\n" +
+        "  Or from scratch:  murmuration init --example hello my-first-murm",
     );
     return;
   }
 
-  const { HARNESS_VERSION, AgentStateStore } = await import("@murmurations-ai/core");
+  console.log("NAME".padEnd(20) + " " + "STATUS".padEnd(20) + " " + "AGENTS".padEnd(8) + " ROOT");
+  console.log("─".repeat(80));
 
-  console.log("murmuration-harness v" + HARNESS_VERSION + "\n");
-  console.log("NAME".padEnd(15) + " " + "STATUS".padEnd(22) + " " + "AGENTS".padEnd(8) + " ROOT");
-  console.log("─".repeat(70));
+  for (const session of running) {
+    const status = session.pid !== undefined ? `running (PID ${String(session.pid)})` : "running";
 
-  for (const name of names.sort()) {
-    const entry = registry[name];
-    if (!entry) continue;
-    const root = entry.root;
-
-    // Check daemon status — heartbeat is authoritative, pidfile is fallback
-    let status = "stopped";
-    const heartbeatAge = entry.lastHeartbeatAt
-      ? Date.now() - new Date(entry.lastHeartbeatAt).getTime()
-      : Infinity;
-    const heartbeatFresh = heartbeatAge < 120_000; // 2 minutes (heartbeat is 60s)
-
-    if (entry.pid && heartbeatFresh) {
-      try {
-        process.kill(entry.pid, 0);
-        status = `running (PID ${String(entry.pid)})`;
-      } catch {
-        status = "stopped (stale heartbeat)";
-      }
-    } else {
-      // Fallback to pidfile
-      const pidfile = join(root, ".murmuration", "daemon.pid");
-      if (existsSync(pidfile)) {
-        const pid = parseInt(readFileSync(pidfile, "utf8").trim(), 10);
-        try {
-          process.kill(pid, 0);
-          status = `running (PID ${String(pid)})`;
-        } catch {
-          status = "stopped (stale pid)";
-        }
-      }
-    }
-
-    // Count agents
     let agentCount: string;
     try {
       const store = new AgentStateStore({
-        persistDir: join(root, ".murmuration", "agents"),
+        persistDir: join(session.root, ".murmuration", "agents"),
       });
       const loaded = await store.load();
       agentCount = loaded > 0 ? String(store.getAllAgents().length) : "0";
@@ -124,7 +107,9 @@ export const listSessions = async (): Promise<void> => {
       agentCount = "?";
     }
 
-    console.log(`${name.padEnd(15)} ${status.padEnd(22)} ${agentCount.padEnd(8)} ${root}`);
+    console.log(
+      `${session.name.padEnd(20)} ${status.padEnd(20)} ${agentCount.padEnd(8)} ${session.root}`,
+    );
   }
 };
 

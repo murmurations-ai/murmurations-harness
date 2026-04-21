@@ -73,6 +73,7 @@ import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
 import { buildMemoryToolsForAgent } from "./memory/index.js";
+import { registerRunningSocket, unregisterRunningSocket } from "./running-sessions.js";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
@@ -1406,6 +1407,11 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       })
     : firstPassDaemon;
 
+  // v0.5.0 Milestone 4.8: running-session name. Used by registerRunningSocket
+  // below so `murmuration list` shows a readable name per tmux-style socket
+  // directory. Fall back to the root's basename if nothing better is available.
+  const runningSessionName = exampleRoot.split("/").filter(Boolean).pop() ?? "murmuration";
+
   const shutdownPromise = new Promise<void>((resolveShutdown) => {
     const shutdown = (signal: NodeJS.Signals): void => {
       void (async () => {
@@ -1418,6 +1424,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
           })}\n`,
         );
         await effectiveDaemon.stop();
+        if (!once) unregisterRunningSocket(runningSessionName);
         resolveShutdown();
       })();
     };
@@ -1438,6 +1445,12 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   // Start daemon control socket
   const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
+
+  // v0.5.0 Milestone 4.8: publish this daemon's socket to the shared
+  // ~/.murmuration/sockets/ directory so `murmuration list` can find it.
+  if (!once) {
+    registerRunningSocket(runningSessionName, socketPath);
+  }
   const govPersistDir = resolve(exampleRoot, ".murmuration", "governance");
 
   // Command executor — owns command dispatch, status building, and detail handlers
