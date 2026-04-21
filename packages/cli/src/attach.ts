@@ -477,6 +477,26 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   // `:show-digest <agent>` and reused for <TAB> completion on the
   // second arg.
   const digestsByAgentRef: { value: Map<string, readonly string[]> } = { value: new Map() };
+  // Agents we've already kicked off a digest.list fetch for (populated
+  // or in-flight). Prevents duplicate requests on repeated TABs while
+  // the first is still pending.
+  const digestFetchesInFlight = new Set<string>();
+  const maybeLoadDigestsFor = (agentId: string): void => {
+    if (digestsByAgentRef.value.has(agentId)) return;
+    if (digestFetchesInFlight.has(agentId)) return;
+    digestFetchesInFlight.add(agentId);
+    void (async () => {
+      const resp = await send("digest.list", { agentId });
+      if (!resp.error) {
+        const r = resp.result as { digests?: { name: string }[] };
+        digestsByAgentRef.value.set(
+          agentId,
+          (r.digests ?? []).map((d) => d.name),
+        );
+      }
+      digestFetchesInFlight.delete(agentId);
+    })();
+  };
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -545,11 +565,13 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
             partial,
           );
         }
-        // Second arg: digest filename (from the cache populated by
-        // :show-digest <agent> without a file — that call primes the
-        // list for tab completion here).
+        // Second arg: digest filename. Lazy-fire the digest.list for
+        // this agent on first TAB so the SECOND TAB has results. The
+        // enter-path (running :show-digest <agent> with no file arg)
+        // also populates the cache as a side-effect.
         const agentId = parts[1] ?? "";
         const partial = parts[2] ?? "";
+        if (agentIds.includes(agentId)) maybeLoadDigestsFor(agentId);
         const names = digestsByAgentRef.value.get(agentId) ?? [];
         return finalize(
           names.filter((n) => n.startsWith(partial)),
@@ -709,22 +731,9 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
       directiveIdsRef.value = items.map((i) => i.id);
     }
   })();
-  // Warm digest-filename cache for every agent in parallel so
-  // `:show-digest <agent> <TAB>` works on the first attempt. Each
-  // digest.list is a readdir of a small tree; fanning out across 27
-  // agents still finishes in well under a second.
-  void Promise.all(
-    agentIds.map(async (aid) => {
-      const resp = await send("digest.list", { agentId: aid });
-      if (!resp.error) {
-        const r = resp.result as { digests?: { name: string }[] };
-        digestsByAgentRef.value.set(
-          aid,
-          (r.digests ?? []).map((d) => d.name),
-        );
-      }
-    }),
-  );
+  // Digest cache is populated lazily — see `maybeLoadDigestsFor`
+  // below. First TAB for an agent fires the fetch in background;
+  // second TAB picks up results. The enter-path also populates.
   rl.setPrompt(prompt);
   rl.prompt();
 
