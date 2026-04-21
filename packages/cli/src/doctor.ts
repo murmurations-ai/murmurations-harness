@@ -25,6 +25,7 @@ import {
   IdentityLoader,
 } from "@murmurations-ai/core";
 
+import { listBundledPluginAliases, probeGovernancePlugin } from "./governance-plugin-resolver.js";
 import { loadHarnessConfig, type HarnessConfig } from "./harness-config.js";
 
 const execFileP = promisify(execFile);
@@ -527,23 +528,41 @@ const runGovernanceChecks = (ctx: CheckContext): void => {
     });
     return;
   }
-  // If plugin looks like a relative file path, verify it resolves.
-  if (plugin.startsWith("./") || plugin.startsWith("../")) {
-    const resolved = join(rootDir, plugin.replace(/^\.\//, ""));
-    if (!existsSync(resolved)) {
-      findings.push({
-        checkId: "governance.plugin-missing",
-        category: "governance",
-        severity: "error",
-        title: `Governance plugin not found: ${plugin}`,
-        detail: `Expected a file at ${resolved}. boot.ts will fail to load the plugin.`,
-        remediation: `Check the path in murmuration/harness.yaml, or remove the \`governance.plugin\` line to fall back to the no-op plugin.`,
-      });
-    }
+
+  // v0.5.0 Milestone 4.7: probe the same resolution order boot.ts uses.
+  // If nothing resolves, flag an error with a concrete remediation.
+  const probe = probeGovernancePlugin(rootDir, plugin);
+  if (probe.kind === "unresolvable") {
+    const aliases = listBundledPluginAliases();
+    findings.push({
+      checkId: "governance.plugin-unresolvable",
+      category: "governance",
+      severity: "error",
+      title: `Governance plugin "${plugin}" cannot be resolved`,
+      detail: `Tried: ${probe.attempted.join("; ")}. boot.ts will crash on start.`,
+      remediation: `Set \`governance.plugin\` in murmuration/harness.yaml to one of the bundled aliases (${aliases.join(", ")}), a valid relative file path, or an installed npm package name.`,
+      autoFix: async () => {
+        await rewriteHarnessPlugin(join(rootDir, "murmuration", "harness.yaml"), "s3");
+      },
+      autoFixLabel: `rewrite governance.plugin to "s3" (bundled)`,
+    });
   }
-  // npm package paths are not verified here — that would require a
-  // full `require.resolve`. boot.ts will surface the real error if
-  // the package is missing. Doctor stays fast.
+  // bundled-alias / local-path / npm-package → no finding. boot will load.
+};
+
+/**
+ * Rewrite the `governance.plugin:` line in a harness.yaml to a new
+ * value, preserving all other content. Used by `--fix` for the
+ * `governance.plugin-unresolvable` finding.
+ */
+const rewriteHarnessPlugin = async (yamlPath: string, newPlugin: string): Promise<void> => {
+  if (!existsSync(yamlPath)) return;
+  const content = await readFile(yamlPath, "utf8");
+  const pattern = /^(\s*plugin:\s*).*$/m;
+  const next = pattern.test(content) ? content.replace(pattern, `$1"${newPlugin}"`) : content;
+  if (next !== content) {
+    await writeFile(yamlPath, next, "utf8");
+  }
 };
 
 // ---------------------------------------------------------------------------
