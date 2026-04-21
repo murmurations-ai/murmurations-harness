@@ -938,7 +938,11 @@ export class DaemonCommandExecutor {
     const id = params.id as string | undefined;
     if (!id) throw new Error("directive.delete requires an id");
 
-    // For local provider: delete the file. For GitHub: close the issue.
+    // Local-mode only: delete the scaffolded .json. GitHub-mode is
+    // refused — there's no true delete for GitHub issues via PAT, so
+    // falling back to close-as-delete was a misleading duplicate of
+    // :directive close. v0.5.0 tester: "what's the difference between
+    // close and delete?" — now there is one.
     const itemsDir = join(this.#deps.rootDir, ".murmuration", "items");
     const filePath = join(itemsDir, `${id}.json`);
     try {
@@ -946,34 +950,12 @@ export class DaemonCommandExecutor {
       await unlink(filePath);
       return { deleted: true, id };
     } catch {
-      // Fall back to closing if file delete fails (e.g. GitHub provider)
-      if (this.#deps.collaborationProvider) {
-        // Guard: same as close — confirm the target is a source-directive
-        // before closing it. Otherwise :directive delete 12 silently
-        // closes whatever issue 12 is.
-        const delState = await this.#assertIsDirective(id, "delete");
-        if (delState === "closed") {
-          return { deleted: true, id, alreadyClosed: true, method: "closed" };
-        }
-        const result = await this.#deps.collaborationProvider.updateItemState({ id }, "closed");
-        if (!result.ok) {
-          // 404 on a write that just listed successfully almost always
-          // means the token lacks write access — GitHub returns 404
-          // instead of 403 for unauthorized writes. Annotate so the
-          // operator knows where to look.
-          if (result.error.code === "NOT_FOUND") {
-            const repoHint = this.#deps.repoCoordinate
-              ? `${this.#deps.repoCoordinate.owner}/${this.#deps.repoCoordinate.repo}`
-              : "(unknown)";
-            throw new Error(
-              `could not close directive ${id}: GitHub returned "not found" for ${repoHint}#${id}.\n  If :directive list showed this item, check two things:\n  1. Does the issue actually live in ${repoHint}? (The daemon is hitting that repo; if the directive was posted elsewhere, adjust harness.yaml collaboration.repo or the first agent's github_scopes.)\n  2. Does your GITHUB_TOKEN have Issues: Read and write on that repo? (GitHub returns 404 instead of 403 for unauthorized writes.)`,
-            );
-          }
-          throw new Error(result.error.message);
-        }
-        return { deleted: true, id, method: "closed" };
-      }
-      throw new Error(`Could not delete directive ${id}`);
+      const repoHint = this.#deps.repoCoordinate
+        ? `${this.#deps.repoCoordinate.owner}/${this.#deps.repoCoordinate.repo}`
+        : "<owner>/<repo>";
+      throw new Error(
+        `:directive delete isn't supported on GitHub-backed murmurations (GitHub's REST API can't delete issues via PAT).\n  Use one of:\n    :directive close ${id}                         — close the issue (reversible)\n    gh issue delete ${id} --repo ${repoHint}   — permanently delete (requires admin on the repo)\n  Delete remains available for local-mode murmurations where the directive is a .murmuration/items/<id>.json file.`,
+      );
     }
   }
 
