@@ -511,13 +511,24 @@ class GithubClientImpl implements GithubClient {
 
     const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/issues/${String(issueNumber.value)}`;
     // Temporary: always trace updateIssueState so we can diagnose the
-    // 404-on-write bug EP is hitting. Remove once root cause is known.
-    process.stderr.write(
-      `[github] PATCH ${url} state=${state} tokenPrefix=${this.#token.reveal().slice(0, 12)}\n`,
+    // 404-on-write bug EP is hitting. Writes to both stderr AND
+    // /tmp/murmuration-github-trace.log so the operator can see it
+    // regardless of how the daemon was launched.
+    const { appendFileSync: traceAppend } = await import("node:fs");
+    const traceLine = (s: string): void => {
+      process.stderr.write(s);
+      try {
+        traceAppend("/tmp/murmuration-github-trace.log", s);
+      } catch {
+        /* best effort */
+      }
+    };
+    traceLine(
+      `[${new Date().toISOString()}] [github] PATCH ${url} state=${state} tokenPrefix=${this.#token.reveal().slice(0, 12)}\n`,
     );
     const raw = await this.#requestMutation(url, "PATCH", { state }, options);
-    process.stderr.write(
-      `[github] PATCH result: ${raw.ok ? "ok" : `err ${raw.error.code}: ${raw.error.message}`}\n`,
+    traceLine(
+      `[${new Date().toISOString()}] [github] PATCH result: ${raw.ok ? "ok" : `err ${raw.error.code}: ${raw.error.message}`}\n`,
     );
     if (!raw.ok) return raw;
     return { ok: true, value: undefined };
