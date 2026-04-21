@@ -19,3 +19,9 @@ collaboration:
 
 logging:
   level: info
+
+# Spirit knobs — optional. Defaults apply when omitted.
+spirit:
+  # Tool-use budget per Spirit turn. Larger murmurations (many agents)
+  # may need a bigger budget. Default 32.
+  maxSteps: 32
