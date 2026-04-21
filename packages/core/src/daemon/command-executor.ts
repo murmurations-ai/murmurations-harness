@@ -847,6 +847,38 @@ export class DaemonCommandExecutor {
   // Directive list/delete (ADR-0021)
   // -----------------------------------------------------------------------
 
+  /**
+   * Confirm the given item ID is a source-directive before letting
+   * mutations through. Queries the collaboration provider with the
+   * `source-directive` label and checks the ID is present. Throws
+   * with a legible message on failure.
+   *
+   * v0.5.0 tester report: `:directive close 12` closed an unrelated
+   * agent-identity issue because the handler passed any ID straight
+   * through.
+   */
+  async #assertIsDirective(id: string, action: "close" | "delete"): Promise<void> {
+    if (!this.#deps.collaborationProvider) return;
+    const result = await this.#deps.collaborationProvider.listItems({
+      labels: ["source-directive"],
+      state: "all",
+    });
+    if (!result.ok) {
+      // Can't verify — fail closed rather than letting the mutation
+      // through. Better to surface "couldn't check" than to silently
+      // close a non-directive issue.
+      throw new Error(
+        `cannot ${action} directive ${id}: could not verify it is a directive (${result.error.message})`,
+      );
+    }
+    const match = result.value.find((item) => item.ref.id === id);
+    if (!match) {
+      throw new Error(
+        `refusing to ${action} ${id}: that ID is not a source-directive. Run \`:directive list\` to see open directives.`,
+      );
+    }
+  }
+
   async #handleDirectiveList(): Promise<unknown> {
     if (!this.#deps.collaborationProvider) {
       throw new Error("No collaboration provider configured");
@@ -873,6 +905,12 @@ export class DaemonCommandExecutor {
     }
     const id = params.id as string | undefined;
     if (!id) throw new Error("directive.close requires an id");
+
+    // Guard: confirm the target is actually a source-directive before
+    // mutating it. Without this, :directive close 12 would happily
+    // close ANY issue numbered 12, even an unrelated agent identity
+    // doc. Tester caught this in v0.5.0 validation.
+    await this.#assertIsDirective(id, "close");
 
     const result = await this.#deps.collaborationProvider.updateItemState({ id }, "closed");
     if (!result.ok) {
@@ -903,6 +941,10 @@ export class DaemonCommandExecutor {
     } catch {
       // Fall back to closing if file delete fails (e.g. GitHub provider)
       if (this.#deps.collaborationProvider) {
+        // Guard: same as close — confirm the target is a source-directive
+        // before closing it. Otherwise :directive delete 12 silently
+        // closes whatever issue 12 is.
+        await this.#assertIsDirective(id, "delete");
         const result = await this.#deps.collaborationProvider.updateItemState({ id }, "closed");
         if (!result.ok) {
           // 404 on a write that just listed successfully almost always
