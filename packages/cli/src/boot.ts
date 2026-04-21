@@ -1750,6 +1750,12 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       event: "daemon.exit",
     })}\n`,
   );
+  // Force the process to exit. Without this, open servers (Unix
+  // domain socket, HTTP dashboard) keep the event loop alive and
+  // the daemon logs "exit" but never actually terminates — SIGTERM
+  // appears not to kill it. v0.5.0 tester feedback: "SIGTERM never
+  // completely shuts down a murmuration."
+  process.exit(0);
 };
 
 /**
