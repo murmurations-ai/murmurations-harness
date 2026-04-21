@@ -149,7 +149,41 @@ describe("runDoctor (v0.5.0 Milestone 3)", () => {
     );
     const report = await runDoctor({ rootDir });
     const ids = report.findings.map((f) => f.checkId);
-    expect(ids).toContain("governance.plugin-missing");
+    expect(ids).toContain("governance.plugin-unresolvable");
+  });
+
+  it("accepts bundled `plugin: s3` without flagging (Milestone 4.7)", async () => {
+    await writeHealthy();
+    await writeFile2(
+      "murmuration/harness.yaml",
+      `llm:\n  provider: "gemini"\ngovernance:\n  model: self-organizing\n  plugin: "s3"\ncollaboration:\n  provider: local\n`,
+    );
+    const report = await runDoctor({ rootDir });
+    const ids = report.findings.map((f) => f.checkId);
+    expect(ids).not.toContain("governance.plugin-unresolvable");
+  });
+
+  it("--fix rewrites unresolvable governance plugin to bundled s3 (Milestone 4.7)", async () => {
+    await writeHealthy();
+    // Simulate EP's pre-v0.5 state: plugin: s3 looked like a placeholder
+    // but v0.5.0 makes s3 a bundled alias, so this particular case works.
+    // Use an actually-bogus name to exercise --fix.
+    await writeFile2(
+      "murmuration/harness.yaml",
+      `llm:\n  provider: "gemini"\ngovernance:\n  model: self-organizing\n  plugin: "bogus-not-a-real-plugin"\ncollaboration:\n  provider: local\n`,
+    );
+    const report = await runDoctor({ rootDir });
+    expect(
+      report.findings.find((f) => f.checkId === "governance.plugin-unresolvable"),
+    ).toBeDefined();
+    await applyFixes(report);
+    const content = await import("node:fs/promises").then((m) =>
+      m.readFile(join(rootDir, "murmuration", "harness.yaml"), "utf8"),
+    );
+    expect(content).toContain('plugin: "s3"');
+    const retry = await runDoctor({ rootDir });
+    const retryIds = retry.findings.map((f) => f.checkId);
+    expect(retryIds).not.toContain("governance.plugin-unresolvable");
   });
 
   it("live category is skipped by default", async () => {

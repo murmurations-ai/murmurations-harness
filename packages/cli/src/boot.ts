@@ -71,6 +71,7 @@ import { resolveLLMCost } from "@murmurations-ai/llm/pricing";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
+import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
@@ -569,27 +570,37 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const governancePath = config.governance.plugin;
   let governancePlugin: import("@murmurations-ai/core").GovernancePlugin | undefined;
   if (governancePath) {
+    // v0.5.0: short-name aliases for bundled plugins. `plugin: s3` or
+    // `plugin: self-organizing` in harness.yaml resolves to the plugin
+    // shipped inside the CLI package, not a file or npm package the
+    // operator has to install themselves.
+    const bundledAlias = resolveBundledGovernancePlugin(governancePath);
+
     // Try as npm package first (e.g. "@murmurations-ai/governance-s3"),
     // then as file path relative to murmuration root, then cwd.
     let mod: { default?: unknown };
-    try {
-      // Try as npm package — resolve from the murmuration's node_modules first,
-      // then from the CLI's node_modules (global install).
-      const { createRequire } = await import("node:module");
-      const localRequire = createRequire(join(exampleRoot, "package.json"));
-      const resolved = localRequire.resolve(governancePath);
-      mod = (await import(pathToFileURL(resolved).href)) as { default?: unknown };
-    } catch {
+    if (bundledAlias) {
+      mod = (await import(pathToFileURL(bundledAlias).href)) as { default?: unknown };
+    } else {
       try {
-        // Try direct import (works if plugin is globally installed or in CLI's node_modules)
-        mod = (await import(governancePath)) as { default?: unknown };
+        // Try as npm package — resolve from the murmuration's node_modules first,
+        // then from the CLI's node_modules (global install).
+        const { createRequire } = await import("node:module");
+        const localRequire = createRequire(join(exampleRoot, "package.json"));
+        const resolved = localRequire.resolve(governancePath);
+        mod = (await import(pathToFileURL(resolved).href)) as { default?: unknown };
       } catch {
-        // Last resort: file path relative to murmuration root, then cwd
-        const resolved = resolve(exampleRoot, governancePath);
-        const pluginUrl = pathToFileURL(
-          existsSync(resolved) ? resolved : resolve(governancePath),
-        ).href;
-        mod = (await import(pluginUrl)) as { default?: unknown };
+        try {
+          // Try direct import (works if plugin is globally installed or in CLI's node_modules)
+          mod = (await import(governancePath)) as { default?: unknown };
+        } catch {
+          // Last resort: file path relative to murmuration root, then cwd
+          const resolved = resolve(exampleRoot, governancePath);
+          const pluginUrl = pathToFileURL(
+            existsSync(resolved) ? resolved : resolve(governancePath),
+          ).href;
+          mod = (await import(pluginUrl)) as { default?: unknown };
+        }
       }
     }
     const candidate: unknown = mod.default;
