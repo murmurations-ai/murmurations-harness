@@ -16,6 +16,7 @@ import { join } from "node:path";
 
 import { HARNESS_VERSION } from "../index.js";
 import { PROTOCOL_SCHEMA_VERSION } from "./protocol.js";
+import { runsDirForAgent, runsDir as canonicalRunsDir } from "./runs-path.js";
 import { GovernanceStateStore } from "../governance/index.js";
 import type { GovernancePlugin, GovernanceSyncCallbacks } from "../governance/index.js";
 import type { GovernanceTally } from "../groups/index.js";
@@ -269,7 +270,7 @@ export class DaemonCommandExecutor {
     await agentStateStore.load().catch(() => {
       /* best effort */
     });
-    const runsDir = join(rootDir, ".murmuration", "runs", agentId);
+    const runsDir = runsDirForAgent(rootDir, agentId);
     const agent = agentStateStore.getAgent(agentId);
     const recentDigests: { date: string; summary: string; file: string }[] = [];
     try {
@@ -323,7 +324,7 @@ export class DaemonCommandExecutor {
   async #digestList(
     agentId: string,
   ): Promise<{ digests: { name: string; file: string; date: string }[] }> {
-    const runsDir = join(this.#deps.rootDir, ".murmuration", "runs", agentId);
+    const runsDir = runsDirForAgent(this.#deps.rootDir, agentId);
     const rows: { name: string; file: string; date: string; mtimeMs: number }[] = [];
     try {
       const { stat } = await import("node:fs/promises");
@@ -366,7 +367,7 @@ export class DaemonCommandExecutor {
     if (!/^digest-[\w-]+\.md$/.test(file)) {
       throw new Error(`digest.get: bad filename "${file}"`);
     }
-    const runsDir = join(this.#deps.rootDir, ".murmuration", "runs", agentId);
+    const runsDir = runsDirForAgent(this.#deps.rootDir, agentId);
     // Search across day directories for the file.
     const dates = await readdir(runsDir).catch(() => []);
     for (const date of dates) {
@@ -383,7 +384,7 @@ export class DaemonCommandExecutor {
 
   public async groupDetail(groupId: string): Promise<unknown> {
     const { rootDir, agentStateStore, allRegistered } = this.#deps;
-    const runsBase = join(rootDir, ".murmuration", "runs");
+    const runsBase = canonicalRunsDir(rootDir);
 
     // Find the matching group directory
     let groupRunsDir = "";

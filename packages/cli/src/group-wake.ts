@@ -745,7 +745,7 @@ export const runGroupWakeCommand = async (
 
   const writeFallback = async (): Promise<void> => {
     const { writeFile: wf, mkdir } = await import("node:fs/promises");
-    const meetingDir = join(root, ".murmuration", "runs", `group-${groupId}`, dayUtc);
+    const meetingDir = join(root, "runs", `group-${groupId}`, dayUtc);
     await mkdir(meetingDir, { recursive: true });
     await wf(
       join(meetingDir, `meeting-${randomUUID().slice(0, 8)}.md`),

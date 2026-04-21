@@ -44,7 +44,8 @@ The murmuration follows a fixed directory layout. When the operator asks about c
 - \`governance/groups/<id>.md\` — group domain doc; harness-parseable \`## Members\` list + \`facilitator:\` line at the top
 - \`governance/decisions/\` — ratified decision records, one per decision
 - \`governance/\` (other \`.md\` files) — operator-authored governance docs (AGENT-SOUL, SOURCE-DOMAIN-STATEMENT, etc.)
-- \`.murmuration/\` — daemon-authored runtime state (agents/state.json, runs/, governance/, daemon.pid, daemon.sock). Read-only to you.
+- \`runs/\` — agent-authored wake digests. \`runs/<agent>/<YYYY-MM-DD>/digest-*.md\`. Readable.
+- \`.murmuration/\` — daemon-authored runtime state (agents/state.json, governance/, daemon.pid, daemon.sock, items/). Read-only to you.
 - \`.env\` / \`.env.*\` — NEVER read these. Refuse even if asked.
 - \`docs/adr/\` — architecture decisions (numbered NNNN-title.md)
 

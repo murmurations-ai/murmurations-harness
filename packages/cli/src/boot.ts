@@ -745,14 +745,32 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     ? { provider, declaration }
     : undefined;
 
+  // One-time auto-migration: move legacy `.murmuration/runs/` →
+  // `runs/` at the repo root if it hasn't been done yet. Idempotent;
+  // safe to run every boot.
+  {
+    const { migrateLegacyRunsDir } = await import("@murmurations-ai/core");
+    const migrated = await migrateLegacyRunsDir(exampleRoot);
+    if (migrated) {
+      logger.info("daemon.runs.migrated", {
+        from: ".murmuration/runs",
+        to: "runs",
+        rootDir: exampleRoot,
+      });
+    }
+  }
+
   // Per-agent run artifact writers (2D5). Each agent gets its own
-  // writer at `<rootDir>/.murmuration/runs/<agentId>/`.
+  // writer at `<rootDir>/runs/<agentId>/`. v0.5.x moved out of the
+  // legacy `.murmuration/runs/` dot-dir so agent-authored content is
+  // visible in normal directory browsing. Readers still fall back to
+  // the legacy location for pre-move data (see runs-path.ts).
   const writerMap = new Map<string, RunArtifactWriter>();
   for (const agent of allRegistered) {
     writerMap.set(
       agent.agentId,
       new RunArtifactWriter({
-        rootDir: resolve(exampleRoot, ".murmuration", "runs", agent.agentId),
+        rootDir: resolve(exampleRoot, "runs", agent.agentId),
       }),
     );
   }
@@ -1712,7 +1730,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     // artifact, then stop the daemon and exit. We detect completion by
     // polling each agent's index.jsonl.
     const indexPaths = allRegistered.map((a) =>
-      resolve(exampleRoot, ".murmuration", "runs", a.agentId, "index.jsonl"),
+      resolve(exampleRoot, "runs", a.agentId, "index.jsonl"),
     );
     const pollIntervalMs = 2000;
     const maxWaitMs = 300_000; // 5 minutes hard ceiling

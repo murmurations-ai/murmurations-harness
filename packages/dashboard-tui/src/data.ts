@@ -159,7 +159,10 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
   }
 
   const results: AgentStatus[] = [];
-  const runsDir = join(rootDir, ".murmuration", "runs");
+  // v0.5.x moved runs/ out of .murmuration/ so content is visible.
+  // Read from new path; legacy data stays at .murmuration/runs/ until
+  // the boot-time auto-migration picks it up.
+  const runsDir = join(rootDir, "runs");
 
   for (const agentId of agentDirs.sort()) {
     const schedule = await parseCronFromRole(rootDir, agentId);
@@ -486,7 +489,10 @@ export interface CostSummary {
 }
 
 export const readCostSummary = async (rootDir: string): Promise<CostSummary> => {
-  const runsDir = join(rootDir, ".murmuration", "runs");
+  // v0.5.x moved runs/ out of .murmuration/ so content is visible.
+  // Read from new path; legacy data stays at .murmuration/runs/ until
+  // the boot-time auto-migration picks it up.
+  const runsDir = join(rootDir, "runs");
   let agentDirs: string[];
   try {
     agentDirs = await readdir(runsDir);
