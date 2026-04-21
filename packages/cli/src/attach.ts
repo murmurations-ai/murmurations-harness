@@ -385,26 +385,26 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   // v0.5.0 tester feedback: `:q` → "Daemon disconnected" + crash.
   let shuttingDown = false;
 
+  // Daemon went away unexpectedly (crashed, stopped, socket closed).
+  // Fall back to the unattached REPL so the operator can `list` /
+  // `attach <name>` naturally. Previous behavior kept the attached
+  // REPL alive with a "(disconnected)>" prompt, which routed input
+  // into ambiguous places — Spirit, partial commands, broken sends.
+  // Tester feedback: "it should be just the initial unattached repl
+  // at this point so we can attach, list, etc."
+  const fallbackToUnattached = (reason: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`\n${reason} Dropping back to the unattached REPL.`);
+    rl.close(); // resolves attachClosedPromise → runAttach returns → caller loops
+  };
   conn.on("error", (err) => {
     connected = false;
-    if (shuttingDown) return;
-    console.error(`\nDaemon connection lost: ${err.message}`);
-    console.log(
-      "The REPL is still running. Use :quit to exit or restart the daemon and re-attach.",
-    );
-    rl.setPrompt("(disconnected)> ");
-    rl.prompt();
+    fallbackToUnattached(`Daemon connection lost: ${err.message}.`);
   });
-
   conn.on("close", () => {
     connected = false;
-    if (shuttingDown) return;
-    console.log("\nDaemon disconnected.");
-    console.log(
-      "The REPL is still running. Use :quit to exit or restart the daemon and re-attach.",
-    );
-    rl.setPrompt("(disconnected)> ");
-    rl.prompt();
+    fallbackToUnattached("Daemon disconnected.");
   });
 
   const send = (method: string, params?: Record<string, unknown>): Promise<SocketResponse> => {
