@@ -299,6 +299,15 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     output: process.stdout,
     terminal: true,
     completer: (line: string): [string[], string] => {
+      // When a single hit uniquely completes a token, append a space
+      // so the next TAB starts on the following argument. Tester
+      // feedback: "if a tab complete selects a single option, there
+      // should be an additional space added too so I can keep tab
+      // completing the next options, if there are any."
+      const finalize = (hits: string[], partial: string): [string[], string] => [
+        hits.length === 1 && hits[0] !== undefined ? [`${hits[0]} `] : hits,
+        partial,
+      ];
       const parts = line.split(/\s+/);
       const cmd = parts[0] ?? "";
       if (parts.length <= 1) {
@@ -318,29 +327,60 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
           ":quit",
           ":help",
         ];
-        return [commands.filter((c) => c.startsWith(cmd)), line];
+        return finalize(
+          commands.filter((c) => c.startsWith(cmd)),
+          line,
+        );
       }
-      if (cmd === ":wake" || cmd === ":edit" || cmd === "wake" || cmd === "edit") {
+      if (
+        cmd === ":wake" ||
+        cmd === ":edit" ||
+        cmd === ":status" ||
+        cmd === "wake" ||
+        cmd === "edit" ||
+        cmd === "status" ||
+        cmd === "s"
+      ) {
         const partial = parts[1] ?? "";
-        return [agentIds.filter((a) => a.startsWith(partial)), partial];
+        return finalize(
+          agentIds.filter((a) => a.startsWith(partial)),
+          partial,
+        );
       }
       if (cmd === ":convene" || cmd === "convene") {
         const partial = parts[1] ?? "";
-        return [groupIds.filter((g) => g.startsWith(partial)), partial];
+        return finalize(
+          groupIds.filter((g) => g.startsWith(partial)),
+          partial,
+        );
+      }
+      if (cmd === ":open" || cmd === "open") {
+        const partial = parts[1] ?? "";
+        const all = [...agentIds, ...groupIds];
+        return finalize(
+          all.filter((x) => x.startsWith(partial)),
+          partial,
+        );
       }
       if (cmd === ":directive" || cmd === "directive" || cmd === ":d" || cmd === "d") {
         const sub = parts[1] ?? "";
         // `:directive <TAB>` → list subcommands.
         if (parts.length <= 2) {
           const subs = ["list", "close", "delete", "edit"];
-          return [subs.filter((s) => s.startsWith(sub)), sub];
+          return finalize(
+            subs.filter((s) => s.startsWith(sub)),
+            sub,
+          );
         }
         // `:directive close|delete|edit <TAB>` → complete from cached
         // directive IDs. Empty cache falls through to no completions;
         // operator can run `:directive list` to populate.
         if (sub === "close" || sub === "delete" || sub === "edit") {
           const partial = parts[2] ?? "";
-          return [directiveIdsRef.value.filter((id) => id.startsWith(partial)), partial];
+          return finalize(
+            directiveIdsRef.value.filter((id) => id.startsWith(partial)),
+            partial,
+          );
         }
         return [[], line];
       }
@@ -589,6 +629,43 @@ const handleCommand = async (
   const verb = parts[0] ?? "";
 
   if (verb === "" || verb === "s" || verb === "status") {
+    // :status <agent> → per-agent detail (state, digests). Without
+    // an arg, whole-daemon snapshot.
+    const agentArg = parts[1];
+    if (agentArg) {
+      if (!agentIds.includes(agentArg)) {
+        console.log(`  Unknown agent: ${agentArg}. Known: ${agentIds.join(", ")}`);
+      } else {
+        const resp = await send("agents.get", { agentId: agentArg });
+        if (resp.error) {
+          console.log(`  Error: ${resp.error}`);
+        } else {
+          const d = resp.result as {
+            agentId: string;
+            state: string;
+            totalWakes: number;
+            totalArtifacts: number;
+            idleWakes: number;
+            consecutiveFailures: number;
+            recentDigests: { date: string; summary: string }[];
+          };
+          console.log(
+            `  ${d.agentId} — ${d.state} · wakes: ${String(d.totalWakes)} · artifacts: ${String(d.totalArtifacts)} · idle: ${String(d.idleWakes)} · failures: ${String(d.consecutiveFailures)}`,
+          );
+          if (d.recentDigests.length === 0) {
+            console.log("  No recent digests.");
+          } else {
+            console.log("  Recent digests:");
+            for (const entry of d.recentDigests) {
+              const firstLine = entry.summary.split("\n")[0] ?? "";
+              console.log(`    ${entry.date}  ${firstLine.slice(0, 80)}`);
+            }
+          }
+        }
+      }
+      rl.prompt();
+      return;
+    }
     const resp = await send("status");
     if (resp.error) {
       console.log(`Error: ${resp.error}`);

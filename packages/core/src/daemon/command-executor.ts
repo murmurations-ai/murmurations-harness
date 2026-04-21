@@ -159,6 +159,11 @@ export class DaemonCommandExecutor {
       // Read-only query methods
       case "agents.list":
         return this.#agentsList();
+      case "agents.get": {
+        const agentId = params.agentId as string | undefined;
+        if (!agentId) throw new Error("agents.get requires an agentId");
+        return this.agentDetail(agentId);
+      }
       case "groups.list":
         return this.#groupsList();
       case "events.history":
