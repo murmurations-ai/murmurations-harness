@@ -941,21 +941,15 @@ const handleCommand = async (
         consecutiveFailures: number;
         groups: string[];
       }[];
-      // :agents accepts three keywords as state filters AND any other
-      // text as a case-insensitive substring filter against the
-      // agentId. Tester feedback: "if 'agents <text>' is typed, the
-      // <text> should be the filter if it is not one of the three
-      // options."
+      // :agents <text> — case-insensitive substring filter on agentId.
+      // The old running/idle/failed state keywords were dropped as
+      // tester feedback ("almost never useful") — the substring
+      // filter covers the common case and doesn't clutter the surface.
       const filterVal = parts[1];
-      let filtered = agents;
-      if (filterVal !== undefined) {
-        if (filterVal === "running" || filterVal === "idle" || filterVal === "failed") {
-          filtered = agents.filter((a) => a.state === filterVal);
-        } else {
-          const needle = filterVal.toLowerCase();
-          filtered = agents.filter((a) => a.agentId.toLowerCase().includes(needle));
-        }
-      }
+      const filtered =
+        filterVal === undefined
+          ? agents
+          : agents.filter((a) => a.agentId.toLowerCase().includes(filterVal.toLowerCase()));
       console.log(formatAgentsTable(filtered));
       if (filterVal !== undefined && filtered.length === 0) {
         console.log(`  (no agents matched "${filterVal}")`);
@@ -1098,7 +1092,7 @@ const handleCommand = async (
   } else if (verb === "?" || verb === "help") {
     console.log(`Commands (use :prefix or bare):
   :status (s)                       Agent status + governance summary
-  :agents [running|idle|failed|<substring>]  Agent list; state keyword or id-substring filter
+  :agents [<substring>]             Agent list; optional case-insensitive id filter
   :groups                           Group list with stats
   :events                           Recent meetings + in-flight
   :cost                             Cost summary per agent
