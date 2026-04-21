@@ -25,6 +25,23 @@ import { CollaborationError } from "./types.js";
 // to avoid circular deps — we use structural typing like the runner does)
 // ---------------------------------------------------------------------------
 
+/**
+ * Wrap a raw numeric issue id into the `IssueNumber` brand shape the
+ * @murmurations-ai/github client expects (`{ kind, value }`). The
+ * structural interface above declares `issueNumber: unknown`, so
+ * TypeScript can't catch the mistake of passing a plain number — the
+ * client's URL template then interpolates `undefined` when it reads
+ * `.value` off a primitive.
+ *
+ * Root cause of the "GitHub returned 'not found'" on :directive
+ * close/delete in v0.5.0 tester validation — every mutation routed
+ * through this provider was PATCHing `/issues/undefined`.
+ */
+const toIssueNumber = (id: string): { kind: "issue-number"; value: number } => ({
+  kind: "issue-number",
+  value: Number(id),
+});
+
 /** Minimal structural interface for the GitHub client we wrap. */
 export interface GitHubClientLike {
   createIssue(
@@ -182,7 +199,7 @@ export class GitHubCollaborationProvider implements CollaborationProvider {
   }
 
   async postComment(ref: ItemRef, body: string): Promise<CollabResult<CommentRef>> {
-    const issueNumber = Number(ref.id);
+    const issueNumber = toIssueNumber(ref.id);
     const result = await this.#client.createIssueComment(this.#repo, issueNumber, { body });
     if (!result.ok) return { ok: false, error: this.#mapError(result.error) };
     return {
@@ -192,21 +209,21 @@ export class GitHubCollaborationProvider implements CollaborationProvider {
   }
 
   async updateItemState(ref: ItemRef, state: ItemState): Promise<CollabResult<void>> {
-    const issueNumber = Number(ref.id);
+    const issueNumber = toIssueNumber(ref.id);
     const result = await this.#client.updateIssueState(this.#repo, issueNumber, state);
     if (!result.ok) return { ok: false, error: this.#mapError(result.error) };
     return { ok: true, value: undefined };
   }
 
   async addLabels(ref: ItemRef, labels: readonly string[]): Promise<CollabResult<void>> {
-    const issueNumber = Number(ref.id);
+    const issueNumber = toIssueNumber(ref.id);
     const result = await this.#client.addLabels(this.#repo, issueNumber, [...labels]);
     if (!result.ok) return { ok: false, error: this.#mapError(result.error) };
     return { ok: true, value: undefined };
   }
 
   async removeLabel(ref: ItemRef, label: string): Promise<CollabResult<void>> {
-    const issueNumber = Number(ref.id);
+    const issueNumber = toIssueNumber(ref.id);
     const result = await this.#client.removeLabel(this.#repo, issueNumber, label);
     if (!result.ok) return { ok: false, error: this.#mapError(result.error) };
     return { ok: true, value: undefined };
