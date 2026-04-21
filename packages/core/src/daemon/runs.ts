@@ -5,7 +5,7 @@
  * `record(result, costRecord?)` on its configured writer. The writer
  * persists two artifacts under the configured root:
  *
- *   1. `<YYYY-MM-DD>/digest-<HH-MM-SS>-<wakeIdShort>.md` — the agent-authored
+ *   1. `<YYYY-MM-DD>/digest-<YYYY-MM-DDTHH-MM-SSZ>-<wakeIdShort>.md` — the agent-authored
  *      `wakeSummary` string, prefixed with a YAML header containing
  *      the wake's provenance (agent, wake id, outcome, cost). Written
  *      per-wake so multiple wakes on the same date never clobber each
@@ -129,13 +129,13 @@ export class RunArtifactWriter {
       const now = this.#now();
       const dayUtc = now.toISOString().slice(0, 10); // YYYY-MM-DD
       const wakeIdShort = result.wakeId.value.slice(0, 8);
-      // Time-prefixed so alphabetical sort is chronological within a
-      // day. Format: digest-HH-MM-SS-<shortId>.md. Tester: "change the
-      // naming format of the digest to use a timestamp for easier
-      // sorting and understanding when it was created without having
-      // to look at the file metadata."
-      const hhmmss = now.toISOString().slice(11, 19).replace(/:/g, "-");
-      const digestFilename = `digest-${hhmmss}-${wakeIdShort}.md`;
+      // Full ISO-like timestamp in the filename so TAB completion
+      // across all days is self-describing. Colons swapped for hyphens
+      // (filesystem-safe on every OS; colons break Windows and show
+      // as slashes in macOS Finder). Format:
+      //   digest-YYYY-MM-DDTHH-MM-SSZ-<shortId>.md
+      const isoStamp = now.toISOString().slice(0, 19).replace(/:/g, "-") + "Z";
+      const digestFilename = `digest-${isoStamp}-${wakeIdShort}.md`;
       const digestRelativePath = `${dayUtc}/${digestFilename}`;
       const digestAbsolutePath = join(this.#rootDir, dayUtc, digestFilename);
       const indexAbsolutePath = join(this.#rootDir, "index.jsonl");
