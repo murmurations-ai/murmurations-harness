@@ -461,6 +461,11 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     input: process.stdin,
     output: process.stdout,
     terminal: true,
+    // Persistent history shared with the unattached REPL. Up-arrow
+    // recalls lines from prior attached+unattached sessions.
+    history: loadReplHistory(),
+    historySize: REPL_HISTORY_MAX,
+    removeHistoryDuplicates: true,
     completer: (line: string): [string[], string] => {
       // When a single hit uniquely completes a token, append a space
       // so the next TAB starts on the following argument. Tester
@@ -726,6 +731,12 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
   rl.on("line", (line) => {
     const input = line.trim();
+
+    // Persist non-empty lines to the shared REPL history file so
+    // up-arrow works across attached/unattached sessions and restarts.
+    if (input.length > 0) {
+      appendReplHistory(input);
+    }
 
     // Spirit turn in flight — drop the input with a note so a second
     // ENTER can't launch a concurrent turn. Type-ahead queueing is a
