@@ -659,7 +659,12 @@ const handleCommand = async (
         if (resp.error) {
           console.log(`  Error: ${resp.error}`);
         } else {
-          console.log(`  Directive ${itemId} closed.`);
+          const r = resp.result as { alreadyClosed?: boolean };
+          if (r.alreadyClosed) {
+            console.log(`  Directive ${itemId} was already closed (no-op).`);
+          } else {
+            console.log(`  Directive ${itemId} closed.`);
+          }
         }
       }
 
@@ -673,7 +678,12 @@ const handleCommand = async (
         if (resp.error) {
           console.log(`  Error: ${resp.error}`);
         } else {
-          console.log(`  Directive ${itemId} deleted.`);
+          const r = resp.result as { alreadyClosed?: boolean };
+          if (r.alreadyClosed) {
+            console.log(`  Directive ${itemId} was already closed (no-op).`);
+          } else {
+            console.log(`  Directive ${itemId} deleted.`);
+          }
         }
       }
 

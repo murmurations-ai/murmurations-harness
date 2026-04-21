@@ -849,24 +849,27 @@ export class DaemonCommandExecutor {
 
   /**
    * Confirm the given item ID is a source-directive before letting
-   * mutations through. Queries the collaboration provider with the
-   * `source-directive` label and checks the ID is present. Throws
-   * with a legible message on failure.
+   * mutations through. Returns the matched item's state ("open" |
+   * "closed") so callers can short-circuit no-op mutations (e.g.
+   * closing an already-closed directive).
    *
-   * v0.5.0 tester report: `:directive close 12` closed an unrelated
-   * agent-identity issue because the handler passed any ID straight
-   * through.
+   * Throws with a legible message when the target isn't a directive
+   * or the provider couldn't verify.
+   *
+   * v0.5.0 tester reports:
+   *   - `:directive close 12` closed an unrelated agent-identity
+   *     issue because the handler passed any ID straight through.
+   *   - `:directive close 513` repeatedly reported "Directive 513
+   *     closed." even when it was already closed — the PATCH is a
+   *     no-op on GitHub but the handler didn't notice.
    */
-  async #assertIsDirective(id: string, action: "close" | "delete"): Promise<void> {
-    if (!this.#deps.collaborationProvider) return;
+  async #assertIsDirective(id: string, action: "close" | "delete"): Promise<"open" | "closed"> {
+    if (!this.#deps.collaborationProvider) return "open";
     const result = await this.#deps.collaborationProvider.listItems({
       labels: ["source-directive"],
       state: "all",
     });
     if (!result.ok) {
-      // Can't verify — fail closed rather than letting the mutation
-      // through. Better to surface "couldn't check" than to silently
-      // close a non-directive issue.
       throw new Error(
         `cannot ${action} directive ${id}: could not verify it is a directive (${result.error.message})`,
       );
@@ -877,6 +880,7 @@ export class DaemonCommandExecutor {
         `refusing to ${action} ${id}: that ID is not a source-directive. Run \`:directive list\` to see open directives.`,
       );
     }
+    return match.state;
   }
 
   async #handleDirectiveList(): Promise<unknown> {
@@ -910,7 +914,10 @@ export class DaemonCommandExecutor {
     // mutating it. Without this, :directive close 12 would happily
     // close ANY issue numbered 12, even an unrelated agent identity
     // doc. Tester caught this in v0.5.0 validation.
-    await this.#assertIsDirective(id, "close");
+    const state = await this.#assertIsDirective(id, "close");
+    if (state === "closed") {
+      return { closed: true, id, alreadyClosed: true };
+    }
 
     const result = await this.#deps.collaborationProvider.updateItemState({ id }, "closed");
     if (!result.ok) {
@@ -944,7 +951,10 @@ export class DaemonCommandExecutor {
         // Guard: same as close — confirm the target is a source-directive
         // before closing it. Otherwise :directive delete 12 silently
         // closes whatever issue 12 is.
-        await this.#assertIsDirective(id, "delete");
+        const delState = await this.#assertIsDirective(id, "delete");
+        if (delState === "closed") {
+          return { deleted: true, id, alreadyClosed: true, method: "closed" };
+        }
         const result = await this.#deps.collaborationProvider.updateItemState({ id }, "closed");
         if (!result.ok) {
           // 404 on a write that just listed successfully almost always
