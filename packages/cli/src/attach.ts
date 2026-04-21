@@ -498,14 +498,14 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
     // Explicit command prefix — always dispatch as a command.
     if (input.startsWith(":")) {
-      void handleCommand(input.slice(1), send, name, rl, conn, agentIds, rootDir);
+      void handleCommand(input.slice(1), send, name, rl, conn, agentIds, groupIds, rootDir);
       return;
     }
 
     // Bare known verb — back-compat command dispatch.
     const firstToken = input.split(/\s+/)[0] ?? "";
     if (firstToken.length > 0 && KNOWN_VERBS.has(firstToken)) {
-      void handleCommand(input, send, name, rl, conn, agentIds, rootDir);
+      void handleCommand(input, send, name, rl, conn, agentIds, groupIds, rootDir);
       return;
     }
 
@@ -531,6 +531,7 @@ const handleCommand = async (
   rl: Interface,
   conn: Socket,
   agentIds: readonly string[],
+  groupIds: readonly string[],
   rootDir: string,
 ): Promise<void> => {
   const parts = cmd.split(/\s+/);
@@ -881,14 +882,7 @@ const handleCommand = async (
   } else if (verb === "open") {
     const target = parts[1];
     if (!target) {
-      console.log("  Usage: open <issue-url|agent-id|group-id>");
-    } else if (target.startsWith("http")) {
-      const cp = await import("node:child_process");
-      cp.execFile("open", [target], () => {
-        /* fire-and-forget */
-      });
-    } else {
-      // Try to open in GitHub
+      // No target — open the murmuration's GitHub URL if we have one.
       const resp = await send("status");
       const r = resp.result as { githubUrl?: string };
       if (r.githubUrl) {
@@ -897,7 +891,45 @@ const handleCommand = async (
           /* fire-and-forget */
         });
       } else {
-        console.log("  No GitHub URL available.");
+        console.log("  Usage: open <url|agent-id|group-id>");
+        console.log("  (no default GitHub URL configured for this murmuration)");
+      }
+    } else if (target.startsWith("http")) {
+      const cp = await import("node:child_process");
+      cp.execFile("open", [target], () => {
+        /* fire-and-forget */
+      });
+    } else {
+      // Resolve target to a local file. The daemon status knows
+      // rootDir; from there, agents/<id>/role.md for agent ids and
+      // governance/groups/<id>.md for group ids. Previously `:open
+      // <group>` ignored the target entirely and reported "No GitHub
+      // URL available" — which was both wrong and confusing.
+      const resp = await send("status");
+      const r = resp.result as { rootDir?: string };
+      const rootDir = r.rootDir;
+      if (!rootDir) {
+        console.log("  Could not determine root directory from daemon.");
+        return;
+      }
+      const path = await import("node:path");
+      const fs = await import("node:fs");
+      let filePath: string | null = null;
+      if (agentIds.includes(target)) {
+        filePath = path.resolve(path.join(rootDir, "agents", target, "role.md"));
+      } else if (groupIds.includes(target)) {
+        filePath = path.resolve(path.join(rootDir, "governance", "groups", `${target}.md`));
+      }
+      if (filePath && fs.existsSync(filePath)) {
+        const editor = process.env.EDITOR ?? "vi";
+        const cp = await import("node:child_process");
+        console.log(`  Opening ${filePath}...`);
+        cp.spawnSync(editor, [filePath], { stdio: "inherit" });
+      } else {
+        console.log(`  No match for "${target}".`);
+        console.log(`  Known agents: ${agentIds.join(", ") || "(none)"}`);
+        console.log(`  Known groups: ${groupIds.join(", ") || "(none)"}`);
+        console.log(`  Or pass a full URL: open https://...`);
       }
     }
   } else if (verb === "q" || verb === "quit" || verb === "detach") {
