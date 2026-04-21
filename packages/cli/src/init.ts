@@ -49,6 +49,27 @@ const ask = (question: string): Promise<string> =>
     getRL().question(question, r);
   });
 
+/**
+ * Wrap a {@link captureSecret} call so it doesn't fight with the
+ * init-flow readline. An active readline keeps its own stdin data
+ * listener, which echoes raw keystrokes AND steals the ENTER meant
+ * for the echo-off prompt — manifesting as a plaintext-echoed key
+ * and a consumed confirmation ENTER. Tear down the readline before
+ * the capture; lazy `getRL()` re-creates a fresh one on the next
+ * `ask()`.
+ *
+ * Tester report (v0.5.0): `murmuration init` echoed the Gemini API
+ * key in plaintext and then "crashed" (actually: readline consumed
+ * the confirmation ENTER, hanging the prompt).
+ */
+const captureSecretIsolated = async (
+  args: Parameters<typeof captureSecret>[0],
+): Promise<string> => {
+  rl?.close();
+  rl = null;
+  return captureSecret(args);
+};
+
 // ---------------------------------------------------------------------------
 // Default-agent templates
 // ---------------------------------------------------------------------------
@@ -419,9 +440,9 @@ export const runInitFromExample = async (
   // can always edit .env by hand later.
   if (llmSpec && process.stdin.isTTY) {
     console.log(
-      `\nLet's capture your ${llmSpec.displayName} API key now so you can run a meeting right away.\nInput is hidden; press ENTER to skip and paste it into .env later.`,
+      `\nLet's capture your ${llmSpec.displayName} API key now so you can run a meeting right away.\nInput is masked; press ENTER to skip and paste it into .env later.`,
     );
-    capturedKey = await captureSecret({ spec: llmSpec, askYN: ask });
+    capturedKey = await captureSecretIsolated({ spec: llmSpec, askYN: ask });
     if (capturedKey) {
       await writeEnvKey(envPath, llmSpec.envVar, capturedKey);
     }
@@ -534,9 +555,9 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
   const llmSpec = getLLMKeySpec(defaultProvider);
   if (llmSpec) {
     console.log(
-      `\nLet's capture your ${llmSpec.displayName} API key. Input is hidden; press ENTER to skip.`,
+      `\nLet's capture your ${llmSpec.displayName} API key. Input is masked; press ENTER to skip.`,
     );
-    const key = await captureSecret({ spec: llmSpec, askYN: ask });
+    const key = await captureSecretIsolated({ spec: llmSpec, askYN: ask });
     if (key) capturedSecrets.set(llmSpec.envVar, key);
   } else {
     console.log(`\nOllama is locally-hosted — no API key needed.`);
@@ -559,9 +580,9 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
 
     // 4a. Capture GITHUB_TOKEN (v0.5.0 Milestone 2).
     console.log(
-      `\nLet's capture your GitHub personal access token. It needs "repo" scope. Input is hidden; press ENTER to skip.`,
+      `\nLet's capture your GitHub personal access token. It needs "repo" scope. Input is masked; press ENTER to skip.`,
     );
-    const token = await captureSecret({ spec: GITHUB_TOKEN_SPEC, askYN: ask });
+    const token = await captureSecretIsolated({ spec: GITHUB_TOKEN_SPEC, askYN: ask });
     if (token) capturedSecrets.set(GITHUB_TOKEN_SPEC.envVar, token);
   }
 
