@@ -312,9 +312,18 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   });
 
   let connected = true;
+  // Tracks whether the REPL is intentionally shutting down (operator
+  // typed :quit / :detach). When true, socket close/error handlers
+  // skip their rl.prompt() calls — calling prompt() on an already-
+  // closed readline throws ERR_USE_AFTER_CLOSE and crashes the
+  // unattached REPL we're about to hand off to.
+  //
+  // v0.5.0 tester feedback: `:q` → "Daemon disconnected" + crash.
+  let shuttingDown = false;
 
   conn.on("error", (err) => {
     connected = false;
+    if (shuttingDown) return;
     console.error(`\nDaemon connection lost: ${err.message}`);
     console.log(
       "The REPL is still running. Use :quit to exit or restart the daemon and re-attach.",
@@ -325,6 +334,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
   conn.on("close", () => {
     connected = false;
+    if (shuttingDown) return;
     console.log("\nDaemon disconnected.");
     console.log(
       "The REPL is still running. Use :quit to exit or restart the daemon and re-attach.",
@@ -445,6 +455,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   });
 
   rl.on("close", () => {
+    shuttingDown = true;
     conn.destroy();
     resolveAttachClosed();
   });
