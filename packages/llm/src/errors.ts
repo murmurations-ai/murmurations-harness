@@ -228,9 +228,10 @@ const remediationHints = (err: LLMClientError): readonly string[] => {
   switch (err.code) {
     case "unauthorized":
       return [
-        `Your ${envVarForProvider(err.provider)} is missing or wrong. Check \`.env\` and confirm the key starts with the expected prefix.`,
+        `Your ${envVarForProvider(err.provider)} is missing, wrong, or expired.`,
+        "Confirm you edited the `.env` inside the murmuration's own root (e.g. `<murmuration>/.env`), not a different directory. If running `group-wake` from another folder, it still reads the target murmuration's .env — not your current one.",
+        "After updating .env, restart the daemon so the new value is loaded: `murmuration restart --name <name>`.",
         "Rotate the key at the provider console if it may be compromised.",
-        "After editing .env, restart the daemon so the new value is loaded.",
       ];
     case "forbidden":
       return providerForbiddenHints(err.provider);

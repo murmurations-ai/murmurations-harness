@@ -74,6 +74,25 @@ const mapError = (err: unknown, provider: ProviderId, model: string): LLMClientE
   if (status === 403) {
     return new LLMForbiddenError(provider, message, opts);
   }
+
+  // Message-based auth detection. Gemini returns HTTP 400 INVALID_ARGUMENT
+  // for expired / bad API keys rather than 401 — without this we'd
+  // classify "API key expired. Please renew the API key." as a
+  // generic validation error, which hides the real fix (.env edit +
+  // daemon restart). Run before the 400/422 validation branch below.
+  const lower = message.toLowerCase();
+  const looksLikeAuth =
+    lower.includes("api key expired") ||
+    lower.includes("api key not valid") ||
+    lower.includes("api_key_invalid") ||
+    lower.includes("invalid api key") ||
+    lower.includes("invalid_api_key") ||
+    lower.includes("unauthenticated") ||
+    lower.includes("authentication") ||
+    (lower.includes("api key") && (lower.includes("invalid") || lower.includes("expired")));
+  if (looksLikeAuth) {
+    return new LLMUnauthorizedError(provider, message, opts);
+  }
   if (status === 429) {
     return new LLMRateLimitError(provider, message, {
       ...opts,
