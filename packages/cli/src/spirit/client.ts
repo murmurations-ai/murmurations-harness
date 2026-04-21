@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { makeSecretKey, makeSecretValue, type SecretValue } from "@murmurations-ai/core";
 import {
   createLLMClient,
+  formatLLMError,
   ProviderRegistry,
   type LLMClient,
   type LLMClientConfig,
@@ -191,7 +192,7 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
 
     if (!result.ok) {
       history.pop();
-      throw new Error(`Spirit LLM error: ${result.error.code} — ${result.error.message}`);
+      throw new Error(`\n${formatLLMError(result.error, { agentId: "spirit", model })}`);
     }
 
     history.push({ role: "assistant", content: result.value.content });
