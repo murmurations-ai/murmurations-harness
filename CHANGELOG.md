@@ -29,7 +29,6 @@ The v0.5.0 work started from a lived failure: on 2026-04-20, a motivated operato
 - **`murmuration doctor --name <session>` + hero-command post-init message** — init's final output shows the next command to run verbatim, with the session registered so `--name` shortcuts work immediately.
 - **`tools.mcp: []` + `plugins: []`** emitted in init-generated `role.md` for parity with the default-agent template.
 - **`docs/GETTING-STARTED.md`** rewritten as a tester walkthrough with expected output and a "what to do when…" table for the top 10 failure modes.
-- **`docs/MIGRATION-GUIDE.md`** — upgrade path from pre-v0.5 murmurations, including the Emergent Praxis migration case study.
 
 ### Changed
 

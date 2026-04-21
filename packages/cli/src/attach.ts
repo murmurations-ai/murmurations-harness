@@ -62,7 +62,6 @@ interface SocketEvent {
  * operations (Spirit turns, meeting wakes) where the operator would
  * otherwise see a blank terminal until the result arrives.
  *
- * v0.5.0 tester feedback: "when talking with the Spirit, it seems to
  * just hang. We should put some kind of indicator that it's doing
  * thinking or work."
  *
@@ -144,7 +143,6 @@ const appendReplHistory = (entry: string, sessionName: string | null = null): vo
  * <name>` to connect to one, or `quit` to exit. No daemon is started;
  * this is purely a navigation surface.
  *
- * v0.5.0 Milestone 4.9 (tester feedback): bare `murmuration` used to
  * auto-start a daemon when cwd had a murmuration/ directory. That
  * surprised operators who just wanted to see what was running.
  */
@@ -449,8 +447,6 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   const { loadConfig } = await import("./config.js");
   const config = loadConfig();
   const prompt = config.ui.prompt.replace("{name}", name);
-
-  // v0.5.0 Milestone 4.9.2: the runAttach promise now resolves when the
   // attached REPL's readline closes (i.e., on :quit / :detach / EOF).
   // Previously the function returned immediately after setup and the
   // close handler called `process.exit(0)`. That killed the process —
@@ -660,7 +656,6 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   // closed readline throws ERR_USE_AFTER_CLOSE and crashes the
   // unattached REPL we're about to hand off to.
   //
-  // v0.5.0 tester feedback: `:q` → "Daemon disconnected" + crash.
   let shuttingDown = false;
 
   // Daemon went away unexpectedly (crashed, stopped, socket closed).
@@ -668,7 +663,6 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   // `attach <name>` naturally. Previous behavior kept the attached
   // REPL alive with a "(disconnected)>" prompt, which routed input
   // into ambiguous places — Spirit, partial commands, broken sends.
-  // Tester feedback: "it should be just the initial unattached repl
   // at this point so we can attach, list, etc."
   const fallbackToUnattached = (reason: string): void => {
     if (shuttingDown) return;
@@ -1253,7 +1247,6 @@ const handleCommand = async (
       }[];
       // :agents <text> — case-insensitive substring filter on agentId.
       // The old running/idle/failed state keywords were dropped as
-      // tester feedback ("almost never useful") — the substring
       // filter covers the common case and doesn't clutter the surface.
       const filterVal = parts[1];
       const filtered =

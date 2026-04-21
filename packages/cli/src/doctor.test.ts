@@ -78,24 +78,6 @@ describe("runDoctor (v0.5.0 Milestone 3)", () => {
     expect(ids).toContain("layout.env.mode");
   });
 
-  it("detects legacy governance/circles/ without groups/", async () => {
-    await writeHealthy();
-    await mkdir(join(rootDir, "governance", "circles"), { recursive: true });
-    await writeFile2("governance/circles/example.md", "# example\n");
-    const report = await runDoctor({ rootDir });
-    const ids = report.findings.map((f) => f.checkId);
-    expect(ids).toContain("layout.legacy-circles.only");
-  });
-
-  it("detects legacy circles/ alongside groups/ as a separate warning", async () => {
-    await writeHealthy();
-    await mkdir(join(rootDir, "governance", "circles"), { recursive: true });
-    await mkdir(join(rootDir, "governance", "groups"), { recursive: true });
-    const report = await runDoctor({ rootDir });
-    const ids = report.findings.map((f) => f.checkId);
-    expect(ids).toContain("layout.legacy-circles.coexist");
-  });
-
   it("flags schema errors in role.md (bad model_tier)", async () => {
     await writeHealthy();
     await writeFile2("agents/broken/role.md", `---\nmodel_tier: galactic\n---\nbody\n`);
@@ -115,19 +97,6 @@ describe("runDoctor (v0.5.0 Milestone 3)", () => {
     const ids = report.findings.map((f) => f.checkId);
     expect(ids.some((id) => id.includes("unknown-member"))).toBe(true);
     expect(ids.some((id) => id.includes("facilitator-missing"))).toBe(true);
-  });
-
-  it("--fix auto-renames governance/circles/ → governance/groups/", async () => {
-    await writeHealthy();
-    await mkdir(join(rootDir, "governance", "circles"), { recursive: true });
-    await writeFile2("governance/circles/one.md", "# one\n");
-    const report = await runDoctor({ rootDir });
-    const fixable = report.findings.find((f) => f.checkId === "layout.legacy-circles.only");
-    expect(fixable?.autoFix).toBeDefined();
-    await applyFixes(report);
-    const retry = await runDoctor({ rootDir });
-    const retryIds = retry.findings.map((f) => f.checkId);
-    expect(retryIds).not.toContain("layout.legacy-circles.only");
   });
 
   it("--fix auto-chmod .env to 0600", async () => {

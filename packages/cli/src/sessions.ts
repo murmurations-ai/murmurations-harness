@@ -137,7 +137,6 @@ export const heartbeatSession = (rootDir: string): void => {
  *   2. sessions.json — registered names (useful when the daemon is
  *      stopped but the operator wants to start it by name).
  *
- * v0.5.0 Milestone 4.8 tester feedback: `murmuration attach <name>`
  * should work whenever a daemon is running, regardless of whether
  * anyone registered it first.
  */

@@ -15,7 +15,7 @@
 
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { copyFile, rename, readFile, writeFile, chmod, readdir } from "node:fs/promises";
+import { copyFile, readFile, writeFile, chmod, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -145,39 +145,6 @@ const runLayoutChecks = async (ctx: CheckContext): Promise<void> => {
         remediation: `Copy the default-agent templates from \`murmuration init\` output, or run init against a scratch dir and copy.`,
       });
     }
-  }
-
-  // governance/circles/ alongside governance/groups/ → legacy leftover
-  const circlesDir = join(rootDir, "governance", "circles");
-  const groupsDir = join(rootDir, "governance", "groups");
-  if (existsSync(circlesDir) && existsSync(groupsDir)) {
-    findings.push({
-      checkId: "layout.legacy-circles.coexist",
-      category: "layout",
-      severity: "warning",
-      title: "governance/circles/ and governance/groups/ both exist",
-      detail:
-        "Pre-ADR-0026 layout alongside the canonical one. The harness only reads governance/groups/.",
-      remediation:
-        "Remove governance/circles/ once its contents are mirrored in governance/groups/.",
-      autoFix: async () => {
-        await rename(circlesDir, circlesDir + ".bak");
-      },
-      autoFixLabel: "rename governance/circles/ to governance/circles.bak/",
-    });
-  } else if (existsSync(circlesDir) && !existsSync(groupsDir)) {
-    findings.push({
-      checkId: "layout.legacy-circles.only",
-      category: "layout",
-      severity: "error",
-      title: "governance/circles/ is used — needs renaming to governance/groups/",
-      detail: "The harness reads governance/groups/. Pre-ADR-0026 naming will not load.",
-      remediation: `Rename governance/circles/ → governance/groups/ (preserves history if using \`git mv\`).`,
-      autoFix: async () => {
-        await rename(circlesDir, groupsDir);
-      },
-      autoFixLabel: "rename governance/circles/ → governance/groups/",
-    });
   }
 
   // .gitignore covers .env

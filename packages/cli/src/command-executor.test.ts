@@ -22,10 +22,10 @@ const makeTmpRoot = (): string => {
   const dir = join(tmpdir(), `murm-exec-test-${randomUUID().slice(0, 8)}`);
   mkdirSync(join(dir, ".murmuration", "agents"), { recursive: true });
   mkdirSync(join(dir, ".murmuration", "governance"), { recursive: true });
-  mkdirSync(join(dir, ".murmuration", "runs", "01-research", "2026-04-13"), { recursive: true });
+  mkdirSync(join(dir, "runs", "01-research", "2026-04-13"), { recursive: true });
   // Write a digest file for agent detail test
   writeFileSync(
-    join(dir, ".murmuration", "runs", "01-research", "2026-04-13", "digest-abc123.md"),
+    join(dir, "runs", "01-research", "2026-04-13", "digest-abc123.md"),
     "---\nagentId: 01-research\n---\nResearch digest: found 3 signals.",
     "utf8",
   );
