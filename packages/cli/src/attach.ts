@@ -137,7 +137,7 @@ export const runUnattachedRepl = async (): Promise<void> => {
     await import("./running-sessions.js");
   const { HARNESS_VERSION } = await import("@murmurations-ai/core");
 
-  const TOP_LEVEL_VERBS = ["list", "attach", "help", "quit", "exit"] as const;
+  const TOP_LEVEL_VERBS = ["list", "attach", "stop", "help", "quit", "exit"] as const;
 
   const rl = createInterface({
     input: process.stdin,
@@ -160,8 +160,9 @@ export const runUnattachedRepl = async (): Promise<void> => {
         const hits = TOP_LEVEL_VERBS.filter((v) => v.startsWith(verb));
         return [hits.map((h) => restore(h) + " "), restore(verb)];
       }
-      // `attach <TAB>`: complete from currently-running session names.
-      if (verb === "attach") {
+      // `attach <TAB>` / `stop <TAB>`: complete from currently-running
+      // session names.
+      if (verb === "attach" || verb === "stop") {
         const partial = parts[1] ?? "";
         const names = listRunningSessionNamesSync();
         const hits = names.filter((n) => n.startsWith(partial));
@@ -200,6 +201,7 @@ export const runUnattachedRepl = async (): Promise<void> => {
     if (verb === "help" || verb === "?") {
       console.log("  :list                show running murmurations");
       console.log("  :attach <name>       connect to a running murmuration");
+      console.log("  :stop <name>         stop a running daemon");
       console.log("  :quit / :q / :exit   leave the REPL");
       console.log("  (the `:` prefix is optional here — bare `list` also works)");
       console.log("");
@@ -252,6 +254,37 @@ export const runUnattachedRepl = async (): Promise<void> => {
       });
       await runAttach(match.root, match.name);
       return runUnattachedRepl();
+    }
+    if (verb === "stop") {
+      const name = rest[0];
+      if (!name) {
+        console.log("  usage: stop <name>\n");
+        continue;
+      }
+      const sessions = await listRunningSessions();
+      const match = sessions.find((s) => s.name === name);
+      if (!match) {
+        const available = sessions.map((s) => s.name);
+        console.log(
+          `  no running murmuration named "${name}".${available.length > 0 ? ` Known: ${available.join(", ")}.` : ""}\n`,
+        );
+        continue;
+      }
+      // Signal the daemon via its pidfile. Same mechanism as the
+      // `murmuration stop --name <name>` CLI command.
+      if (match.pid !== undefined) {
+        try {
+          process.kill(match.pid, "SIGTERM");
+          console.log(`  Sent SIGTERM to ${name} (PID ${String(match.pid)}).\n`);
+        } catch (err) {
+          console.log(
+            `  Could not signal PID ${String(match.pid)}: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
+      } else {
+        console.log(`  ${name} has no pid on record.\n`);
+      }
+      continue;
     }
 
     console.log(`  unknown command: ${verb}. type \`?\` for help.\n`);
