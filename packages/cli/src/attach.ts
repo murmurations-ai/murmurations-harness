@@ -418,6 +418,15 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   rl.on("line", (line) => {
     const input = line.trim();
 
+    // Bare ENTER is a no-op — just re-prompt. Tester feedback: bare
+    // ENTER previously dispatched :status and dumped an agent list,
+    // which was surprising. Operators use ENTER to clear their mental
+    // state while thinking; the REPL should respect that.
+    if (input.length === 0) {
+      rl.prompt();
+      return;
+    }
+
     // Explicit command prefix — always dispatch as a command.
     if (input.startsWith(":")) {
       void handleCommand(input.slice(1), send, name, rl, conn, agentIds, rootDir);
@@ -426,7 +435,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
     // Bare known verb — back-compat command dispatch.
     const firstToken = input.split(/\s+/)[0] ?? "";
-    if (KNOWN_VERBS.has(firstToken)) {
+    if (firstToken.length > 0 && KNOWN_VERBS.has(firstToken)) {
       void handleCommand(input, send, name, rl, conn, agentIds, rootDir);
       return;
     }
