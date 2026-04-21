@@ -142,20 +142,11 @@ export const heartbeatSession = (rootDir: string): void => {
  * anyone registered it first.
  */
 export const resolveSessionRoot = (name: string): string => {
-  // 1. Running-sessions: live symlinks are authoritative when present.
-  //    Works from any directory without prior register/init.
-  const hit = findRunningSessionByName(name);
-  if (hit) return hit.root;
+  const root = tryResolveSessionRoot(name);
+  if (root !== null) return root;
 
-  // 2. sessions.json fallback: the operator registered this name
-  //    (possibly before the daemon was started).
-  const registry = loadRegistry();
-  const entry = registry[name];
-  if (entry) return entry.root;
-
-  // Neither source has it — give the operator a useful error.
   const available = listRunningSessionNamesSync();
-  const registered = Object.keys(registry).sort();
+  const registered = Object.keys(loadRegistry()).sort();
   const allNames = [...new Set([...available, ...registered])].sort();
   const hint =
     allNames.length > 0
@@ -163,4 +154,17 @@ export const resolveSessionRoot = (name: string): string => {
       : `No running or registered sessions found. Start one with \`murmuration start --root <path>\`.`;
   console.error(`murmuration: unknown session "${name}". ${hint}`);
   process.exit(1);
+};
+
+/**
+ * Non-exiting variant for callers (like the REPL) that want to handle
+ * the "no such session" case themselves. Returns the root for any
+ * known session (running OR registered), null if neither.
+ */
+export const tryResolveSessionRoot = (name: string): string | null => {
+  const hit = findRunningSessionByName(name);
+  if (hit) return hit.root;
+  const entry = loadRegistry()[name];
+  if (entry) return entry.root;
+  return null;
 };
