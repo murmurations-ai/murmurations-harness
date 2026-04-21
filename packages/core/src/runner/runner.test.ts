@@ -190,7 +190,7 @@ describe("createDefaultRunner", () => {
     expect(llmCalls).toHaveLength(1);
     expect(llmCalls[0]?.tools).toBeDefined();
     expect(llmCalls[0]?.tools).toHaveLength(1);
-    expect(llmCalls[0]?.maxSteps).toBe(5);
+    expect(llmCalls[0]?.maxSteps).toBe(256);
   });
 
   it("does not load tools when no mcpServerConfigs", async () => {

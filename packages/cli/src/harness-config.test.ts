@@ -28,7 +28,8 @@ describe("loadHarnessConfig", () => {
     expect(config.collaboration.repo).toBeUndefined();
     expect(config.products).toEqual([]);
     expect(config.logging.level).toBe("info");
-    expect(config.spirit.maxSteps).toBe(32);
+    expect(config.spirit.maxSteps).toBe(256);
+    expect(config.agent.maxSteps).toBe(256);
   });
 
   it("reads spirit.maxSteps override from harness.yaml", async () => {
@@ -50,7 +51,7 @@ describe("loadHarnessConfig", () => {
 `,
     );
     const config = await loadHarnessConfig(rootDir);
-    expect(config.spirit.maxSteps).toBe(32);
+    expect(config.spirit.maxSteps).toBe(256);
   });
 
   it("loads all fields from a complete harness.yaml", async () => {
@@ -163,7 +164,8 @@ describe("mergeWithCliFlags", () => {
       collaboration: { provider: "github" as const, repo: "org/repo" },
       products: [],
       logging: { level: "info" as const },
-      spirit: { maxSteps: 32 },
+      spirit: { maxSteps: 256 },
+      agent: { maxSteps: 256 },
     };
 
     const merged = mergeWithCliFlags(config, {
@@ -184,7 +186,8 @@ describe("mergeWithCliFlags", () => {
       collaboration: { provider: "local" as const, repo: "org/repo" },
       products: [],
       logging: { level: "warn" as const },
-      spirit: { maxSteps: 32 },
+      spirit: { maxSteps: 256 },
+      agent: { maxSteps: 256 },
     };
 
     const merged = mergeWithCliFlags(config, {});
@@ -201,7 +204,8 @@ describe("mergeWithCliFlags", () => {
       collaboration: { provider: "github" as const, repo: "my/repo" },
       products: [{ name: "p", repo: "o/r" }],
       logging: { level: "info" as const },
-      spirit: { maxSteps: 32 },
+      spirit: { maxSteps: 256 },
+      agent: { maxSteps: 256 },
     };
 
     const merged = mergeWithCliFlags(config, { logLevel: "debug" });

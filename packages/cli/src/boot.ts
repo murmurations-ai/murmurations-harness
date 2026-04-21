@@ -1175,7 +1175,10 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               return createDefaultRunner(
                 capturedAgentDir,
                 [],
-                agentTools.length > 0 ? { extensionTools: agentTools } : {},
+                {
+                  maxSteps: config.agent.maxSteps,
+                  ...(agentTools.length > 0 ? { extensionTools: agentTools } : {}),
+                },
                 exampleRoot,
               ) as unknown as AgentRunner<InProcessRunnerClients>;
             }
