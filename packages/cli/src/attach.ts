@@ -657,7 +657,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 const handleCommand = async (
   cmd: string,
   send: (method: string, params?: Record<string, unknown>) => Promise<SocketResponse>,
-  _name: string,
+  name: string,
   rl: Interface,
   conn: Socket,
   agentIds: readonly string[],
@@ -1192,7 +1192,23 @@ const handleCommand = async (
     rl.close();
     return;
   } else if (verb === "stop") {
-    console.log("Sending stop...");
+    // Attached :stop takes no arg and stops THIS daemon. If an arg is
+    // given, require it to match the attached session name — that way
+    // `:stop <typo>` doesn't silently stop the murmuration the operator
+    // is attached to. Tester feedback: ":stop dw stopped emergent-praxis
+    // even though I did not name it."
+    const target = parts[1];
+    if (target && target !== name) {
+      console.log(
+        `  refusing to stop: you're attached to "${name}" but asked to stop "${target}".`,
+      );
+      console.log(
+        `  To stop "${name}", use bare \`:stop\` (no arg) or \`:stop ${name}\`. To stop a different murmuration, detach first (\`:q\`) and run \`:stop ${target}\` from the unattached REPL.`,
+      );
+      rl.prompt();
+      return;
+    }
+    console.log(`Sending stop to ${name}...`);
     await send("stop");
     rl.close();
     return;
