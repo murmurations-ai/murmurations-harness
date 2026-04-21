@@ -941,12 +941,25 @@ const handleCommand = async (
         consecutiveFailures: number;
         groups: string[];
       }[];
+      // :agents accepts three keywords as state filters AND any other
+      // text as a case-insensitive substring filter against the
+      // agentId. Tester feedback: "if 'agents <text>' is typed, the
+      // <text> should be the filter if it is not one of the three
+      // options."
       const filterVal = parts[1];
-      const filtered =
-        filterVal === "running" || filterVal === "idle" || filterVal === "failed"
-          ? agents.filter((a) => a.state === filterVal)
-          : agents;
+      let filtered = agents;
+      if (filterVal !== undefined) {
+        if (filterVal === "running" || filterVal === "idle" || filterVal === "failed") {
+          filtered = agents.filter((a) => a.state === filterVal);
+        } else {
+          const needle = filterVal.toLowerCase();
+          filtered = agents.filter((a) => a.agentId.toLowerCase().includes(needle));
+        }
+      }
       console.log(formatAgentsTable(filtered));
+      if (filterVal !== undefined && filtered.length === 0) {
+        console.log(`  (no agents matched "${filterVal}")`);
+      }
     }
   } else if (verb === "groups") {
     const { formatGroupsTable } = await import("./formatters.js");
@@ -1085,7 +1098,7 @@ const handleCommand = async (
   } else if (verb === "?" || verb === "help") {
     console.log(`Commands (use :prefix or bare):
   :status (s)                       Agent status + governance summary
-  :agents [running|idle|failed]     Agent list with filter
+  :agents [running|idle|failed|<substring>]  Agent list; state keyword or id-substring filter
   :groups                           Group list with stats
   :events                           Recent meetings + in-flight
   :cost                             Cost summary per agent
