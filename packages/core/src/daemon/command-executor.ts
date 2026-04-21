@@ -971,7 +971,6 @@ export class DaemonCommandExecutor {
    * Throws with a legible message when the target isn't a directive
    * or the provider couldn't verify.
    *
-   * v0.5.0 tester reports:
    *   - `:directive close 12` closed an unrelated agent-identity
    *     issue because the handler passed any ID straight through.
    *   - `:directive close 513` repeatedly reported "Directive 513

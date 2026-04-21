@@ -477,15 +477,6 @@ const main = async (): Promise<void> => {
       await runGroupWakeCommand(argv.slice(1), resolveRoot(argv.slice(1)));
       break;
     }
-    case "group-wake": {
-      // Deprecated alias — unified with the REPL's `:convene` in v0.5.x.
-      // Remove after one release cycle.
-      process.stderr.write(
-        "murmuration: `group-wake` is deprecated and will be removed in a future release. Use `convene` instead.\n",
-      );
-      await runGroupWakeCommand(argv.slice(1), resolveRoot(argv.slice(1)));
-      break;
-    }
     case "directive": {
       await runDirective(argv.slice(1), resolveRoot(argv.slice(1)));
       break;

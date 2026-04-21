@@ -182,7 +182,6 @@ export const promptSecret = async (options: SecretPromptOptions): Promise<string
           continue;
         }
         chars.push(ch);
-        // Tester feedback: pure invisible input makes it hard to tell
         // whether typing is registering. Echo a '*' per character so
         // the operator sees progress without leaking the secret.
         stdout.write("*");

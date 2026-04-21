@@ -33,7 +33,6 @@ You'll see the facilitator invite the scout, the scout contribute, and the facil
 For a real murmuration (no example), run `murmuration init` without `--example` and answer the interview.
 
 → Full walkthrough: [docs/GETTING-STARTED.md](./docs/GETTING-STARTED.md)
-→ Upgrading from pre-v0.5: [docs/MIGRATION-GUIDE.md](./docs/MIGRATION-GUIDE.md)
 
 ## Philosophy: Source as a human role
 

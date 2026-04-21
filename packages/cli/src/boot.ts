@@ -745,26 +745,8 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     ? { provider, declaration }
     : undefined;
 
-  // One-time auto-migration: move legacy `.murmuration/runs/` →
-  // `runs/` at the repo root if it hasn't been done yet. Idempotent;
-  // safe to run every boot.
-  {
-    const { migrateLegacyRunsDir } = await import("@murmurations-ai/core");
-    const migrated = await migrateLegacyRunsDir(exampleRoot);
-    if (migrated) {
-      logger.info("daemon.runs.migrated", {
-        from: ".murmuration/runs",
-        to: "runs",
-        rootDir: exampleRoot,
-      });
-    }
-  }
-
-  // Per-agent run artifact writers (2D5). Each agent gets its own
-  // writer at `<rootDir>/runs/<agentId>/`. v0.5.x moved out of the
-  // legacy `.murmuration/runs/` dot-dir so agent-authored content is
-  // visible in normal directory browsing. Readers still fall back to
-  // the legacy location for pre-move data (see runs-path.ts).
+  // Per-agent run artifact writers. Each agent gets its own writer
+  // at `<rootDir>/runs/<agentId>/`.
   const writerMap = new Map<string, RunArtifactWriter>();
   for (const agent of allRegistered) {
     writerMap.set(
@@ -1468,8 +1450,6 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         ...(groupConfigs.length > 0 ? { groups: groupConfigs, onGovernanceMeetingDue } : {}),
       })
     : firstPassDaemon;
-
-  // v0.5.0 Milestone 4.8: running-session name. Used by registerRunningSocket
   // below so `murmuration list` shows a readable name per tmux-style socket
   // directory. Fall back to the root's basename if nothing better is available.
   const runningSessionName = exampleRoot.split("/").filter(Boolean).pop() ?? "murmuration";
@@ -1507,8 +1487,6 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   // Start daemon control socket
   const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
-
-  // v0.5.0 Milestone 4.8: publish this daemon's socket to the shared
   // ~/.murmuration/sockets/ directory so `murmuration list` can find it.
   if (!once) {
     registerRunningSocket(runningSessionName, socketPath);

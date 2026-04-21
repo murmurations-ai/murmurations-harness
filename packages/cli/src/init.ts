@@ -80,7 +80,6 @@ const ask = (question: string, completions?: readonly string[]): Promise<string>
  * the capture; lazy `getRL()` re-creates a fresh one on the next
  * `ask()`.
  *
- * Tester report (v0.5.0): `murmuration init` echoed the Gemini API
  * key in plaintext and then "crashed" (actually: readline consumed
  * the confirmation ENTER, hanging the prompt).
  */
@@ -111,7 +110,6 @@ const resolveDefaultAgentTemplatesDir = (): string => {
 
 // ---------------------------------------------------------------------------
 // Examples — bundled templates copied by `murmuration init --example <name>`.
-// v0.5.0 Milestone 4. A new operator can run
 //   `murmuration init --example hello my-test-dir`
 // and watch a meeting happen in under 5 minutes.
 // ---------------------------------------------------------------------------
@@ -130,7 +128,6 @@ const resolveExamplesDir = (): string => {
 
 /**
  * Resolve the bundled S3 governance plugin shipped with the CLI.
- * v0.5.0 Milestone 4.6: S3 (and any future governance plugins we
  * author) ship with the CLI so operators don't need to install or
  * author them from scratch. Copied into the scaffolded murmuration
  * at init time so the repo is self-contained.
@@ -313,15 +310,10 @@ const getLLMKeySpec = (
  * Used to tell the operator what they're about to run against so they
  * don't accidentally overwrite half-migrated work. v0.5.0 Milestone 2.
  */
-export type ExistingStateKind =
-  | "empty-or-missing"
-  | "current" // ADR-0026 compliant (murmuration/ + agents/)
-  | "legacy-circles" // governance/circles/ predating ADR-0026
-  | "partial"; // some ADR-0026 pieces but missing either murmuration/ or agents/
+export type ExistingStateKind = "empty-or-missing" | "current" | "partial";
 
 export interface ExistingStateInfo {
   readonly kind: ExistingStateKind;
-  /** Specific signals that informed the classification. */
   readonly signals: readonly string[];
 }
 
@@ -331,23 +323,18 @@ export const detectExistingState = (targetDir: string): ExistingStateInfo => {
   }
   const hasMurmurationDir = existsSync(join(targetDir, "murmuration"));
   const hasAgentsDir = existsSync(join(targetDir, "agents"));
-  const hasCirclesDir = existsSync(join(targetDir, "governance", "circles"));
   const hasGroupsDir = existsSync(join(targetDir, "governance", "groups"));
 
   const signals: string[] = [];
   if (hasMurmurationDir) signals.push("murmuration/ present");
   if (hasAgentsDir) signals.push("agents/ present");
-  if (hasCirclesDir) signals.push("governance/circles/ present (pre-ADR-0026)");
-  if (hasGroupsDir) signals.push("governance/groups/ present (ADR-0026)");
+  if (hasGroupsDir) signals.push("governance/groups/ present");
 
-  if (!hasMurmurationDir && !hasAgentsDir && !hasCirclesDir && !hasGroupsDir) {
+  if (!hasMurmurationDir && !hasAgentsDir && !hasGroupsDir) {
     return {
       kind: "empty-or-missing",
       signals: signals.length > 0 ? signals : ["no murmuration/governance artifacts found"],
     };
-  }
-  if (hasCirclesDir && !hasGroupsDir) {
-    return { kind: "legacy-circles", signals };
   }
   if (hasMurmurationDir && hasAgentsDir) {
     return { kind: "current", signals };
@@ -446,8 +433,6 @@ export const runInitFromExample = async (
   }
 
   await copyExample(example, targetDir);
-
-  // v0.5.0 Milestone 4.5: materialize .env from .env.example at 0600
   // so the operator doesn't have to `cp .env.example .env && chmod 600 .env`.
   // Then offer to capture the LLM key interactively — same UX as
   // interactive init. If they skip, .env still carries the placeholder
@@ -532,8 +517,6 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
   // 1. Target directory
   const target = targetArg ?? (await ask("Directory to create (e.g. ../my-murmuration): "));
   const targetDir = resolve(target.trim());
-
-  // v0.5.0 Milestone 2: detect existing state so the operator knows what
   // they're about to run against before anything is overwritten.
   const existingState = detectExistingState(targetDir);
   if (existingState.kind !== "empty-or-missing") {
@@ -545,11 +528,7 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
     switch (existingState.kind) {
       case "current":
         warning =
-          "This looks like a current (ADR-0026) murmuration. Running init here will overwrite files.";
-        break;
-      case "legacy-circles":
-        warning =
-          "This looks like a pre-ADR-0026 murmuration (governance/circles/). Running init here will overwrite files. A migration tool is planned (see ADR-0026).";
+          "This looks like an existing murmuration. Running init here will overwrite files.";
         break;
       case "partial":
         warning =
@@ -723,7 +702,6 @@ _Edit to reflect this murmuration's specific priorities._
   );
 
   // murmuration/harness.yaml
-  // v0.5.0 Milestone 4.6: the S3 plugin ships bundled with the CLI and
   // is copied into murmuration/governance-s3/ on init. The plugin path
   // in harness.yaml is relative so the scaffolded repo is self-contained
   // (no npm install of an external plugin package needed).
@@ -939,8 +917,6 @@ ${members.map((m) => `- ${m}`).join("\n")}
   // exists (e.g. running init against an existing repo), append
   // only the missing entries instead of overwriting.
   await ensureGitignoreCovers(targetDir, [".env", ".env.*", "!.env.example", ".murmuration/"]);
-
-  // v0.5.0 Milestone 2: .env uses captured secrets when available,
   // placeholder when the operator skipped. .env.example ships the
   // same keys with empty values so operators committing the repo have
   // a template to share.
@@ -986,8 +962,6 @@ ${members.map((m) => `- ${m}`).join("\n")}
   // -------------------------------------------------------------------
   // Print next steps
   // -------------------------------------------------------------------
-
-  // v0.5.0 Milestone 2: lead with the hero command a tester runs next.
   // Optional per-agent tuning hints follow; no step-by-step chore list.
   const firstGroup = groups[0];
   const heroCommand = firstGroup
