@@ -1,12 +1,13 @@
 /**
  * Interactive secret capture for `murmuration init` — v0.5.0 Milestone 2.
  *
- * Prompts with stdin in raw mode so characters aren't echoed to the
- * terminal. Provides a provider-specific shape-validation heuristic
- * (catches paste-from-wrong-clipboard; not cryptographic). Shows a
- * masked last-4 confirmation so the operator can verify the paste
- * landed. ENTER-to-skip returns an empty string and the caller writes
- * a placeholder to .env.
+ * Prompts with stdin in raw mode and echoes a '*' per character so
+ * the operator sees typing progress without leaking the secret.
+ * Provides a provider-specific shape-validation heuristic (catches
+ * paste-from-wrong-clipboard; not cryptographic). Shows a masked
+ * last-4 confirmation so the operator can verify the paste landed.
+ * ENTER-to-skip returns an empty string and the caller writes a
+ * placeholder to .env.
  *
  * Exported helpers are pure (no side effects beyond stdio) so init.ts
  * composes them and tests exercise each piece in isolation.
@@ -168,8 +169,12 @@ export const promptSecret = async (options: SecretPromptOptions): Promise<string
           return;
         }
         if (code === 8 || code === 127) {
-          // backspace / delete — pop one character silently
-          if (chars.length > 0) chars.pop();
+          // backspace / delete — pop one char and erase its mask.
+          // \b moves cursor left; ' ' overwrites the '*'; \b moves back.
+          if (chars.length > 0) {
+            chars.pop();
+            stdout.write("\b \b");
+          }
           continue;
         }
         if (code < 32) {
@@ -177,6 +182,10 @@ export const promptSecret = async (options: SecretPromptOptions): Promise<string
           continue;
         }
         chars.push(ch);
+        // Tester feedback: pure invisible input makes it hard to tell
+        // whether typing is registering. Echo a '*' per character so
+        // the operator sees progress without leaking the secret.
+        stdout.write("*");
       }
     };
 
@@ -237,7 +246,7 @@ export const captureSecret = async (options: CaptureSecretOptions): Promise<stri
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const value = await doPrompt({
-      question: `Enter your ${options.spec.envVar} (input hidden, press ENTER to skip): `,
+      question: `Enter your ${options.spec.envVar} (masked, press ENTER to skip): `,
     });
 
     const trimmed = value.trim();
