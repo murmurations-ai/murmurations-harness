@@ -822,11 +822,12 @@ const handleCommand = async (
     }
   } else if (verb === "wake") {
     const agentId = parts[1];
+    const force = parts.includes("--force");
     if (!agentId) {
-      console.log("  Usage: wake <agent-id>");
+      console.log("  Usage: wake <agent-id> [--force]");
     } else {
-      console.log(`  Waking ${agentId}...`);
-      const resp = await send("wake-now", { agentId });
+      console.log(`  Waking ${agentId}${force ? " (--force: bypass circuit breaker)" : ""}...`);
+      const resp = await send("wake-now", { agentId, ...(force ? { force: true } : {}) });
       if (resp.error) {
         console.log(`  Error: ${resp.error}`);
       } else {
@@ -879,6 +880,26 @@ const handleCommand = async (
                       }
                       if (evt.event === "daemon.wake.failed") {
                         console.log(`  Wake failed: ${evt.errorMessage ?? "unknown error"}`);
+                        rl.prompt();
+                        return;
+                      }
+                      // Circuit-breaker skip — agent hit the consecutive-
+                      // failure threshold (default 3) and is now locked
+                      // out. The daemon never runs the wake, so there's
+                      // no completed/failed event — recognize this here
+                      // so the operator isn't left waiting 2min for a
+                      // timeout. Offer the --force escape hatch.
+                      if (evt.event === "daemon.wake.circuitBreaker") {
+                        const ev = evt as unknown as {
+                          consecutiveFailures?: number;
+                          threshold?: number;
+                        };
+                        console.log(
+                          `  Wake skipped: circuit breaker tripped (${String(ev.consecutiveFailures ?? "?")} / ${String(ev.threshold ?? "?")} consecutive failures).`,
+                        );
+                        console.log(
+                          `  Run \`:wake ${agentId} --force\` to reset the failure count and try again.`,
+                        );
                         rl.prompt();
                         return;
                       }

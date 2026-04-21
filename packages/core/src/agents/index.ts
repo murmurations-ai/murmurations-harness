@@ -261,6 +261,19 @@ export class AgentStateStore implements IAgentStateStore {
     return this.#agents.get(agentId);
   }
 
+  /**
+   * Reset consecutive-failure count to 0 for a single agent. Used by
+   * :wake --force to unstick an agent that the circuit breaker has
+   * locked out. No-op if the agent is unknown.
+   */
+  public async resetConsecutiveFailures(agentId: string): Promise<void> {
+    const agent = this.#agents.get(agentId);
+    if (!agent) return;
+    if (agent.consecutiveFailures === 0) return;
+    this.#agents.set(agentId, { ...agent, consecutiveFailures: 0 });
+    await this.#persist();
+  }
+
   /** Get all agent records. */
   public getAllAgents(): readonly AgentRecord[] {
     return [...this.#agents.values()];
