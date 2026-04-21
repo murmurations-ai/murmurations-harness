@@ -288,6 +288,12 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
   let agentIds: readonly string[] = [];
   let groupIds: readonly string[] = [];
+  // Directive ID cache — populated on attach and refreshed on every
+  // `:directive list`. Used by the completer so `:directive close
+  // <TAB>` doesn't require typing the full ID. Wrapped in a ref so
+  // handleCommand (top-level fn) can refresh it via the passed-in
+  // ref; the completer reads .value through the same ref.
+  const directiveIdsRef: { value: readonly string[] } = { value: [] };
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -323,9 +329,20 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
         return [groupIds.filter((g) => g.startsWith(partial)), partial];
       }
       if (cmd === ":directive" || cmd === "directive" || cmd === ":d" || cmd === "d") {
-        const partial = parts[1] ?? "";
-        const subs = ["list", "close", "delete", "edit"];
-        return [subs.filter((s) => s.startsWith(partial)), partial];
+        const sub = parts[1] ?? "";
+        // `:directive <TAB>` → list subcommands.
+        if (parts.length <= 2) {
+          const subs = ["list", "close", "delete", "edit"];
+          return [subs.filter((s) => s.startsWith(sub)), sub];
+        }
+        // `:directive close|delete|edit <TAB>` → complete from cached
+        // directive IDs. Empty cache falls through to no completions;
+        // operator can run `:directive list` to populate.
+        if (sub === "close" || sub === "delete" || sub === "edit") {
+          const partial = parts[2] ?? "";
+          return [directiveIdsRef.value.filter((id) => id.startsWith(partial)), partial];
+        }
+        return [[], line];
       }
       return [[], line];
     },
@@ -426,6 +443,16 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   agentIds = statusResult?.agents.map((a) => a.agentId) ?? [];
   groupIds =
     (statusResult as { groups?: { groupId: string }[] }).groups?.map((g) => g.groupId) ?? [];
+  // Warm directive-id cache so `:directive close <TAB>` works the
+  // first time without requiring `:directive list` first. Best-effort;
+  // silently tolerates a missing collaboration provider.
+  void (async () => {
+    const resp = await send("directive.list", {});
+    if (!resp.error) {
+      const items = (resp.result as { items?: { id: string }[] }).items ?? [];
+      directiveIdsRef.value = items.map((i) => i.id);
+    }
+  })();
   rl.setPrompt(prompt);
   rl.prompt();
 
@@ -511,14 +538,24 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
     // Explicit command prefix — always dispatch as a command.
     if (input.startsWith(":")) {
-      void handleCommand(input.slice(1), send, name, rl, conn, agentIds, groupIds, rootDir);
+      void handleCommand(
+        input.slice(1),
+        send,
+        name,
+        rl,
+        conn,
+        agentIds,
+        groupIds,
+        directiveIdsRef,
+        rootDir,
+      );
       return;
     }
 
     // Bare known verb — back-compat command dispatch.
     const firstToken = input.split(/\s+/)[0] ?? "";
     if (firstToken.length > 0 && KNOWN_VERBS.has(firstToken)) {
-      void handleCommand(input, send, name, rl, conn, agentIds, groupIds, rootDir);
+      void handleCommand(input, send, name, rl, conn, agentIds, groupIds, directiveIdsRef, rootDir);
       return;
     }
 
@@ -545,6 +582,7 @@ const handleCommand = async (
   conn: Socket,
   agentIds: readonly string[],
   groupIds: readonly string[],
+  directiveIdsRef: { value: readonly string[] },
   rootDir: string,
 ): Promise<void> => {
   const parts = cmd.split(/\s+/);
@@ -596,6 +634,9 @@ const handleCommand = async (
               items?: { id: string; title: string; state: string; labels: string[] }[];
             }
           ).items ?? [];
+        // Refresh tab-completion cache so close/delete/edit <TAB>
+        // reflects the just-listed state.
+        directiveIdsRef.value = items.map((i) => i.id);
         if (items.length === 0) {
           console.log("  No directives found.");
         } else {
