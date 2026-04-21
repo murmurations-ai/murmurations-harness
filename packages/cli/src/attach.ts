@@ -137,7 +137,16 @@ export const runUnattachedRepl = async (): Promise<void> => {
     await import("./running-sessions.js");
   const { HARNESS_VERSION } = await import("@murmurations-ai/core");
 
-  const TOP_LEVEL_VERBS = ["list", "attach", "stop", "help", "quit", "exit"] as const;
+  const TOP_LEVEL_VERBS = [
+    "list",
+    "attach",
+    "start",
+    "stop",
+    "restart",
+    "help",
+    "quit",
+    "exit",
+  ] as const;
 
   const rl = createInterface({
     input: process.stdin,
@@ -160,13 +169,30 @@ export const runUnattachedRepl = async (): Promise<void> => {
         const hits = TOP_LEVEL_VERBS.filter((v) => v.startsWith(verb));
         return [hits.map((h) => restore(h) + " "), restore(verb)];
       }
-      // `attach <TAB>` / `stop <TAB>`: complete from currently-running
-      // session names.
-      if (verb === "attach" || verb === "stop") {
+      // `attach <TAB>` / `stop <TAB>` / `restart <TAB>`: from running
+      // sessions. `start <TAB>`: from registered-but-not-running.
+      if (verb === "attach" || verb === "stop" || verb === "restart") {
         const partial = parts[1] ?? "";
         const names = listRunningSessionNamesSync();
         const hits = names.filter((n) => n.startsWith(partial));
         return [hits, partial];
+      }
+      if (verb === "start") {
+        const partial = parts[1] ?? "";
+        // Offer all registered names not currently running. Best-
+        // effort sync read of the registry — failure falls through
+        // to no completions.
+        try {
+          const raw = readFileSync(join(homedir(), ".murmuration", "sessions.json"), "utf8");
+          const reg = JSON.parse(raw) as Record<string, unknown>;
+          const running = new Set(listRunningSessionNamesSync());
+          const hits = Object.keys(reg)
+            .filter((n) => !running.has(n) && n.startsWith(partial))
+            .sort();
+          return [hits, partial];
+        } catch {
+          return [[], partial];
+        }
       }
       return [[], line];
     },
@@ -201,7 +227,9 @@ export const runUnattachedRepl = async (): Promise<void> => {
     if (verb === "help" || verb === "?") {
       console.log("  :list                show running murmurations");
       console.log("  :attach <name>       connect to a running murmuration");
+      console.log("  :start <name>        start a registered daemon");
       console.log("  :stop <name>         stop a running daemon");
+      console.log("  :restart <name>      stop + start a running daemon");
       console.log("  :quit / :q / :exit   leave the REPL");
       console.log("  (the `:` prefix is optional here — bare `list` also works)");
       console.log("");
@@ -261,33 +289,119 @@ export const runUnattachedRepl = async (): Promise<void> => {
         console.log("  usage: stop <name>\n");
         continue;
       }
-      const sessions = await listRunningSessions();
-      const match = sessions.find((s) => s.name === name);
-      if (!match) {
-        const available = sessions.map((s) => s.name);
-        console.log(
-          `  no running murmuration named "${name}".${available.length > 0 ? ` Known: ${available.join(", ")}.` : ""}\n`,
-        );
+      await stopSession(name);
+      continue;
+    }
+    if (verb === "start") {
+      const name = rest[0];
+      if (!name) {
+        console.log("  usage: start <name>  (name must be registered or previously-running)\n");
         continue;
       }
-      // Signal the daemon via its pidfile. Same mechanism as the
-      // `murmuration stop --name <name>` CLI command.
-      if (match.pid !== undefined) {
-        try {
-          process.kill(match.pid, "SIGTERM");
-          console.log(`  Sent SIGTERM to ${name} (PID ${String(match.pid)}).\n`);
-        } catch (err) {
-          console.log(
-            `  Could not signal PID ${String(match.pid)}: ${err instanceof Error ? err.message : String(err)}\n`,
-          );
-        }
-      } else {
-        console.log(`  ${name} has no pid on record.\n`);
+      await startSession(name);
+      continue;
+    }
+    if (verb === "restart") {
+      const name = rest[0];
+      if (!name) {
+        console.log("  usage: restart <name>\n");
+        continue;
       }
+      await stopSession(name);
+      // Wait for the socket symlink to disappear so start sees a
+      // clean slate. 5s cap keeps us from hanging if the daemon is
+      // already gone / stuck.
+      const { findRunningSessionByName } = await import("./running-sessions.js");
+      const waitStart = Date.now();
+      while (findRunningSessionByName(name) !== null && Date.now() - waitStart < 5000) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      await startSession(name);
       continue;
     }
 
     console.log(`  unknown command: ${verb}. type \`?\` for help.\n`);
+  }
+};
+
+/**
+ * Stop a running session by name. SIGTERM the daemon PID. Used by
+ * `:stop` and as the first step of `:restart`. Idempotent — logs and
+ * returns cleanly if the name isn't running.
+ */
+const stopSession = async (name: string): Promise<void> => {
+  const { listRunningSessions } = await import("./running-sessions.js");
+  const sessions = await listRunningSessions();
+  const match = sessions.find((s) => s.name === name);
+  if (!match) {
+    const available = sessions.map((s) => s.name);
+    console.log(
+      `  no running murmuration named "${name}".${available.length > 0 ? ` Known: ${available.join(", ")}.` : ""}\n`,
+    );
+    return;
+  }
+  if (match.pid !== undefined) {
+    try {
+      process.kill(match.pid, "SIGTERM");
+      console.log(`  Sent SIGTERM to ${name} (PID ${String(match.pid)}).`);
+    } catch (err) {
+      console.log(
+        `  Could not signal PID ${String(match.pid)}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  } else {
+    console.log(`  ${name} has no pid on record.`);
+  }
+};
+
+/**
+ * Start a registered (or previously-running) session by name. Spawns
+ * a detached child daemon via `murmuration start --root <root>`, same
+ * way the CLI does. Waits briefly for the socket symlink to appear
+ * so the REPL can confirm the daemon is ready.
+ */
+const startSession = async (name: string): Promise<void> => {
+  const { tryResolveSessionRoot } = await import("./sessions.js");
+  const root = tryResolveSessionRoot(name);
+  if (!root) {
+    console.log(
+      `  no session named "${name}" is registered or running. Register first with \`murmuration register --name ${name} --root <path>\`, or start once from the shell with \`murmuration start --root <path>\`.\n`,
+    );
+    return;
+  }
+  const { findRunningSessionByName } = await import("./running-sessions.js");
+  if (findRunningSessionByName(name) !== null) {
+    console.log(
+      `  "${name}" is already running. Use \`:restart ${name}\` to cycle it, or \`:stop ${name}\` to stop it.\n`,
+    );
+    return;
+  }
+  const cp = await import("node:child_process");
+  const { openSync } = await import("node:fs");
+  const { mkdirSync } = await import("node:fs");
+  const path = await import("node:path");
+  const logPath = path.join(root, ".murmuration", "daemon.log");
+  mkdirSync(path.dirname(logPath), { recursive: true });
+  const out = openSync(logPath, "a");
+  const binPath = process.argv[1] ?? "murmuration";
+  const child = cp.spawn(process.execPath, [binPath, "start", "--root", root], {
+    detached: true,
+    stdio: ["ignore", out, out],
+  });
+  child.unref();
+  console.log(`  Starting ${name} (PID ${String(child.pid ?? "?")}); log: ${logPath}`);
+  // Wait briefly for the socket symlink to appear — confirmation that
+  // the daemon bound its control socket and is ready for :attach.
+  const waitStart = Date.now();
+  while (findRunningSessionByName(name) === null && Date.now() - waitStart < 10000) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  if (findRunningSessionByName(name) !== null) {
+    console.log(`  ${name} is ready. Use \`:attach ${name}\` to connect.\n`);
+  } else {
+    console.log(
+      `  (${name} didn't bind its socket within 10s — check ${logPath} for boot errors.)\n`,
+    );
   }
 };
 
