@@ -923,6 +923,28 @@ const handleCommand = async (
                         rl.prompt();
                         return;
                       }
+                      // Wall-clock timeout — the agent ran past its
+                      // max_wall_clock_ms (15s default). Event fires
+                      // with duration metadata the operator should see
+                      // alongside the "what to do" hint.
+                      if (evt.event === "daemon.wake.timedOut") {
+                        const ev = evt as unknown as {
+                          durationMs?: number;
+                          budget?: { maxWallClockMs?: number };
+                        };
+                        const dur =
+                          ev.durationMs !== undefined ? `${String(ev.durationMs)}ms` : "?";
+                        const cap =
+                          ev.budget?.maxWallClockMs !== undefined
+                            ? `${String(ev.budget.maxWallClockMs)}ms`
+                            : "?";
+                        console.log(`  Wake timed out (${dur} / ${cap} wall clock).`);
+                        console.log(
+                          `  Raise max_wall_clock_ms in agents/${agentId}/role.md, or switch to a faster model (e.g. model_tier: fast).`,
+                        );
+                        rl.prompt();
+                        return;
+                      }
                       // Circuit-breaker skip — agent hit the consecutive-
                       // failure threshold (default 3) and is now locked
                       // out. The daemon never runs the wake, so there's
