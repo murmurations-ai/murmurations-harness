@@ -178,7 +178,7 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
   const turn = async (message: string): Promise<SpiritTurnResult> => {
     history.push({ role: "user", content: message });
 
-    const maxSteps = 16;
+    const maxSteps = harness.spirit.maxSteps;
     const result = await client.complete({
       model,
       messages: history,

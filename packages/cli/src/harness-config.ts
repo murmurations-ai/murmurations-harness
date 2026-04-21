@@ -43,6 +43,16 @@ export interface HarnessConfig {
   readonly logging: {
     readonly level: "debug" | "info" | "warn" | "error";
   };
+  /** Spirit-specific knobs. Defaults apply when omitted. */
+  readonly spirit: {
+    /**
+     * Maximum tool-use steps in a single Spirit turn. Each step is one
+     * round-trip to the LLM + any tool calls it emits. Larger
+     * murmurations (many agents) need a bigger budget or the Spirit
+     * runs out of steps before producing a final answer. Default 32.
+     */
+    readonly maxSteps: number;
+  };
 }
 
 const DEFAULTS: HarnessConfig = {
@@ -51,6 +61,7 @@ const DEFAULTS: HarnessConfig = {
   collaboration: { provider: "github", repo: undefined },
   products: [],
   logging: { level: "info" },
+  spirit: { maxSteps: 32 },
 };
 
 const isLLMProvider = (v: unknown): v is LLMProvider =>
@@ -83,9 +94,15 @@ export async function loadHarnessConfig(rootDir: string): Promise<HarnessConfig>
   const collab = raw.collaboration as Record<string, unknown> | undefined;
   const products = raw.products as { name: string; repo: string }[] | undefined;
   const logging = raw.logging as Record<string, unknown> | undefined;
+  const spirit = raw.spirit as Record<string, unknown> | undefined;
 
   const collabProvider = collab?.provider;
   const logLevel = logging?.level;
+  const rawMaxSteps = spirit?.maxSteps;
+  const maxSteps =
+    typeof rawMaxSteps === "number" && Number.isFinite(rawMaxSteps) && rawMaxSteps >= 1
+      ? Math.floor(rawMaxSteps)
+      : DEFAULTS.spirit.maxSteps;
 
   return {
     llm: {
@@ -118,6 +135,7 @@ export async function loadHarnessConfig(rootDir: string): Promise<HarnessConfig>
           ? logLevel
           : DEFAULTS.logging.level,
     },
+    spirit: { maxSteps },
   };
 }
 
@@ -146,5 +164,6 @@ export function mergeWithCliFlags(
     logging: {
       level: flags.logLevel ?? config.logging.level,
     },
+    spirit: config.spirit,
   };
 }
