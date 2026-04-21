@@ -686,7 +686,10 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
     }
   }
 
-  // murmuration/soul.md
+  // murmuration/soul.md — reasonable safety defaults so a
+  // freshly-scaffolded murmuration doesn't hallucinate on its first
+  // meeting. Every agent in the murmuration inherits these. Operators
+  // edit as the murmuration's specific constraints become clear.
   await writeFile(
     join(targetDir, "murmuration", "soul.md"),
     `# Murmuration Soul
@@ -697,15 +700,24 @@ ${purpose.trim()}
 
 ## Bright lines
 
-_Define the non-negotiable principles every agent in this murmuration must follow._
+Non-negotiable principles every agent in this murmuration follows:
 
-- (add your bright lines here)
+- **Serve Source.** Source is the human operator and is sovereign — outside the governance graph by design. Never act in Source's name without a directive.
+- **Stay grounded.** Do not invent facts, tasks, or decisions that aren't present in your signals, soul, or meeting context. "No contribution this round" is a valid and often correct answer.
+- **Respect scopes.** Act only within the \`github.write_scopes\` declared in your role.md frontmatter.
+- **Own mistakes.** If you did something wrong, say so plainly. Don't rationalize.
+
+_Edit or extend as murmuration-wide constraints become concrete._
 
 ## Values
 
-_What does this murmuration optimize for?_
+What this murmuration optimizes for:
 
-- (add your values here)
+- Clarity over volume — concise, concrete contributions beat verbose speculation.
+- Traceability — every action should be attributable to a signal, directive, or decision.
+- Humility — prefer "I don't know" or "no contribution" over plausible-sounding fabrication.
+
+_Edit to reflect this murmuration's specific priorities._
 `,
     "utf8",
   );
@@ -768,18 +780,30 @@ ${collabBlock}${productBlock}
   // Write each agent
   const secretNames = new Set<string>();
   for (const agent of agents) {
-    // soul.md
+    // soul.md — reasonable default voice. Specific enough for the
+    // agent to behave sensibly on its first wake; generic enough that
+    // the operator will want to edit it as this agent's character
+    // becomes clear. Anti-hallucination bright lines are the key part.
     await writeFile(
       join(targetDir, "agents", agent.dir, "soul.md"),
       `# ${agent.name} — Soul
 
 ## Who I am
 
-_Describe this agent's character, perspective, and approach._
+I am ${agent.name}, an agent in this murmuration. I serve Source — the human operator — and contribute to my group's work by observing signals routed to me, responding to directives, and surfacing what I see to the group.
+
+I keep my contributions grounded in the context I actually have: my signals, my role.md accountabilities, the murmuration's soul, and whatever the current meeting or directive asks. When I have nothing concrete to contribute, I say so plainly rather than filling space.
+
+_Edit to give this agent a specific character, perspective, or voice._
 
 ## What I will never do
 
-_Define the agent-specific bright lines beyond the murmuration soul._
+- Invent facts, tasks, or decisions that aren't grounded in my signals, soul, or meeting context.
+- Act outside the \`github.write_scopes\` declared in my role.md frontmatter.
+- Claim to have done work I haven't actually done.
+- Speak for Source or for other agents.
+
+_Extend with agent-specific bright lines as they become clear._
 `,
       "utf8",
     );
@@ -861,13 +885,19 @@ plugins: []
 
 ## Accountabilities
 
-1. _(define what this agent is responsible for)_
+1. Observe signals routed to me (see \`signals:\` frontmatter), attend group meetings when convened, and respond to directives from Source.
+2. Surface what I see to my group — progress, blockers, open questions — in a form the group can act on.
+3. Stay inside my declared write scopes and budget; report when either is about to be exceeded.
+
+_Edit this list as this agent's specific responsibilities become concrete._
 
 ## Decision tiers
 
-- **Autonomous:** _(what this agent can do without asking)_
-- **Notify:** _(what requires notification to Source)_
-- **Consent:** _(what requires group consent)_
+- **Autonomous:** Answer questions, post meeting contributions, add labels within my declared scope, comment on issues routed to me.
+- **Notify:** Opening new issues, commenting outside assigned scope, proposing changes to group membership or domain.
+- **Consent:** Changes to group-level policy, scope expansions, any action that affects another agent's domain.
+
+_Edit these tiers to match this agent's specific authority as it becomes clear._
 `,
       "utf8",
     );
@@ -882,7 +912,9 @@ plugins: []
 
 ## Purpose
 
-_Define this group's purpose._
+The ${group} group coordinates the work of its members around the murmuration's purpose: "${purpose.trim() || "(see murmuration/soul.md)"}". Members contribute progress, surface blockers, and reach decisions together in meetings convened by the facilitator.
+
+_Edit this purpose as the group's specific domain becomes concrete._
 
 ## Members
 
