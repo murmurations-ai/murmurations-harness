@@ -73,49 +73,23 @@ interface SocketEvent {
  *
  * Skipped when stderr is not a TTY (CI, piped output).
  */
-const startThinkingIndicator = (label: string, rl?: Interface): (() => void) => {
+const startThinkingIndicator = (label: string): (() => void) => {
   if (!process.stderr.isTTY) return () => undefined;
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   const start = Date.now();
   let frameIdx = 0;
-
-  // "Above mode": when a readline is passed, reserve a line above the
-  // prompt for the spinner so the operator can still see the prompt
-  // while work is in flight. Without rl, fall back to the original
-  // in-place spinner.
-  let aboveMode = false;
-  if (rl !== undefined) {
-    process.stderr.write("\n");
-    aboveMode = true;
-    rl.prompt(true);
-  }
-
   const render = (): void => {
     const elapsed = Math.floor((Date.now() - start) / 1000);
     const frame = frames[frameIdx % frames.length] ?? "";
     frameIdx++;
-    if (aboveMode) {
-      // Save cursor → up 1 line → col 0 → clear line → spinner → restore.
-      process.stderr.write(
-        `\x1b7\x1b[1A\r\x1b[2K\x1b[2m${frame} ${label} (${String(elapsed)}s)\x1b[0m\x1b8`,
-      );
-    } else {
-      process.stderr.write(`\r\x1b[2m${frame} ${label} (${String(elapsed)}s)\x1b[0m`);
-    }
+    process.stderr.write(`\r\x1b[2m${frame} ${label} (${String(elapsed)}s)\x1b[0m`);
   };
   render();
   const timer = setInterval(render, 100);
   return () => {
     clearInterval(timer);
-    if (aboveMode) {
-      // Up 1 (spinner line) → col 0 → clear to end of screen (removes
-      // spinner line + prompt line). Caller continues with console.log
-      // of the result, then rl.prompt() for a fresh prompt.
-      process.stderr.write("\x1b[1A\r\x1b[J");
-    } else {
-      // Clear the line and reset to column 0.
-      process.stderr.write("\r\x1b[K");
-    }
+    // Clear the line and reset to column 0.
+    process.stderr.write("\r\x1b[K");
   };
 };
 
@@ -474,7 +448,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
       return;
     }
     spiritBusy = true;
-    const stop = startThinkingIndicator("Spirit thinking", rl);
+    const stop = startThinkingIndicator("Spirit thinking");
     try {
       const result = await session.turn(message);
       stop();
