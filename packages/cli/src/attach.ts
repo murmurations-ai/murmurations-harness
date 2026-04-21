@@ -73,23 +73,49 @@ interface SocketEvent {
  *
  * Skipped when stderr is not a TTY (CI, piped output).
  */
-const startThinkingIndicator = (label: string): (() => void) => {
+const startThinkingIndicator = (label: string, rl?: Interface): (() => void) => {
   if (!process.stderr.isTTY) return () => undefined;
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   const start = Date.now();
   let frameIdx = 0;
+
+  // "Above mode": when a readline is passed, reserve a line above the
+  // prompt for the spinner so the operator can still see the prompt
+  // while work is in flight. Without rl, fall back to the original
+  // in-place spinner.
+  let aboveMode = false;
+  if (rl !== undefined) {
+    process.stderr.write("\n");
+    aboveMode = true;
+    rl.prompt(true);
+  }
+
   const render = (): void => {
     const elapsed = Math.floor((Date.now() - start) / 1000);
     const frame = frames[frameIdx % frames.length] ?? "";
     frameIdx++;
-    process.stderr.write(`\r\x1b[2m${frame} ${label} (${String(elapsed)}s)\x1b[0m`);
+    if (aboveMode) {
+      // Save cursor → up 1 line → col 0 → clear line → spinner → restore.
+      process.stderr.write(
+        `\x1b7\x1b[1A\r\x1b[2K\x1b[2m${frame} ${label} (${String(elapsed)}s)\x1b[0m\x1b8`,
+      );
+    } else {
+      process.stderr.write(`\r\x1b[2m${frame} ${label} (${String(elapsed)}s)\x1b[0m`);
+    }
   };
   render();
   const timer = setInterval(render, 100);
   return () => {
     clearInterval(timer);
-    // Clear the line and reset to column 0.
-    process.stderr.write("\r\x1b[K");
+    if (aboveMode) {
+      // Up 1 (spinner line) → col 0 → clear to end of screen (removes
+      // spinner line + prompt line). Caller continues with console.log
+      // of the result, then rl.prompt() for a fresh prompt.
+      process.stderr.write("\x1b[1A\r\x1b[J");
+    } else {
+      // Clear the line and reset to column 0.
+      process.stderr.write("\r\x1b[K");
+    }
   };
 };
 
@@ -418,6 +444,10 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
   let spiritSession: SpiritSession | null = null;
   let spiritUnavailableReason: string | null = null;
+  // True while a Spirit turn is in flight. The line handler drops
+  // input while busy so a second ENTER can't launch a concurrent turn.
+  // Type-ahead queueing is a separate feature (issue #147).
+  let spiritBusy = false;
 
   const ensureSpirit = async (): Promise<SpiritSession | null> => {
     if (spiritSession) return spiritSession;
@@ -443,7 +473,8 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
       rl.prompt();
       return;
     }
-    const stop = startThinkingIndicator("Spirit thinking");
+    spiritBusy = true;
+    const stop = startThinkingIndicator("Spirit thinking", rl);
     try {
       const result = await session.turn(message);
       stop();
@@ -455,12 +486,24 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     } catch (err) {
       stop();
       console.log(`(Spirit error: ${err instanceof Error ? err.message : String(err)})`);
+    } finally {
+      spiritBusy = false;
     }
     rl.prompt();
   };
 
   rl.on("line", (line) => {
     const input = line.trim();
+
+    // Spirit turn in flight — drop the input with a note so a second
+    // ENTER can't launch a concurrent turn. Type-ahead queueing is a
+    // separate feature tracked in issue #147.
+    if (spiritBusy) {
+      if (input.length > 0) {
+        console.log("  (Spirit is thinking — your input was dropped. Wait for the response.)");
+      }
+      return;
+    }
 
     // Bare ENTER is a no-op — just re-prompt. Tester feedback: bare
     // ENTER previously dispatched :status and dumped an agent list,
