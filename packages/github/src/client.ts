@@ -510,20 +510,15 @@ class GithubClientImpl implements GithubClient {
     if (denial) return denial;
 
     const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/issues/${String(issueNumber.value)}`;
-    // MURMURATION_DEBUG_GITHUB=1 turns on request tracing so the
-    // operator can see exactly what's going out when a write 404s
-    // unexpectedly.
-    if (process.env.MURMURATION_DEBUG_GITHUB === "1") {
-      process.stderr.write(
-        `[github] PATCH ${url} state=${state} tokenPrefix=${this.#token.reveal().slice(0, 10)}\n`,
-      );
-    }
+    // Temporary: always trace updateIssueState so we can diagnose the
+    // 404-on-write bug EP is hitting. Remove once root cause is known.
+    process.stderr.write(
+      `[github] PATCH ${url} state=${state} tokenPrefix=${this.#token.reveal().slice(0, 12)}\n`,
+    );
     const raw = await this.#requestMutation(url, "PATCH", { state }, options);
-    if (process.env.MURMURATION_DEBUG_GITHUB === "1") {
-      process.stderr.write(
-        `[github] PATCH result: ${raw.ok ? "ok" : `err ${raw.error.code}: ${raw.error.message}`}\n`,
-      );
-    }
+    process.stderr.write(
+      `[github] PATCH result: ${raw.ok ? "ok" : `err ${raw.error.code}: ${raw.error.message}`}\n`,
+    );
     if (!raw.ok) return raw;
     return { ok: true, value: undefined };
   }
