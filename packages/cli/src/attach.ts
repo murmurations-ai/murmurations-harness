@@ -828,7 +828,7 @@ const handleCommand = async (
             totalArtifacts: number;
             idleWakes: number;
             consecutiveFailures: number;
-            recentDigests: { date: string; summary: string }[];
+            recentDigests: { date: string; summary: string; file: string }[];
           };
           console.log(
             `  ${d.agentId} — ${d.state} · wakes: ${String(d.totalWakes)} · artifacts: ${String(d.totalArtifacts)} · idle: ${String(d.idleWakes)} · failures: ${String(d.consecutiveFailures)}`,
@@ -847,6 +847,7 @@ const handleCommand = async (
                 .find((s) => s.length > 0 && !s.startsWith("#"));
               const preview = meaningfulLine ?? "(empty digest)";
               console.log(`    ${entry.date}  ${preview.slice(0, 80)}`);
+              console.log(`                ${entry.file}`);
             }
           }
         }

@@ -259,7 +259,7 @@ export class DaemonCommandExecutor {
     });
     const runsDir = join(rootDir, ".murmuration", "runs", agentId);
     const agent = agentStateStore.getAgent(agentId);
-    const recentDigests: { date: string; summary: string }[] = [];
+    const recentDigests: { date: string; summary: string; file: string }[] = [];
     try {
       const dates = (await readdir(runsDir))
         .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
@@ -286,7 +286,7 @@ export class DaemonCommandExecutor {
         if (!latest) continue;
         const content = await readFile(latest.file, "utf8");
         const body = content.replace(/^---[\s\S]*?---\n*/, "").trim();
-        recentDigests.push({ date, summary: body.slice(0, 500) });
+        recentDigests.push({ date, summary: body.slice(0, 500), file: latest.file });
       }
     } catch {
       /* no runs yet */
