@@ -186,6 +186,123 @@ export class LLMInternalError extends LLMClientError {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Human-readable formatting with remediation hints
+// ---------------------------------------------------------------------------
+
+/**
+ * Format an {@link LLMClientError} as a multi-line operator-facing
+ * block. Shows provider, code, HTTP status, model when provided, and
+ * the raw provider message. Appends a short "what to check" list
+ * tailored to the error code + provider so a tester hit with a 403
+ * knows to look at API-key permissions rather than their agent code.
+ *
+ * Never embeds the API key or token. Safe to print to stdout.
+ *
+ * Intentionally generous with whitespace — operators read this in a
+ * terminal, not a log aggregator.
+ */
+export const formatLLMError = (
+  err: LLMClientError,
+  context: { readonly agentId?: string; readonly model?: string } = {},
+): string => {
+  const lines: string[] = [];
+  const who = context.agentId !== undefined ? ` for ${context.agentId}` : "";
+  lines.push(`LLM call failed${who}`);
+  lines.push(`  provider: ${err.provider}`);
+  if (context.model !== undefined) lines.push(`  model:    ${context.model}`);
+  lines.push(
+    `  code:     ${err.code}${err.status !== undefined ? ` (HTTP ${String(err.status)})` : ""}`,
+  );
+  lines.push(`  message:  ${err.message}`);
+  const hints = remediationHints(err);
+  if (hints.length > 0) {
+    lines.push("");
+    lines.push("Next steps:");
+    for (const hint of hints) lines.push(`  - ${hint}`);
+  }
+  return lines.join("\n");
+};
+
+const remediationHints = (err: LLMClientError): readonly string[] => {
+  switch (err.code) {
+    case "unauthorized":
+      return [
+        `Your ${envVarForProvider(err.provider)} is missing or wrong. Check \`.env\` and confirm the key starts with the expected prefix.`,
+        "Rotate the key at the provider console if it may be compromised.",
+        "After editing .env, restart the daemon so the new value is loaded.",
+      ];
+    case "forbidden":
+      return providerForbiddenHints(err.provider);
+    case "rate-limited":
+      return [
+        "You've hit the provider's rate limit. Wait a minute or two and retry.",
+        "If this happens often: lower wake cadence (agent role.md `wake_schedule`), reduce parallelism, or upgrade your provider plan.",
+        "Consider a different model tier — set `model_tier: economy` in role.md for cheaper, higher-limit models.",
+      ];
+    case "content-policy":
+      return [
+        "The provider refused the prompt for safety/policy reasons.",
+        "Check the agent's soul.md and any recent signals for content that could have tripped the filter.",
+      ];
+    case "context-length":
+      return [
+        "The prompt exceeded the model's context window.",
+        "Reduce the number of signals included (agent role.md `signals` caps), shorten agent soul.md, or switch to a larger-context model.",
+      ];
+    case "transport":
+    case "provider-outage":
+      return [
+        "Network or upstream provider issue.",
+        "Check connectivity and https://status.anthropic.com / https://status.openai.com / https://status.cloud.google.com depending on provider.",
+        "Retry in a few minutes.",
+      ];
+    case "validation":
+    case "parse":
+    case "internal":
+      return ["Unexpected client error. Include the `message:` line above when filing a bug."];
+  }
+};
+
+const envVarForProvider = (provider: string): string => {
+  switch (provider) {
+    case "gemini":
+      return "GEMINI_API_KEY";
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "openai":
+      return "OPENAI_API_KEY";
+    default:
+      return `${provider.toUpperCase()}_API_KEY`;
+  }
+};
+
+const providerForbiddenHints = (provider: string): readonly string[] => {
+  const common = [
+    "403 usually means the API key is valid but not permitted for this model or region.",
+  ];
+  switch (provider) {
+    case "gemini":
+      return [
+        ...common,
+        "Gemini free tier only supports some models. Try `model_tier: economy` in role.md to pick a free-tier-friendly model, or enable billing at https://aistudio.google.com/app/apikey.",
+        "If you're outside a supported region, use a VPN endpoint in a supported region or switch providers (anthropic / openai).",
+      ];
+    case "anthropic":
+      return [
+        ...common,
+        "Anthropic keys need model access granted per-model. Check https://console.anthropic.com/settings/workspaces.",
+      ];
+    case "openai":
+      return [
+        ...common,
+        "OpenAI keys need billing + model access. Check https://platform.openai.com/settings/organization/limits.",
+      ];
+    default:
+      return common;
+  }
+};
+
 /**
  * Best-effort scrub of the raw token from a cause's message. Primary
  * defense is that the token never enters any error path we construct;

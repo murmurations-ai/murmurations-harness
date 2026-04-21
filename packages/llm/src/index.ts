@@ -64,3 +64,4 @@ export {
   LLMValidationError,
 } from "./errors.js";
 export type { LLMClientErrorCode, RateLimitScope } from "./errors.js";
+export { formatLLMError } from "./errors.js";

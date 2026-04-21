@@ -29,7 +29,7 @@ import {
   type GovernanceTally,
   GovernanceStateStore,
 } from "@murmurations-ai/core";
-import { createLLMClient, type LLMClient } from "@murmurations-ai/llm";
+import { createLLMClient, formatLLMError, type LLMClient } from "@murmurations-ai/llm";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
 import { buildBuiltinProviderRegistry } from "./builtin-providers/index.js";
@@ -619,7 +619,7 @@ export const runGroupWakeCommand = async (
         temperature: 0.3,
         ...(extensionTools.length > 0 ? { tools: extensionTools, maxSteps: 5 } : {}),
       });
-      if (!r.ok) throw new Error(`LLM failed for ${agentId}: ${r.error.code}`);
+      if (!r.ok) throw new Error(`\n${formatLLMError(r.error, { agentId, model })}`);
       return {
         content: r.value.content,
         inputTokens: r.value.inputTokens,
