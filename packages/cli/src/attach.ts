@@ -347,7 +347,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
           partial,
         );
       }
-      if (cmd === ":convene" || cmd === "convene") {
+      if (cmd === ":convene" || cmd === "convene" || cmd === ":groups" || cmd === "groups") {
         const partial = parts[1] ?? "";
         return finalize(
           groupIds.filter((g) => g.startsWith(partial)),
@@ -961,17 +961,22 @@ const handleCommand = async (
     if (resp.error) {
       console.log(`Error: ${resp.error}`);
     } else {
-      console.log(
-        formatGroupsTable(
-          resp.result as {
-            groupId: string;
-            memberCount: number;
-            totalWakes: number;
-            totalArtifacts: number;
-            members: string[];
-          }[],
-        ),
-      );
+      const groups = resp.result as {
+        groupId: string;
+        memberCount: number;
+        totalWakes: number;
+        totalArtifacts: number;
+        members: string[];
+      }[];
+      const filterVal = parts[1];
+      const filtered =
+        filterVal === undefined
+          ? groups
+          : groups.filter((g) => g.groupId.toLowerCase().includes(filterVal.toLowerCase()));
+      console.log(formatGroupsTable(filtered));
+      if (filterVal !== undefined && filtered.length === 0) {
+        console.log(`  (no groups matched "${filterVal}")`);
+      }
     }
   } else if (verb === "events") {
     const { formatEventsTable } = await import("./formatters.js");
@@ -1093,7 +1098,7 @@ const handleCommand = async (
     console.log(`Commands (use :prefix or bare):
   :status (s)                       Agent status + governance summary
   :agents [<substring>]             Agent list; optional case-insensitive id filter
-  :groups                           Group list with stats
+  :groups [<substring>]             Group list; optional case-insensitive id filter
   :events                           Recent meetings + in-flight
   :cost                             Cost summary per agent
   :directive (d) [message]          Send a Source directive
