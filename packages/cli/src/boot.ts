@@ -1456,8 +1456,32 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   // Command executor — owns command dispatch, status building, and detail handlers
   // (extracted from boot.ts per Engineering Standard #8)
   const { DaemonCommandExecutor } = await import("./command-executor.js");
+
+  // Resolve the repo coordinate for both GitHub collaboration and the
+  // command-executor's status/issue-listing path. Try harness.yaml's
+  // `collaboration.repo` first (explicit operator config), then fall
+  // back to searching ALL registered agents for github_scopes (not
+  // just the first — agents are loaded alphabetically and the first
+  // one may not have scopes declared).
   const firstScope = allRegistered[0]?.signalScopes?.githubScopes?.[0];
-  const repoCoord = firstScope ? { owner: firstScope.owner, repo: firstScope.repo } : undefined;
+  let repoCoord: { owner: string; repo: string } | undefined = firstScope
+    ? { owner: firstScope.owner, repo: firstScope.repo }
+    : undefined;
+  if (!repoCoord && config.collaboration.repo) {
+    const parts = config.collaboration.repo.split("/");
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      repoCoord = { owner: parts[0], repo: parts[1] };
+    }
+  }
+  if (!repoCoord) {
+    for (const agent of allRegistered) {
+      const scope = agent.signalScopes?.githubScopes?.[0];
+      if (scope) {
+        repoCoord = { owner: scope.owner, repo: scope.repo };
+        break;
+      }
+    }
+  }
 
   // Wire a CollaborationProvider for the daemon's command-executor
   // paths (:directive list, directive.close, etc.). Local mode already
@@ -1477,6 +1501,18 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     logger.info("daemon.collaboration.provider", {
       provider: "github",
       repo: `${repoCoord.owner}/${repoCoord.repo}`,
+    });
+  } else if (collaborationMode === "github") {
+    // Diagnostic: explain why the GitHub collaboration provider didn't
+    // wire up so operators aren't staring at "No collaboration provider
+    // configured" with no hint of what to fix.
+    logger.warn("daemon.collaboration.provider.skipped", {
+      reason: !githubClient
+        ? "no GITHUB_TOKEN in .env"
+        : !repoCoord
+          ? "no collaboration.repo in harness.yaml and no agent github_scopes"
+          : "unknown",
+      collaborationMode,
     });
   }
   const commandCollaborationProvider = localCollaborationProvider ?? githubCollaborationProvider;
