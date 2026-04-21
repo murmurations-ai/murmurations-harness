@@ -709,6 +709,22 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
       directiveIdsRef.value = items.map((i) => i.id);
     }
   })();
+  // Warm digest-filename cache for every agent in parallel so
+  // `:show-digest <agent> <TAB>` works on the first attempt. Each
+  // digest.list is a readdir of a small tree; fanning out across 27
+  // agents still finishes in well under a second.
+  void Promise.all(
+    agentIds.map(async (aid) => {
+      const resp = await send("digest.list", { agentId: aid });
+      if (!resp.error) {
+        const r = resp.result as { digests?: { name: string }[] };
+        digestsByAgentRef.value.set(
+          aid,
+          (r.digests ?? []).map((d) => d.name),
+        );
+      }
+    }),
+  );
   rl.setPrompt(prompt);
   rl.prompt();
 
