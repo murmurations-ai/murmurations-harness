@@ -66,13 +66,33 @@ interface SocketEvent {
  * surprised operators who just wanted to see what was running.
  */
 export const runUnattachedRepl = async (): Promise<void> => {
-  const { listRunningSessions } = await import("./running-sessions.js");
+  const { listRunningSessions, listRunningSessionNamesSync } =
+    await import("./running-sessions.js");
   const { HARNESS_VERSION } = await import("@murmurations-ai/core");
+
+  const TOP_LEVEL_VERBS = ["list", "attach", "help", "quit", "exit"] as const;
 
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
     terminal: true,
+    completer: (line: string): [string[], string] => {
+      const parts = line.split(/\s+/);
+      const verb = parts[0] ?? "";
+      // First token: complete verbs.
+      if (parts.length <= 1) {
+        const hits = TOP_LEVEL_VERBS.filter((v) => v.startsWith(verb));
+        return [hits.map((h) => h + " "), verb];
+      }
+      // `attach <TAB>`: complete from currently-running session names.
+      if (verb === "attach") {
+        const partial = parts[1] ?? "";
+        const names = listRunningSessionNamesSync();
+        const hits = names.filter((n) => n.startsWith(partial));
+        return [hits, partial];
+      }
+      return [[], line];
+    },
   });
 
   const prompt = "murmuration> ";
