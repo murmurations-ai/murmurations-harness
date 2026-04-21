@@ -673,6 +673,16 @@ export class DaemonCommandExecutor {
       throw new Error(`Unknown agent "${agentId}". Available: ${available}`);
     }
 
+    // --force: reset the circuit-breaker by zeroing consecutiveFailures
+    // before spawning the child. Operator escape hatch when an agent
+    // is locked out after 3 consecutive failures.
+    if (params.force === true) {
+      await this.#deps.agentStateStore.load().catch(() => {
+        /* best effort */
+      });
+      await this.#deps.agentStateStore.resetConsecutiveFailures(agentId);
+    }
+
     const result = await this.#deps.onWakeNow(this.#deps.rootDir, agentId);
 
     // Track the process (Engineering Standard #7 — track what you spawn)
