@@ -816,7 +816,48 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       process.exit(78);
     }
     if (provider.has(GITHUB_TOKEN)) {
-      githubClient = createGithubClient({ token: provider.get(GITHUB_TOKEN) });
+      // Resolve the target repo once, so the shared githubClient has
+      // writeScopes set for it. Without this, every write path through
+      // the daemon (Source directive close/delete, governance meeting
+      // minutes post) hits `no write scopes configured`. Same
+      // resolution order as collaboration-factory.ts: first-agent
+      // scope → harness.yaml → any-agent scope.
+      let bootRepoCoord: { owner: string; repo: string } | undefined;
+      const firstAgentScope = allRegistered[0]?.signalScopes?.githubScopes?.[0];
+      if (firstAgentScope) {
+        bootRepoCoord = { owner: firstAgentScope.owner, repo: firstAgentScope.repo };
+      }
+      if (!bootRepoCoord && config.collaboration.repo) {
+        const parts = config.collaboration.repo.split("/");
+        if (parts.length === 2 && parts[0] && parts[1]) {
+          bootRepoCoord = { owner: parts[0], repo: parts[1] };
+        }
+      }
+      if (!bootRepoCoord) {
+        for (const agent of allRegistered) {
+          const scope = agent.signalScopes?.githubScopes?.[0];
+          if (scope) {
+            bootRepoCoord = { owner: scope.owner, repo: scope.repo };
+            break;
+          }
+        }
+      }
+      const writeScopesRepos = bootRepoCoord
+        ? [`${bootRepoCoord.owner}/${bootRepoCoord.repo}`]
+        : [];
+      githubClient = createGithubClient({
+        token: provider.get(GITHUB_TOKEN),
+        ...(writeScopesRepos.length > 0
+          ? {
+              writeScopes: {
+                issueComments: writeScopesRepos,
+                branchCommits: [],
+                labels: writeScopesRepos,
+                issues: writeScopesRepos,
+              },
+            }
+          : {}),
+      });
     }
   }
 
