@@ -198,9 +198,10 @@ export const runUnattachedRepl = async (): Promise<void> => {
       return;
     }
     if (verb === "help" || verb === "?") {
-      console.log("  list                 show running murmurations");
-      console.log("  attach <name>        connect to a running murmuration");
-      console.log("  quit / q / exit      leave the REPL");
+      console.log("  :list                show running murmurations");
+      console.log("  :attach <name>       connect to a running murmuration");
+      console.log("  :quit / :q / :exit   leave the REPL");
+      console.log("  (the `:` prefix is optional here — bare `list` also works)");
       console.log("");
       console.log("Related CLI commands (run from your shell, not this REPL):");
       console.log("  murmuration start --root <path>     boot a daemon");
@@ -968,7 +969,7 @@ const handleCommand = async (
   :wake <agent-id>                  Wake an agent now
   :convene <group-id> [kind]        Convene a group meeting
   :edit <agent-id>                  Open agent's role.md in $EDITOR
-  :open <url|agent|group>           Open in browser
+  :open <url|agent|group>           Open URL in browser, or file in $EDITOR
   :switch <session-name>            Switch to another murmuration
   :stop                             Stop the daemon
   :quit (q)                         Detach from daemon
