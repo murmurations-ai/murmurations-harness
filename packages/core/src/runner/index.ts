@@ -18,6 +18,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 
+import { runsDirForAgent } from "../daemon/runs-path.js";
 import { parseSelfReflection } from "../execution/index.js";
 import type {
   AgentOutputArtifact,
@@ -185,7 +186,7 @@ const readUpstreamDigest = async (
   upstreamAgentId: string,
 ): Promise<string | null> => {
   try {
-    const runsDir = join(rootDir, ".murmuration", "runs", upstreamAgentId);
+    const runsDir = runsDirForAgent(rootDir, upstreamAgentId);
     const dates = await readdir(runsDir);
     const sorted = dates
       .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
@@ -213,7 +214,7 @@ const readSelfDigestTail = async (
   n: number,
 ): Promise<{ day: string; wake: string; content: string }[]> => {
   try {
-    const runsDir = join(rootDir, ".murmuration", "runs", agentId);
+    const runsDir = runsDirForAgent(rootDir, agentId);
     const dates = await readdir(runsDir);
     const sortedDays = dates
       .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
