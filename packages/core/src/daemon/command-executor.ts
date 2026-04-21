@@ -324,25 +324,34 @@ export class DaemonCommandExecutor {
     agentId: string,
   ): Promise<{ digests: { name: string; file: string; date: string }[] }> {
     const runsDir = join(this.#deps.rootDir, ".murmuration", "runs", agentId);
-    const out: { name: string; file: string; date: string }[] = [];
+    const rows: { name: string; file: string; date: string; mtimeMs: number }[] = [];
     try {
+      const { stat } = await import("node:fs/promises");
       const dates = (await readdir(runsDir))
         .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
         .sort()
         .reverse();
+      // Collect all digests, then sort by file mtime (descending).
+      // Filename sort alone is unreliable while the tree has a mix
+      // of legacy (`digest-<shortId>.md`), time-only
+      // (`digest-HH-MM-SS-<shortId>.md`), and ISO
+      // (`digest-YYYY-MM-DDTHH-MM-SSZ-<shortId>.md`) shapes — their
+      // lexicographic order has no chronological meaning.
       for (const date of dates) {
-        const files = (await readdir(join(runsDir, date)))
-          .filter((f) => f.startsWith("digest-") && f.endsWith(".md"))
-          .sort()
-          .reverse(); // newest first within a day (timestamp-prefixed)
+        const files = (await readdir(join(runsDir, date))).filter(
+          (f) => f.startsWith("digest-") && f.endsWith(".md"),
+        );
         for (const f of files) {
-          out.push({ name: f, file: join(runsDir, date, f), date });
+          const full = join(runsDir, date, f);
+          const s = await stat(full).catch(() => null);
+          rows.push({ name: f, file: full, date, mtimeMs: s?.mtimeMs ?? 0 });
         }
       }
+      rows.sort((a, b) => b.mtimeMs - a.mtimeMs);
     } catch {
       /* no runs */
     }
-    return { digests: out };
+    return { digests: rows.map(({ name, file, date }) => ({ name, file, date })) };
   }
 
   /**
