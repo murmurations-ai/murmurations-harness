@@ -56,6 +56,43 @@ interface SocketEvent {
 }
 
 /**
+ * Animated "thinking" indicator for long-running synchronous
+ * operations (Spirit turns, meeting wakes) where the operator would
+ * otherwise see a blank terminal until the result arrives.
+ *
+ * v0.5.0 tester feedback: "when talking with the Spirit, it seems to
+ * just hang. We should put some kind of indicator that it's doing
+ * thinking or work."
+ *
+ * Writes to stderr so stdout captures stay clean for scripting, and
+ * uses `\r` to overwrite the same line each tick. Elapsed seconds
+ * tick up once per second so the operator can see the call isn't
+ * frozen. Returns a stop() that clears the line and restores the
+ * cursor.
+ *
+ * Skipped when stderr is not a TTY (CI, piped output).
+ */
+const startThinkingIndicator = (label: string): (() => void) => {
+  if (!process.stderr.isTTY) return () => undefined;
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const start = Date.now();
+  let frameIdx = 0;
+  const render = (): void => {
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    const frame = frames[frameIdx % frames.length] ?? "";
+    frameIdx++;
+    process.stderr.write(`\r\x1b[2m${frame} ${label} (${String(elapsed)}s)\x1b[0m`);
+  };
+  render();
+  const timer = setInterval(render, 100);
+  return () => {
+    clearInterval(timer);
+    // Clear the line and reset to column 0.
+    process.stderr.write("\r\x1b[K");
+  };
+};
+
+/**
  * Unattached REPL — `murmuration` with no arguments drops the operator
  * here. From this prompt they can `list` running murmurations, `attach
  * <name>` to connect to one, or `quit` to exit. No daemon is started;
@@ -362,14 +399,17 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
       rl.prompt();
       return;
     }
+    const stop = startThinkingIndicator("Spirit thinking");
     try {
       const result = await session.turn(message);
+      stop();
       console.log(result.content);
       const tokens = `${String(result.inputTokens)} in / ${String(result.outputTokens)} out`;
       const cost = `$${result.estimatedCostUsd.toFixed(4)}`;
       const tools = result.toolCallCount > 0 ? `, ${String(result.toolCallCount)} tool calls` : "";
       console.log(`  \x1b[2m[${tokens}${tools} · ~${cost}]\x1b[0m`);
     } catch (err) {
+      stop();
       console.log(`(Spirit error: ${err instanceof Error ? err.message : String(err)})`);
     }
     rl.prompt();
