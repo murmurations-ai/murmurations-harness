@@ -657,8 +657,15 @@ const handleCommand = async (
           } else {
             console.log("  Recent digests:");
             for (const entry of d.recentDigests) {
-              const firstLine = entry.summary.split("\n")[0] ?? "";
-              console.log(`    ${entry.date}  ${firstLine.slice(0, 80)}`);
+              // Skip blank lines and markdown headers that have no prose.
+              // Some digests are frontmatter-only with an empty body —
+              // fall back to "(empty digest)" instead of a lonely date.
+              const meaningfulLine = entry.summary
+                .split("\n")
+                .map((s) => s.trim())
+                .find((s) => s.length > 0 && !s.startsWith("#"));
+              const preview = meaningfulLine ?? "(empty digest)";
+              console.log(`    ${entry.date}  ${preview.slice(0, 80)}`);
             }
           }
         }

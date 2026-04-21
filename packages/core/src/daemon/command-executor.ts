@@ -250,6 +250,13 @@ export class DaemonCommandExecutor {
 
   public async agentDetail(agentId: string): Promise<unknown> {
     const { rootDir, agentStateStore } = this.#deps;
+    // Reload from disk so wake-now child-process writes are visible.
+    // Without this, :status <agent> shows stale wake counts right
+    // after a :wake — the daemon's in-memory state doesn't know the
+    // child already updated the JSONL. buildStatus() does the same.
+    await agentStateStore.load().catch(() => {
+      /* best effort */
+    });
     const runsDir = join(rootDir, ".murmuration", "runs", agentId);
     const agent = agentStateStore.getAgent(agentId);
     const recentDigests: { date: string; summary: string }[] = [];
