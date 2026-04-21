@@ -94,17 +94,31 @@ const startThinkingIndicator = (label: string): (() => void) => {
 };
 
 /**
- * Persistent REPL history — `~/.murmuration/repl-history`, one entry
- * per line, oldest first (like bash). Node readline expects the
- * `history` option newest-first, so we reverse on load. Best-effort:
- * any I/O failure silently degrades to in-memory history only.
+ * Persistent REPL history — one file per surface so commands specific
+ * to one murmuration (`:status editorial-agent`, `:directive close
+ * 457`) don't cross-contaminate recall in another murmuration that
+ * may not even have those agents/directives.
+ *
+ * Layout under `~/.murmuration/`:
+ *   repl-history                — unattached REPL (generic: list, attach)
+ *   repl-history-<name>         — attached REPL for murmuration <name>
+ *
+ * Oldest entry first (bash-style). readline's `history` option wants
+ * newest-first, so we reverse on load. Best-effort: any I/O failure
+ * silently degrades to in-memory history only.
  */
-const REPL_HISTORY_FILE = join(homedir(), ".murmuration", "repl-history");
 const REPL_HISTORY_MAX = 500;
 
-const loadReplHistory = (): string[] => {
+const replHistoryFile = (sessionName: string | null): string =>
+  join(
+    homedir(),
+    ".murmuration",
+    sessionName === null ? "repl-history" : `repl-history-${sessionName}`,
+  );
+
+const loadReplHistory = (sessionName: string | null = null): string[] => {
   try {
-    const content = readFileSync(REPL_HISTORY_FILE, "utf8");
+    const content = readFileSync(replHistoryFile(sessionName), "utf8");
     const lines = content.split("\n").filter((l) => l.length > 0);
     // File is oldest-first; readline wants newest-first.
     return lines.slice(-REPL_HISTORY_MAX).reverse();
@@ -113,10 +127,11 @@ const loadReplHistory = (): string[] => {
   }
 };
 
-const appendReplHistory = (entry: string): void => {
+const appendReplHistory = (entry: string, sessionName: string | null = null): void => {
   try {
-    mkdirSync(dirname(REPL_HISTORY_FILE), { recursive: true });
-    appendFileSync(REPL_HISTORY_FILE, `${entry}\n`);
+    const file = replHistoryFile(sessionName);
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${entry}\n`);
   } catch {
     /* best-effort */
   }
@@ -461,9 +476,9 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     input: process.stdin,
     output: process.stdout,
     terminal: true,
-    // Persistent history shared with the unattached REPL. Up-arrow
-    // recalls lines from prior attached+unattached sessions.
-    history: loadReplHistory(),
+    // Per-murmuration persistent history so `:status editorial-agent`
+    // from the EP REPL doesn't pollute the hello-circle REPL.
+    history: loadReplHistory(name),
     historySize: REPL_HISTORY_MAX,
     removeHistoryDuplicates: true,
     completer: (line: string): [string[], string] => {
@@ -732,10 +747,9 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   rl.on("line", (line) => {
     const input = line.trim();
 
-    // Persist non-empty lines to the shared REPL history file so
-    // up-arrow works across attached/unattached sessions and restarts.
+    // Persist non-empty lines to the per-murmuration history file.
     if (input.length > 0) {
-      appendReplHistory(input);
+      appendReplHistory(input, name);
     }
 
     // Spirit turn in flight — drop the input with a note so a second
