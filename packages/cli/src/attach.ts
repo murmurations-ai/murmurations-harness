@@ -147,12 +147,18 @@ export const runUnattachedRepl = async (): Promise<void> => {
     historySize: REPL_HISTORY_MAX,
     removeHistoryDuplicates: true,
     completer: (line: string): [string[], string] => {
-      const parts = line.split(/\s+/);
+      // Strip any leading `:` so `:li<TAB>` completes to `list` just like
+      // `li<TAB>` does. The attached REPL uses `:` as a command prefix;
+      // the unattached REPL accepts it as a decorative alias.
+      const hadColon = line.startsWith(":");
+      const stripped = hadColon ? line.slice(1) : line;
+      const parts = stripped.split(/\s+/);
       const verb = parts[0] ?? "";
+      const restore = (s: string): string => (hadColon ? `:${s}` : s);
       // First token: complete verbs.
       if (parts.length <= 1) {
         const hits = TOP_LEVEL_VERBS.filter((v) => v.startsWith(verb));
-        return [hits.map((h) => h + " "), verb];
+        return [hits.map((h) => restore(h) + " "), restore(verb)];
       }
       // `attach <TAB>`: complete from currently-running session names.
       if (verb === "attach") {
@@ -179,7 +185,13 @@ export const runUnattachedRepl = async (): Promise<void> => {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
     appendReplHistory(trimmed);
-    const [verb = "", ...rest] = trimmed.split(/\s+/);
+    // Accept `:verb` as well as bare `verb` for muscle-memory consistency
+    // with the attached REPL, where `:` is the explicit command prefix.
+    // The unattached REPL has no Spirit-vs-command ambiguity so the `:`
+    // is decorative here, but permitting it avoids retraining operators
+    // who hop between attached and unattached surfaces.
+    const normalized = trimmed.startsWith(":") ? trimmed.slice(1) : trimmed;
+    const [verb = "", ...rest] = normalized.split(/\s+/);
 
     if (verb === "quit" || verb === "q" || verb === "exit") {
       rl.close();
