@@ -177,6 +177,7 @@ Pass `--help` to any command for full flag documentation.
 - **Pick a governance model.** v0.5.0 ships with five: S3 (self-organizing), chain-of-command, meritocratic, consensus, parliamentary. Declare one in `murmuration/harness.yaml`.
 - **Set real wake schedules.** By default, new agents are dispatch-only. Add `wake_schedule.cron` when you're ready for autonomous wakes.
 - **Tune budgets and write scopes** per agent as you observe what they actually need.
+- **Tune the harness.** [docs/CONFIGURATION.md](./CONFIGURATION.md) is the full reference for `murmuration/harness.yaml` — LLM provider, governance plugin, logging level, Spirit tool-loop budget, and more.
 - **Read the architecture docs.** [docs/ARCHITECTURE.md](./ARCHITECTURE.md) covers the engineering standards; ADRs under [docs/adr/](./adr/) cover every load-bearing design decision.
 
 Questions, bugs, feedback: open an issue on [murmurations-ai/murmurations-harness](https://github.com/murmurations-ai/murmurations-harness/issues).
