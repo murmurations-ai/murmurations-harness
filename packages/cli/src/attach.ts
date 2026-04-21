@@ -307,16 +307,19 @@ export const runUnattachedRepl = async (): Promise<void> => {
         console.log("  usage: restart <name>\n");
         continue;
       }
-      await stopSession(name);
-      // Wait for the socket symlink to disappear so start sees a
-      // clean slate. 5s cap keeps us from hanging if the daemon is
-      // already gone / stuck.
+      // Capture the root BEFORE stopping. A running-but-never-registered
+      // session loses its name→root mapping when the socket symlink
+      // disappears, and `:start` would then fail with "no session
+      // named X is registered or running." Snapshot first.
       const { findRunningSessionByName } = await import("./running-sessions.js");
+      const preStop = findRunningSessionByName(name);
+      const rootHint = preStop?.root;
+      await stopSession(name);
       const waitStart = Date.now();
       while (findRunningSessionByName(name) !== null && Date.now() - waitStart < 5000) {
         await new Promise((r) => setTimeout(r, 200));
       }
-      await startSession(name);
+      await startSession(name, rootHint);
       continue;
     }
 
@@ -359,15 +362,28 @@ const stopSession = async (name: string): Promise<void> => {
  * a detached child daemon via `murmuration start --root <root>`, same
  * way the CLI does. Waits briefly for the socket symlink to appear
  * so the REPL can confirm the daemon is ready.
+ *
+ * `rootHint` lets the caller (e.g. :restart) supply the root directly
+ * when the session isn't registered — useful for a running-but-never-
+ * registered session we're cycling.
  */
-const startSession = async (name: string): Promise<void> => {
+const startSession = async (name: string, rootHint?: string): Promise<void> => {
   const { tryResolveSessionRoot } = await import("./sessions.js");
-  const root = tryResolveSessionRoot(name);
+  const root = rootHint ?? tryResolveSessionRoot(name);
   if (!root) {
     console.log(
       `  no session named "${name}" is registered or running. Register first with \`murmuration register --name ${name} --root <path>\`, or start once from the shell with \`murmuration start --root <path>\`.\n`,
     );
     return;
+  }
+  // Persist the name→root mapping so future `:start ${name}` /
+  // `:restart ${name}` calls work without a rootHint, even after a
+  // full restart cycle drops the live socket.
+  try {
+    const { registerSession } = await import("./sessions.js");
+    registerSession(name, root);
+  } catch {
+    /* best-effort — registry is UI sugar */
   }
   const { findRunningSessionByName } = await import("./running-sessions.js");
   if (findRunningSessionByName(name) !== null) {
