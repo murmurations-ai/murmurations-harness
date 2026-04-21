@@ -160,22 +160,28 @@ Set `LANGFUSE_SECRET_KEY` and `LANGFUSE_PUBLIC_KEY` in your environment. The har
 
 ### Configuration (`harness.yaml`)
 
-Settings that rarely change live in `murmuration/harness.yaml`:
+Settings that rarely change live in `murmuration/harness.yaml`. Full field reference: [docs/CONFIGURATION.md](./docs/CONFIGURATION.md).
 
 ```yaml
+llm:
+  provider: gemini
+
 governance:
-  plugin: "./governance-s3/index.mjs"
+  plugin: s3 # bundled alias; also accepts a path or npm package
 
 collaboration:
-  provider: "github" # or "local" for offline
-  repo: "my-org/my-murmuration" # governance repo (private)
+  provider: github # or "local" for offline
+  repo: my-org/my-murmuration
 
 products:
   - name: my-product
-    repo: "my-org/my-product" # product repo (separate)
+    repo: my-org/my-product
 
 logging:
-  level: "info"
+  level: info
+
+spirit:
+  maxSteps: 32 # Spirit tool-loop budget per turn
 ```
 
 CLI flags override the config file when set. The murmuration is self-contained — all configuration, identity, and runtime state live in one directory.
