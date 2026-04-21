@@ -452,7 +452,15 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     try {
       const result = await session.turn(message);
       stop();
-      console.log(result.content);
+      if (result.truncated) {
+        console.log(
+          "(Spirit ran out of tool-use budget before producing an answer. Try narrowing the question, or ask for a shorter summary.)",
+        );
+      } else if (result.content.trim().length === 0) {
+        console.log("(Spirit returned no text. Try rephrasing the question.)");
+      } else {
+        console.log(result.content);
+      }
       const tokens = `${String(result.inputTokens)} in / ${String(result.outputTokens)} out`;
       const cost = `$${result.estimatedCostUsd.toFixed(4)}`;
       const tools = result.toolCallCount > 0 ? `, ${String(result.toolCallCount)} tool calls` : "";

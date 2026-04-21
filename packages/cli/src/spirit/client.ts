@@ -48,6 +48,12 @@ export interface SpiritTurnResult {
   readonly outputTokens: number;
   readonly toolCallCount: number;
   readonly estimatedCostUsd: number;
+  /**
+   * True when the tool loop exhausted maxSteps before the model
+   * produced a final text message. When this is set the operator
+   * sees an empty response; the REPL should surface a hint.
+   */
+  readonly truncated: boolean;
 }
 
 export interface SpiritInitOptions {
@@ -172,6 +178,7 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
   const turn = async (message: string): Promise<SpiritTurnResult> => {
     history.push({ role: "user", content: message });
 
+    const maxSteps = 16;
     const result = await client.complete({
       model,
       messages: history,
@@ -179,7 +186,7 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
       maxOutputTokens: 4096,
       temperature: 0.2,
       tools,
-      maxSteps: 8,
+      maxSteps,
     });
 
     if (!result.ok) {
@@ -193,13 +200,22 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     const outputTokens = result.value.outputTokens;
     const estimatedCostUsd =
       (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
+    const toolCallCount = result.value.toolCalls?.length ?? 0;
+    // Vercel SDK reports finishReason="tool-calls" (→ "tool_use") when
+    // stepCountIs fires while the model was mid-tool-loop. Combined with
+    // empty text, that means the budget ran out before a final answer.
+    const truncated =
+      toolCallCount >= maxSteps &&
+      result.value.stopReason === "tool_use" &&
+      result.value.content.trim().length === 0;
 
     return {
       content: result.value.content,
       inputTokens,
       outputTokens,
-      toolCallCount: result.value.toolCalls?.length ?? 0,
+      toolCallCount,
       estimatedCostUsd,
+      truncated,
     };
   };
 
