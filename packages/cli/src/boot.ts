@@ -1458,6 +1458,28 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const { DaemonCommandExecutor } = await import("./command-executor.js");
   const firstScope = allRegistered[0]?.signalScopes?.githubScopes?.[0];
   const repoCoord = firstScope ? { owner: firstScope.owner, repo: firstScope.repo } : undefined;
+
+  // Wire a CollaborationProvider for the daemon's command-executor
+  // paths (:directive list, directive.close, etc.). Local mode already
+  // constructs `localCollaborationProvider` earlier in boot. GitHub
+  // mode needs the same — without it, :directive list fails with
+  // "No collaboration provider configured" even though the murmuration
+  // is clearly configured for GitHub. v0.5.0 tester feedback.
+  let githubCollaborationProvider:
+    | import("@murmurations-ai/core").CollaborationProvider
+    | undefined;
+  if (collaborationMode === "github" && githubClient && repoCoord) {
+    const { GitHubCollaborationProvider } = await import("@murmurations-ai/core");
+    githubCollaborationProvider = new GitHubCollaborationProvider({
+      client: githubClient,
+      repo: makeRepoCoordinate(repoCoord.owner, repoCoord.repo),
+    });
+    logger.info("daemon.collaboration.provider", {
+      provider: "github",
+      repo: `${repoCoord.owner}/${repoCoord.repo}`,
+    });
+  }
+  const commandCollaborationProvider = localCollaborationProvider ?? githubCollaborationProvider;
   const executor = new DaemonCommandExecutor({
     rootDir: exampleRoot,
     agentStateStore,
@@ -1476,7 +1498,9 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         }
       : {}),
     eventBus,
-    ...(localCollaborationProvider ? { collaborationProvider: localCollaborationProvider } : {}),
+    ...(commandCollaborationProvider
+      ? { collaborationProvider: commandCollaborationProvider }
+      : {}),
     ...(githubClient && repoCoord
       ? {
           repoCoordinate: repoCoord,
