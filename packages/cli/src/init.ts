@@ -40,13 +40,35 @@ import {
 // DO NOT create readline at module scope — it grabs stdin and corrupts
 // terminal mode for other commands (e.g., attach REPL double echo).
 let rl: Interface | null = null;
+
+// Completions active for the current ask() call. The readline
+// completer reads this at TAB time; ask() sets it before question()
+// and clears it after the answer arrives. Lets us reuse one readline
+// Interface across prompts with prompt-specific completion lists.
+let activeCompletions: readonly string[] | null = null;
+
 const getRL = (): Interface => {
-  rl ??= createInterface({ input: process.stdin, output: process.stdout });
+  rl ??= createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    completer: (line: string): [string[], string] => {
+      if (!activeCompletions) return [[], line];
+      const lower = line.toLowerCase();
+      const hits = activeCompletions.filter((c) => c.toLowerCase().startsWith(lower));
+      // Empty input / no prefix match → show the full menu.
+      return [hits.length > 0 ? hits : [...activeCompletions], line];
+    },
+  });
   return rl;
 };
-const ask = (question: string): Promise<string> =>
+
+const ask = (question: string, completions?: readonly string[]): Promise<string> =>
   new Promise((r) => {
-    getRL().question(question, r);
+    activeCompletions = completions ?? null;
+    getRL().question(question, (answer) => {
+      activeCompletions = null;
+      r(answer);
+    });
   });
 
 /**
@@ -252,16 +274,22 @@ const askAgentQuestions = async (
 
   const providerInput = await ask(
     `  LLM provider override (gemini / anthropic / openai / ollama) [${defaultProvider}]: `,
+    ["gemini", "anthropic", "openai", "ollama"],
   );
   const provider = normalizeProvider(providerInput, defaultProvider);
 
   const groupInput = await ask("  Group this agent belongs to (or Enter for none): ");
   const group = groupInput.trim().toLowerCase().replace(/\s+/g, "-") || "";
 
-  const scheduleInput = await ask(
-    "  Wake schedule (daily / hourly / custom cron / Enter for 2s delay): ",
-  );
-  const schedule = scheduleInput.trim().toLowerCase();
+  // Daily is the default: a 2-second delay wakes every agent on
+  // startup which burns tokens fast on a many-agent fabric. Daily at
+  // 9am UTC is a safer out-of-the-box cadence; operators can edit
+  // role.md for anything more aggressive.
+  const scheduleInput = await ask("  Wake schedule (daily / hourly / custom cron) [daily]: ", [
+    "daily",
+    "hourly",
+  ]);
+  const schedule = scheduleInput.trim().toLowerCase() || "daily";
 
   return { name: name.trim(), dir, provider, group, schedule };
 };
@@ -328,10 +356,11 @@ export const detectExistingState = (targetDir: string): ExistingStateInfo => {
 };
 
 const formatScheduleYaml = (schedule: string): string => {
-  if (schedule === "daily") return 'cron: "0 9 * * *"  # daily at 9am UTC';
+  if (schedule === "" || schedule === "daily") return 'cron: "0 9 * * *"  # daily at 9am UTC';
   if (schedule === "hourly") return 'cron: "0 * * * *"  # every hour';
   if (schedule.includes("*") || schedule.includes("/")) return `cron: "${schedule}"`;
-  return 'delayMs: 2000  # Change to cron for scheduled wakes: cron: "0 18 * * *"';
+  // Unknown input — fall back to daily rather than a chatty 2s delay.
+  return 'cron: "0 9 * * *"  # daily at 9am UTC (edit to tune)';
 };
 
 // ---------------------------------------------------------------------------
@@ -530,7 +559,7 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
         break;
     }
     console.log(`\n${warning}`);
-    const existing = await ask(`Continue anyway? (y/N): `);
+    const existing = await ask(`Continue anyway? (y/N): `, ["yes", "no"]);
     if (existing.trim().toLowerCase() !== "y") {
       console.log("Aborted.");
       rl?.close();
@@ -545,6 +574,7 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
   //    unless an agent's role.md or a spirit.md (Phase 2) overrides.
   const defaultProviderInput = await ask(
     "Default LLM provider (gemini / anthropic / openai / ollama) [gemini]: ",
+    ["gemini", "anthropic", "openai", "ollama"],
   );
   const defaultProvider = normalizeProvider(defaultProviderInput, "gemini");
 
@@ -564,7 +594,10 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
   }
 
   // 4. Collaboration & Products
-  const collabInput = await ask("\nCollaboration provider (github / local) [github]: ");
+  const collabInput = await ask("\nCollaboration provider (github / local) [github]: ", [
+    "github",
+    "local",
+  ]);
   const collaboration = collabInput.trim().toLowerCase() === "local" ? "local" : "github";
 
   let githubOwner = "";
@@ -595,10 +628,10 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
   const agents: AgentAnswers[] = [];
   agents.push(await askAgentQuestions(true, defaultProvider));
 
-  let addMore = await ask("\nAdd another agent? (y/N): ");
+  let addMore = await ask("\nAdd another agent? (y/N): ", ["yes", "no"]);
   while (addMore.trim().toLowerCase() === "y") {
     agents.push(await askAgentQuestions(false, defaultProvider));
-    addMore = await ask("\nAdd another agent? (y/N): ");
+    addMore = await ask("\nAdd another agent? (y/N): ", ["yes", "no"]);
   }
 
   // 5. Governance model
@@ -608,6 +641,7 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
   // the menu; those plugins still need to be authored separately.
   const govInput = await ask(
     "\nGovernance model (self-organizing / chain-of-command / meritocratic / consensus / parliamentary / none) [self-organizing]: ",
+    ["self-organizing", "chain-of-command", "meritocratic", "consensus", "parliamentary", "none"],
   );
   const governance = govInput.trim().toLowerCase() || "self-organizing";
 
