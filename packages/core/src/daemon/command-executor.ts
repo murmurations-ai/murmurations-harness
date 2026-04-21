@@ -266,14 +266,27 @@ export class DaemonCommandExecutor {
         .sort()
         .reverse()
         .slice(0, 5);
+      const { stat } = await import("node:fs/promises");
       for (const date of dates) {
-        const files = await readdir(join(runsDir, date));
-        const digestFile = files.find((f) => f.startsWith("digest-"));
-        if (digestFile) {
-          const content = await readFile(join(runsDir, date, digestFile), "utf8");
-          const body = content.replace(/^---[\s\S]*?---\n*/, "").trim();
-          recentDigests.push({ date, summary: body.slice(0, 500) });
-        }
+        const files = (await readdir(join(runsDir, date))).filter((f) => f.startsWith("digest-"));
+        if (files.length === 0) continue;
+        // Digest filenames are UUID-keyed, so alphabetical order has
+        // no relationship to time. Pick the most recent by mtime so
+        // :status <agent> shows the latest wake, not a random one
+        // (often a timed-out earlier attempt with an empty body).
+        const withStats = await Promise.all(
+          files.map(async (f) => {
+            const full = join(runsDir, date, f);
+            const s = await stat(full).catch(() => null);
+            return { file: full, mtimeMs: s?.mtimeMs ?? 0 };
+          }),
+        );
+        withStats.sort((a, b) => b.mtimeMs - a.mtimeMs);
+        const latest = withStats[0];
+        if (!latest) continue;
+        const content = await readFile(latest.file, "utf8");
+        const body = content.replace(/^---[\s\S]*?---\n*/, "").trim();
+        recentDigests.push({ date, summary: body.slice(0, 500) });
       }
     } catch {
       /* no runs yet */
