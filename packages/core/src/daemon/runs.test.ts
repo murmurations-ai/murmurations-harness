@@ -97,7 +97,7 @@ describe("RunArtifactWriter", () => {
 
     await writer.record(result, costRecord);
 
-    const digestPath = join(rootDir, "2026-04-12", "digest-18-00-04-3986ebbc.md");
+    const digestPath = join(rootDir, "2026-04-12", "digest-2026-04-12T18-00-04Z-3986ebbc.md");
     const stats = await stat(digestPath);
     expect(stats.isFile()).toBe(true);
 
@@ -129,7 +129,7 @@ describe("RunArtifactWriter", () => {
     expect(entry.github.restCalls).toBe(2);
     expect(entry.github.graphqlCalls).toBe(1);
     expect(entry.totals.apiCalls).toBe(3);
-    expect(entry.digestPath).toBe("2026-04-12/digest-18-00-04-3986ebbc.md");
+    expect(entry.digestPath).toBe("2026-04-12/digest-2026-04-12T18-00-04Z-3986ebbc.md");
   });
 
   it("appends to index.jsonl across multiple wakes on the same day", async () => {
@@ -158,8 +158,8 @@ describe("RunArtifactWriter", () => {
     expect(a.wakeId).toBe("11111111-1111-1111-1111-111111111111");
     expect(b.wakeId).toBe("22222222-2222-2222-2222-222222222222");
     // Distinct digest filenames — no clobbering.
-    expect(a.digestPath).toBe("2026-04-12/digest-18-00-04-11111111.md");
-    expect(b.digestPath).toBe("2026-04-12/digest-18-00-04-22222222.md");
+    expect(a.digestPath).toBe("2026-04-12/digest-2026-04-12T18-00-04Z-11111111.md");
+    expect(b.digestPath).toBe("2026-04-12/digest-2026-04-12T18-00-04Z-22222222.md");
   });
 
   it("records a failed outcome with unknown provider when costRecord is absent", async () => {
