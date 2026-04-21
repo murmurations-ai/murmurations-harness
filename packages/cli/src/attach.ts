@@ -15,8 +15,9 @@
 
 import { createConnection, type Socket } from "node:net";
 import { createInterface, type Interface } from "node:readline";
-import { resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 
 import { initSpiritSession, SpiritUnavailableError, type SpiritSession } from "./spirit/index.js";
 
@@ -93,6 +94,35 @@ const startThinkingIndicator = (label: string): (() => void) => {
 };
 
 /**
+ * Persistent REPL history — `~/.murmuration/repl-history`, one entry
+ * per line, oldest first (like bash). Node readline expects the
+ * `history` option newest-first, so we reverse on load. Best-effort:
+ * any I/O failure silently degrades to in-memory history only.
+ */
+const REPL_HISTORY_FILE = join(homedir(), ".murmuration", "repl-history");
+const REPL_HISTORY_MAX = 500;
+
+const loadReplHistory = (): string[] => {
+  try {
+    const content = readFileSync(REPL_HISTORY_FILE, "utf8");
+    const lines = content.split("\n").filter((l) => l.length > 0);
+    // File is oldest-first; readline wants newest-first.
+    return lines.slice(-REPL_HISTORY_MAX).reverse();
+  } catch {
+    return [];
+  }
+};
+
+const appendReplHistory = (entry: string): void => {
+  try {
+    mkdirSync(dirname(REPL_HISTORY_FILE), { recursive: true });
+    appendFileSync(REPL_HISTORY_FILE, `${entry}\n`);
+  } catch {
+    /* best-effort */
+  }
+};
+
+/**
  * Unattached REPL — `murmuration` with no arguments drops the operator
  * here. From this prompt they can `list` running murmurations, `attach
  * <name>` to connect to one, or `quit` to exit. No daemon is started;
@@ -113,6 +143,9 @@ export const runUnattachedRepl = async (): Promise<void> => {
     input: process.stdin,
     output: process.stdout,
     terminal: true,
+    history: loadReplHistory(),
+    historySize: REPL_HISTORY_MAX,
+    removeHistoryDuplicates: true,
     completer: (line: string): [string[], string] => {
       const parts = line.split(/\s+/);
       const verb = parts[0] ?? "";
@@ -145,6 +178,7 @@ export const runUnattachedRepl = async (): Promise<void> => {
     });
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
+    appendReplHistory(trimmed);
     const [verb = "", ...rest] = trimmed.split(/\s+/);
 
     if (verb === "quit" || verb === "q" || verb === "exit") {
