@@ -228,6 +228,18 @@ export class VercelAdapter implements LLMAdapter {
       // Note: cost hook is emitted per-step via onStepFinish above.
       // For single-step completions (no tools), onStepFinish fires exactly once.
 
+      // Aggregate text across all steps. Vercel's `result.text` is
+      // only the FINAL step's text; if the model stopped right after
+      // a tool call (no summarizing text turn), result.text is empty
+      // even though intermediate steps generated plenty of output.
+      // Falls back to result.text when the steps shape is absent
+      // (single-step, no tools).
+      const aggregatedText = result.steps
+        .map((s) => (s as unknown as { text?: string }).text ?? "")
+        .filter((t) => t.length > 0)
+        .join("\n\n");
+      const content = aggregatedText.length > 0 ? aggregatedText : result.text;
+
       // Collect tool calls from all steps
       const toolCalls = result.steps
         .flatMap((s) => {
@@ -245,7 +257,7 @@ export class VercelAdapter implements LLMAdapter {
         .filter((tc) => tc.name);
 
       const response: LLMResponse = {
-        content: result.text,
+        content,
         stopReason: mapFinishReason(result.finishReason),
         inputTokens,
         outputTokens,
