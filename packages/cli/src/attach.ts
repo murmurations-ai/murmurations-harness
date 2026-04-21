@@ -55,6 +55,96 @@ interface SocketEvent {
   readonly data: Record<string, unknown>;
 }
 
+/**
+ * Unattached REPL — `murmuration` with no arguments drops the operator
+ * here. From this prompt they can `list` running murmurations, `attach
+ * <name>` to connect to one, or `quit` to exit. No daemon is started;
+ * this is purely a navigation surface.
+ *
+ * v0.5.0 Milestone 4.9 (tester feedback): bare `murmuration` used to
+ * auto-start a daemon when cwd had a murmuration/ directory. That
+ * surprised operators who just wanted to see what was running.
+ */
+export const runUnattachedRepl = async (): Promise<void> => {
+  const { listRunningSessions } = await import("./running-sessions.js");
+  const { HARNESS_VERSION } = await import("@murmurations-ai/core");
+
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: true,
+  });
+
+  const prompt = "murmuration> ";
+
+  console.log(`murmuration-harness v${HARNESS_VERSION} — unattached REPL`);
+  console.log(
+    "Type `list` to see running murmurations, `attach <name>` to connect, `?` for help.\n",
+  );
+
+  for (;;) {
+    const line: string = await new Promise((res) => {
+      rl.question(prompt, res);
+    });
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    const [verb = "", ...rest] = trimmed.split(/\s+/);
+
+    if (verb === "quit" || verb === "q" || verb === "exit") {
+      rl.close();
+      return;
+    }
+    if (verb === "help" || verb === "?") {
+      console.log("  list                 show running murmurations");
+      console.log("  attach <name>        connect to a running murmuration");
+      console.log("  quit / q / exit      leave the REPL");
+      console.log("");
+      console.log("Related CLI commands (run from your shell, not this REPL):");
+      console.log("  murmuration start --root <path>     boot a daemon");
+      console.log("  murmuration init [--example hello]  scaffold a new murmuration");
+      console.log("  murmuration doctor                   diagnose setup\n");
+      continue;
+    }
+    if (verb === "list" || verb === "ls") {
+      const sessions = await listRunningSessions();
+      if (sessions.length === 0) {
+        console.log("  (no running murmurations)");
+        console.log("  Start one with: murmuration start --root <path>\n");
+      } else {
+        for (const s of sessions) {
+          console.log(`  ${s.name.padEnd(24)} PID ${String(s.pid ?? "?").padEnd(8)} ${s.root}`);
+        }
+        console.log("");
+      }
+      continue;
+    }
+    if (verb === "attach") {
+      const name = rest[0];
+      if (!name) {
+        console.log("  usage: attach <name>\n");
+        continue;
+      }
+      const sessions = await listRunningSessions();
+      const match = sessions.find((s) => s.name === name);
+      if (!match) {
+        const available = sessions.map((s) => s.name);
+        console.log(
+          `  no running murmuration named "${name}".${available.length > 0 ? ` Known: ${available.join(", ")}.` : ""}\n`,
+        );
+        continue;
+      }
+      // Hand off to the full attach flow. When the operator detaches,
+      // control returns here and the unattached loop continues.
+      rl.close();
+      await runAttach(match.root, match.name);
+      // Re-open readline for the next iteration.
+      return runUnattachedRepl();
+    }
+
+    console.log(`  unknown command: ${verb}. type \`?\` for help.\n`);
+  }
+};
+
 export const runAttach = async (rootDir: string, name: string): Promise<void> => {
   const socketPath = resolve(rootDir, ".murmuration", "daemon.sock");
   if (!existsSync(socketPath)) {

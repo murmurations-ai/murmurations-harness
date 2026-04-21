@@ -18,6 +18,7 @@
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
@@ -165,6 +166,55 @@ const safeUnlink = (path: string): void => {
     } catch {
       /* give up */
     }
+  }
+};
+
+/**
+ * Synchronous, minimal "is there a running session with this name?"
+ * lookup. Returns the murmuration root, or null if no live symlink
+ * with that name exists. Used by `resolveSessionRoot` so `--name
+ * <running>` works from any directory without requiring prior
+ * registration. Doesn't prune stale entries (that happens in
+ * `listRunningSessions`).
+ */
+export const findRunningSessionByName = (name: string): { root: string } | null => {
+  const linkPath = join(SOCKETS_DIR, `${name}.sock`);
+  if (!existsSync(linkPath)) return null;
+  let socketPath: string;
+  try {
+    socketPath = readlinkSync(linkPath);
+  } catch {
+    return null;
+  }
+  const root = join(socketPath, "..", "..");
+  // Verify the process is alive. If not, treat as not-running.
+  const pidfile = join(root, ".murmuration", "daemon.pid");
+  if (existsSync(pidfile)) {
+    try {
+      const pid = parseInt(readFileSync(pidfile, "utf8").trim(), 10);
+      if (!Number.isNaN(pid) && isProcessAlive(pid)) {
+        return { root };
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+  return null;
+};
+
+/**
+ * Enumerate registered running-session names without touching pidfiles.
+ * Used for error messages that list available names. Fast sync read.
+ */
+export const listRunningSessionNamesSync = (): readonly string[] => {
+  if (!existsSync(SOCKETS_DIR)) return [];
+  try {
+    return readdirSync(SOCKETS_DIR)
+      .filter((f) => f.endsWith(".sock"))
+      .map((f) => f.slice(0, -".sock".length))
+      .sort();
+  } catch {
+    return [];
   }
 };
 
