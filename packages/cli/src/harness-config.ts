@@ -47,9 +47,19 @@ export interface HarnessConfig {
   readonly spirit: {
     /**
      * Maximum tool-use steps in a single Spirit turn. Each step is one
-     * round-trip to the LLM + any tool calls it emits. Larger
-     * murmurations (many agents) need a bigger budget or the Spirit
-     * runs out of steps before producing a final answer. Default 32.
+     * round-trip to the LLM + any tool calls it emits. Default 256
+     * (effectively unlimited; raised from earlier tighter values after
+     * tester work showed truncation mid-workflow).
+     */
+    readonly maxSteps: number;
+  };
+  /** Agent runtime knobs. Applied to every agent's wake unless overridden
+   *  per-agent in role.md. */
+  readonly agent: {
+    /**
+     * Maximum tool-use steps in a single agent wake. Default 256
+     * (effectively unlimited). Wall-clock and cost budgets are the
+     * real circuit-breakers; step-count is belt-and-suspenders.
      */
     readonly maxSteps: number;
   };
@@ -61,7 +71,8 @@ const DEFAULTS: HarnessConfig = {
   collaboration: { provider: "github", repo: undefined },
   products: [],
   logging: { level: "info" },
-  spirit: { maxSteps: 32 },
+  spirit: { maxSteps: 256 },
+  agent: { maxSteps: 256 },
 };
 
 const isLLMProvider = (v: unknown): v is LLMProvider =>
@@ -95,14 +106,24 @@ export async function loadHarnessConfig(rootDir: string): Promise<HarnessConfig>
   const products = raw.products as { name: string; repo: string }[] | undefined;
   const logging = raw.logging as Record<string, unknown> | undefined;
   const spirit = raw.spirit as Record<string, unknown> | undefined;
+  const agent = raw.agent as Record<string, unknown> | undefined;
 
   const collabProvider = collab?.provider;
   const logLevel = logging?.level;
-  const rawMaxSteps = spirit?.maxSteps;
-  const maxSteps =
-    typeof rawMaxSteps === "number" && Number.isFinite(rawMaxSteps) && rawMaxSteps >= 1
-      ? Math.floor(rawMaxSteps)
+  const rawSpiritMaxSteps = spirit?.maxSteps;
+  const spiritMaxSteps =
+    typeof rawSpiritMaxSteps === "number" &&
+    Number.isFinite(rawSpiritMaxSteps) &&
+    rawSpiritMaxSteps >= 1
+      ? Math.floor(rawSpiritMaxSteps)
       : DEFAULTS.spirit.maxSteps;
+  const rawAgentMaxSteps = agent?.maxSteps;
+  const agentMaxSteps =
+    typeof rawAgentMaxSteps === "number" &&
+    Number.isFinite(rawAgentMaxSteps) &&
+    rawAgentMaxSteps >= 1
+      ? Math.floor(rawAgentMaxSteps)
+      : DEFAULTS.agent.maxSteps;
 
   return {
     llm: {
@@ -135,7 +156,8 @@ export async function loadHarnessConfig(rootDir: string): Promise<HarnessConfig>
           ? logLevel
           : DEFAULTS.logging.level,
     },
-    spirit: { maxSteps },
+    spirit: { maxSteps: spiritMaxSteps },
+    agent: { maxSteps: agentMaxSteps },
   };
 }
 
@@ -165,5 +187,6 @@ export function mergeWithCliFlags(
       level: flags.logLevel ?? config.logging.level,
     },
     spirit: config.spirit,
+    agent: config.agent,
   };
 }

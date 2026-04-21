@@ -41,6 +41,11 @@ export interface DefaultRunnerOptions {
    *  prompt as a "Recent work" block (ADR-0029 §2). Default 3. Set to
    *  0 to disable the self-digest tail entirely. */
   readonly selfDigestTail?: number;
+  /** Max tool-use steps per wake. Each step is one LLM round-trip plus
+   *  its tool calls. Too low truncates multi-step workflows mid-action;
+   *  too high wastes tokens. Default 256 (effectively unlimited for
+   *  normal agent work). Configurable via harness.yaml `agent.maxSteps`. */
+  readonly maxSteps?: number;
 }
 
 /** Tool definition compatible with LLM tool calling (ADR-0020 Phase 2). */
@@ -76,7 +81,16 @@ export interface DefaultRunnerClients {
     ): Promise<
       | {
           ok: true;
-          value: { content: string; inputTokens: number; outputTokens: number; modelUsed: string };
+          value: {
+            content: string;
+            inputTokens: number;
+            outputTokens: number;
+            modelUsed: string;
+            /** Number of LLM→tool round-trips. */
+            steps?: number;
+            /** Tool invocations across all steps. */
+            toolCalls?: readonly unknown[];
+          };
         }
       | {
           ok: false;
@@ -433,7 +447,7 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
           systemPromptOverride: systemPrompt,
           maxOutputTokens: 16000,
           temperature: 0.3,
-          ...(tools && tools.length > 0 ? { tools, maxSteps: 5 } : {}),
+          ...(tools && tools.length > 0 ? { tools, maxSteps: options.maxSteps ?? 256 } : {}),
         },
         ...(signal ? [{ signal }] : []),
       );
@@ -449,6 +463,10 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
     }
 
     const content = result.value.content.trim();
+    const stepCount = result.value.steps ?? 1;
+    const toolCallCount = result.value.toolCalls?.length ?? 0;
+    const stepBudget = options.maxSteps ?? 256;
+    const exhaustedBudget = stepCount >= stepBudget;
 
     // 10. Parse self-reflection
     const reflection = parseSelfReflection(content);
@@ -457,10 +475,21 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
       `  model: ${result.value.modelUsed}`,
       `  input_tokens: ${String(result.value.inputTokens)}`,
       `  output_tokens: ${String(result.value.outputTokens)}`,
+      `  steps: ${String(stepCount)} / ${String(stepBudget)}`,
+      `  tool_calls: ${String(toolCallCount)}`,
       `  signal_count: ${String(spawn.signals.signals.length)}`,
       `  effectiveness: ${reflection.effectiveness}`,
       ...(reflection.governanceEvent
         ? [`  governance_event: ${reflection.governanceEvent.slice(0, 80)}`]
+        : []),
+      ...(exhaustedBudget
+        ? [
+            "",
+            `  ⚠ BUDGET EXHAUSTED: ran through all ${String(stepBudget)} tool-use`,
+            `    steps without finishing. Next wake should note this and`,
+            `    either narrow scope, raise agent.maxSteps in harness.yaml,`,
+            `    or surface a tension suggesting the step budget is too low.`,
+          ]
         : []),
     ];
 
