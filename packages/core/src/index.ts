@@ -44,6 +44,7 @@ export * from "./daemon/http.js";
 export * from "./daemon/events.js";
 export * from "./daemon/logger.js";
 export { runsDir, runsDirForAgent } from "./daemon/runs-path.js";
+export { logsDir, daemonLogPath, wakeLogPath } from "./daemon/logs-path.js";
 export * from "./daemon/protocol.js";
 // directives/index.ts removed — directives are GitHub issues now.
 // The DirectiveStore was a file-based mechanism that has been replaced

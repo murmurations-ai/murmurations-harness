@@ -410,7 +410,8 @@ const startSession = async (name: string, rootHint?: string): Promise<void> => {
   const { openSync } = await import("node:fs");
   const { mkdirSync } = await import("node:fs");
   const path = await import("node:path");
-  const logPath = path.join(root, ".murmuration", "daemon.log");
+  const { daemonLogPath } = await import("@murmurations-ai/core");
+  const logPath = daemonLogPath(root);
   mkdirSync(path.dirname(logPath), { recursive: true });
   const out = openSync(logPath, "a");
   const binPath = process.argv[1] ?? "murmuration";
@@ -1087,8 +1088,8 @@ const handleCommand = async (
       } else {
         console.log(`  Wake triggered for ${agentId}. Waiting for result...`);
         // Poll the wake log for completion
-        const pathMod = await import("node:path");
-        const logPath = pathMod.join(rootDir, ".murmuration", `wake-${agentId}.log`);
+        const { wakeLogPath } = await import("@murmurations-ai/core");
+        const logPath = wakeLogPath(rootDir, agentId);
         const startTime = Date.now();
         const maxWaitMs = 120_000; // 2 min
         const pollMs = 2000;
@@ -1104,7 +1105,7 @@ const handleCommand = async (
 
         const pollForResult = (): void => {
           if (Date.now() - startTime > maxWaitMs) {
-            console.log("  (timed out waiting for wake result — check .murmuration/ log)");
+            console.log(`  (timed out waiting for wake result — check ${logPath})`);
             rl.prompt();
             return;
           }
