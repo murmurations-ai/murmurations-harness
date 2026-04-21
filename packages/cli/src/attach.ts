@@ -153,11 +153,20 @@ export const runUnattachedRepl = async (): Promise<void> => {
         );
         continue;
       }
-      // Hand off to the full attach flow. When the operator detaches,
-      // control returns here and the unattached loop continues.
-      rl.close();
+      // Hand off to the full attach flow. Wait for THIS readline to
+      // fully close before handing stdin to runAttach — otherwise two
+      // readlines fight for stdin and characters double-echo. Then
+      // runAttach's own readline owns stdin until the operator detaches,
+      // at which point we re-enter the unattached REPL for another
+      // pass. :quit/:exit in the unattached REPL is the only path back
+      // to the shell.
+      await new Promise<void>((res) => {
+        rl.once("close", () => {
+          res();
+        });
+        rl.close();
+      });
       await runAttach(match.root, match.name);
-      // Re-open readline for the next iteration.
       return runUnattachedRepl();
     }
 
@@ -177,6 +186,21 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   const { loadConfig } = await import("./config.js");
   const config = loadConfig();
   const prompt = config.ui.prompt.replace("{name}", name);
+
+  // v0.5.0 Milestone 4.9.2: the runAttach promise now resolves when the
+  // attached REPL's readline closes (i.e., on :quit / :detach / EOF).
+  // Previously the function returned immediately after setup and the
+  // close handler called `process.exit(0)`. That killed the process —
+  // which broke the unattached REPL trying to reclaim control on detach.
+  // Now the caller owns the lifecycle: bin.ts's `attach` command exits
+  // naturally when its await resolves; the unattached REPL re-enters
+  // its own loop.
+  let resolveAttachClosed: () => void = () => {
+    /* reassigned below */
+  };
+  const attachClosedPromise = new Promise<void>((res) => {
+    resolveAttachClosed = res;
+  });
 
   let agentIds: readonly string[] = [];
   let groupIds: readonly string[] = [];
@@ -373,8 +397,12 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
   rl.on("close", () => {
     conn.destroy();
-    process.exit(0);
+    resolveAttachClosed();
   });
+
+  // Block the promise until the readline closes. Callers await this
+  // and act on it (bin.ts exits; unattached REPL re-enters its loop).
+  await attachClosedPromise;
 };
 
 const handleCommand = async (
