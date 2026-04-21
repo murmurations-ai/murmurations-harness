@@ -164,6 +164,18 @@ export class DaemonCommandExecutor {
         if (!agentId) throw new Error("agents.get requires an agentId");
         return this.agentDetail(agentId);
       }
+      case "digest.list": {
+        const agentId = params.agentId as string | undefined;
+        if (!agentId) throw new Error("digest.list requires an agentId");
+        return this.#digestList(agentId);
+      }
+      case "digest.get": {
+        const agentId = params.agentId as string | undefined;
+        const file = params.file as string | undefined;
+        if (!agentId) throw new Error("digest.get requires an agentId");
+        if (!file) throw new Error("digest.get requires a file");
+        return this.#digestGet(agentId, file);
+      }
       case "groups.list":
         return this.#groupsList();
       case "events.history":
@@ -300,6 +312,64 @@ export class DaemonCommandExecutor {
       consecutiveFailures: agent?.consecutiveFailures ?? 0,
       recentDigests,
     };
+  }
+
+  /**
+   * List all digest files for an agent across all days, newest-first.
+   * Returns file basename and absolute path for each, no body (the
+   * caller fetches a specific one via digest.get). REPL uses this for
+   * tab completion on `:show-digest <agent> <TAB>`.
+   */
+  async #digestList(
+    agentId: string,
+  ): Promise<{ digests: { name: string; file: string; date: string }[] }> {
+    const runsDir = join(this.#deps.rootDir, ".murmuration", "runs", agentId);
+    const out: { name: string; file: string; date: string }[] = [];
+    try {
+      const dates = (await readdir(runsDir))
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+        .sort()
+        .reverse();
+      for (const date of dates) {
+        const files = (await readdir(join(runsDir, date)))
+          .filter((f) => f.startsWith("digest-") && f.endsWith(".md"))
+          .sort()
+          .reverse(); // newest first within a day (timestamp-prefixed)
+        for (const f of files) {
+          out.push({ name: f, file: join(runsDir, date, f), date });
+        }
+      }
+    } catch {
+      /* no runs */
+    }
+    return { digests: out };
+  }
+
+  /**
+   * Fetch the body of a specific digest file for an agent. `file` is
+   * the basename (e.g. `digest-15-27-56-dc22eb62.md`). Returns the
+   * full file content including frontmatter so the caller can render
+   * whatever slice they want.
+   */
+  async #digestGet(agentId: string, file: string): Promise<{ content: string; path: string }> {
+    // Guard against path traversal — filename must match the digest
+    // shape, nothing else.
+    if (!/^digest-[\w-]+\.md$/.test(file)) {
+      throw new Error(`digest.get: bad filename "${file}"`);
+    }
+    const runsDir = join(this.#deps.rootDir, ".murmuration", "runs", agentId);
+    // Search across day directories for the file.
+    const dates = await readdir(runsDir).catch(() => []);
+    for (const date of dates) {
+      const candidate = join(runsDir, date, file);
+      try {
+        const content = await readFile(candidate, "utf8");
+        return { content, path: candidate };
+      } catch {
+        /* not in this day */
+      }
+    }
+    throw new Error(`digest.get: file "${file}" not found for agent "${agentId}"`);
   }
 
   public async groupDetail(groupId: string): Promise<unknown> {

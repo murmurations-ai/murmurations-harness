@@ -238,9 +238,12 @@ const readSelfDigestTail = async (
         try {
           const content = await readFile(join(dayDir, f), "utf8");
           const stripped = content.replace(/^---[\s\S]*?---\n*/, "").trim();
-          // Pull wake id from the filename: digest-<shortId>.md
-          const wakeMatch = /^digest-([^.]+)\.md$/.exec(f);
-          const wake = wakeMatch?.[1] ?? "?";
+          // Pull wake id from the filename. Supports both new-style
+          // `digest-HH-MM-SS-<shortId>.md` and legacy
+          // `digest-<shortId>.md` (pre-timestamp-rename migration).
+          const newStyle = /^digest-\d{2}-\d{2}-\d{2}-([^.]+)\.md$/.exec(f);
+          const legacyStyle = /^digest-([^.]+)\.md$/.exec(f);
+          const wake = newStyle?.[1] ?? legacyStyle?.[1] ?? "?";
           results.push({ day, wake, content: stripped });
         } catch {
           // skip unreadable

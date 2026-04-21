@@ -43,6 +43,7 @@ const KNOWN_VERBS = new Set([
   "cost",
   "edit",
   "open",
+  "show-digest",
   "q",
   "quit",
   "detach",
@@ -472,6 +473,10 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   // handleCommand (top-level fn) can refresh it via the passed-in
   // ref; the completer reads .value through the same ref.
   const directiveIdsRef: { value: readonly string[] } = { value: [] };
+  // Digest filename cache, keyed by agentId. Populated on first
+  // `:show-digest <agent>` and reused for <TAB> completion on the
+  // second arg.
+  const digestsByAgentRef: { value: Map<string, readonly string[]> } = { value: new Map() };
   const rl = createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -505,6 +510,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
           ":convene",
           ":edit",
           ":open",
+          ":show-digest",
           ":switch",
           ":stop",
           ":quit",
@@ -527,6 +533,26 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
         const partial = parts[1] ?? "";
         return finalize(
           agentIds.filter((a) => a.startsWith(partial)),
+          partial,
+        );
+      }
+      if (cmd === ":show-digest" || cmd === "show-digest") {
+        if (parts.length <= 2) {
+          // First arg: agent id.
+          const partial = parts[1] ?? "";
+          return finalize(
+            agentIds.filter((a) => a.startsWith(partial)),
+            partial,
+          );
+        }
+        // Second arg: digest filename (from the cache populated by
+        // :show-digest <agent> without a file — that call primes the
+        // list for tab completion here).
+        const agentId = parts[1] ?? "";
+        const partial = parts[2] ?? "";
+        const names = digestsByAgentRef.value.get(agentId) ?? [];
+        return finalize(
+          names.filter((n) => n.startsWith(partial)),
           partial,
         );
       }
@@ -782,6 +808,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
         agentIds,
         groupIds,
         directiveIdsRef,
+        digestsByAgentRef,
         rootDir,
       );
       return;
@@ -790,7 +817,18 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     // Bare known verb — back-compat command dispatch.
     const firstToken = input.split(/\s+/)[0] ?? "";
     if (firstToken.length > 0 && KNOWN_VERBS.has(firstToken)) {
-      void handleCommand(input, send, name, rl, conn, agentIds, groupIds, directiveIdsRef, rootDir);
+      void handleCommand(
+        input,
+        send,
+        name,
+        rl,
+        conn,
+        agentIds,
+        groupIds,
+        directiveIdsRef,
+        digestsByAgentRef,
+        rootDir,
+      );
       return;
     }
 
@@ -818,6 +856,7 @@ const handleCommand = async (
   agentIds: readonly string[],
   groupIds: readonly string[],
   directiveIdsRef: { value: readonly string[] },
+  digestsByAgentRef: { value: Map<string, readonly string[]> },
   rootDir: string,
 ): Promise<void> => {
   const parts = cmd.split(/\s+/);
@@ -1268,6 +1307,57 @@ const handleCommand = async (
       };
       console.log(formatCostTable(r.totalWakes, r.totalArtifacts, r.agents));
     }
+  } else if (verb === "show-digest") {
+    const agentId = parts[1];
+    if (!agentId) {
+      console.log("  Usage: :show-digest <agent-id> [<digest-filename>]");
+    } else if (!agentIds.includes(agentId)) {
+      console.log(`  Unknown agent: ${agentId}. Known: ${agentIds.join(", ")}`);
+    } else {
+      const listResp = await send("digest.list", { agentId });
+      if (listResp.error) {
+        console.log(`  Error: ${listResp.error}`);
+      } else {
+        const r = listResp.result as {
+          digests: { name: string; file: string; date: string }[];
+        };
+        digestsByAgentRef.value.set(
+          agentId,
+          r.digests.map((d) => d.name),
+        );
+        const fileArg = parts[2];
+        if (!fileArg) {
+          // No file → print the most recent digest's full body.
+          const latest = r.digests[0];
+          if (!latest) {
+            console.log("  (no digests yet)");
+          } else {
+            const getResp = await send("digest.get", { agentId, file: latest.name });
+            if (getResp.error) {
+              console.log(`  Error: ${getResp.error}`);
+            } else {
+              const g = getResp.result as { content: string; path: string };
+              console.log(`  ${g.path}`);
+              console.log("  " + "─".repeat(60));
+              console.log(g.content);
+            }
+          }
+          if (r.digests.length > 1) {
+            console.log(`  (${String(r.digests.length)} digests — TAB-complete to pick another)`);
+          }
+        } else {
+          const getResp = await send("digest.get", { agentId, file: fileArg });
+          if (getResp.error) {
+            console.log(`  Error: ${getResp.error}`);
+          } else {
+            const g = getResp.result as { content: string; path: string };
+            console.log(`  ${g.path}`);
+            console.log("  " + "─".repeat(60));
+            console.log(g.content);
+          }
+        }
+      }
+    }
   } else if (verb === "edit") {
     const agentId = parts[1];
     if (!agentId) {
@@ -1375,6 +1465,7 @@ const handleCommand = async (
   :groups [<substring>]             Group list; optional case-insensitive id filter
   :events [<substring>]             Recent meetings + in-flight; optional group/kind filter
   :cost                             Cost summary per agent
+  :show-digest <agent> [<file>]     Print a wake digest (TAB-complete file)
   :directive (d) [message]          Send a Source directive
   :directive list                   List open directives
   :directive close <id>             Close/resolve a directive
