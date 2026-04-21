@@ -8,7 +8,7 @@ group_memberships:
   - "example"
 
 # Dispatch-only — the operator triggers meetings with
-# `murmuration group-wake --group example --directive "..."`. No cron.
+# `murmuration convene --group example --directive "..."`. No cron.
 
 signals:
   sources:

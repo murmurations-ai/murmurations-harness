@@ -634,7 +634,7 @@ Everything else inherits, cascades, or has a sensible built-in:
 **Anti-pattern:** Require `agent_id` in the frontmatter even though the loader already knows the directory name.
 **Fix:** Loader fills `agent_id` from the directory slug before Zod validation runs; explicit operator value still wins.
 
-This principle is what makes `murmuration init` → `murmuration group-wake` a 4-command experience instead of a 40-minute tour of every YAML field.
+This principle is what makes `murmuration init` → `murmuration convene` a 4-command experience instead of a 40-minute tour of every YAML field.
 
 ---
 

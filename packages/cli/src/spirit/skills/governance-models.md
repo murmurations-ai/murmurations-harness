@@ -43,7 +43,7 @@ In code, always use `group` / `item`. In CLI output and meeting minutes, the plu
 
 ## Group meetings
 
-`murmuration group-wake --group <id>` convenes a meeting:
+`murmuration convene --group <id>` convenes a meeting:
 
 - **Operational** (default) — the circle works through its backlog
 - **`--governance`** — pending governance items only; emits consent tallies

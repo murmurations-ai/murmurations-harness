@@ -25,7 +25,7 @@ chmod 600 .env
 murmuration doctor
 
 # 5. Run your first meeting
-murmuration group-wake --group example --directive "what should we scout next?"
+murmuration convene --group example --directive "what should we scout next?"
 ```
 
 You'll see the facilitator invite the scout, the scout contribute, and the facilitator synthesize a next step. Meeting minutes land in `.murmuration/items/` locally.
@@ -238,7 +238,7 @@ murmuration cost   [--json]
 
 # Actions
 murmuration directive [flags] "message"     # Send a Source directive
-murmuration group-wake [flags]              # Convene a group meeting
+murmuration convene [flags]              # Convene a group meeting
 
 # Help
 murmuration help protocol                   # Show daemon protocol + parity matrix

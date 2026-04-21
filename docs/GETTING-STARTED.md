@@ -48,7 +48,7 @@ Next:
   # edit .env and paste your GEMINI_API_KEY
 
   murmuration doctor --name my-first-murm
-  murmuration group-wake --name my-first-murm --group example --directive "what should we scout next?"
+  murmuration convene --name my-first-murm --group example --directive "what should we scout next?"
 ```
 
 ### 3. Paste your Gemini API key
@@ -97,7 +97,7 @@ murmuration doctor --live
 ### 5. Run your first meeting
 
 ```sh
-murmuration group-wake --group example --directive "what should we scout next?"
+murmuration convene --group example --directive "what should we scout next?"
 ```
 
 The facilitator (`host-agent`) invites the scout (`scout-agent`) to contribute. The scout offers observations. The facilitator synthesizes a summary and names a next step. You'll see a streaming transcript in your terminal.
@@ -126,7 +126,7 @@ The interactive interview will ask:
 
 Every question has a reasonable default you can ENTER through. API keys are validated for shape before confirmation (the init rejects an obviously wrong paste and lets you try again).
 
-After init, run `murmuration doctor` to validate, edit the scaffolded `role.md` / `soul.md` / `governance/groups/*.md` to flesh out your agents and groups, then `murmuration start` to boot the daemon (or `murmuration group-wake` for on-demand meetings).
+After init, run `murmuration doctor` to validate, edit the scaffolded `role.md` / `soul.md` / `governance/groups/*.md` to flesh out your agents and groups, then `murmuration start` to boot the daemon (or `murmuration convene` for on-demand meetings).
 
 ---
 
@@ -154,18 +154,18 @@ When in doubt, `murmuration doctor` is the first thing to run. It validates agai
 
 ## Key commands reference
 
-| Command                                                 | What it does                                  |
-| ------------------------------------------------------- | --------------------------------------------- |
-| `murmuration init [dir]`                                | Interactive scaffold of a new murmuration     |
-| `murmuration init --example hello [dir]`                | Scaffold the bundled hello-circle example     |
-| `murmuration doctor [--live] [--fix] [--json]`          | Diagnose a murmuration's setup                |
-| `murmuration start [--root\|--name]`                    | Boot the daemon                               |
-| `murmuration group-wake --group <id> --directive "..."` | Convene a group meeting on demand             |
-| `murmuration directive --agent <id> "..."`              | Send a directive to a specific agent          |
-| `murmuration agents`                                    | List registered agents and their state        |
-| `murmuration attach <name>`                             | Interactive REPL attached to a running daemon |
-| `murmuration status`                                    | Show daemon + agent state summary             |
-| `murmuration stop`                                      | Graceful shutdown                             |
+| Command                                              | What it does                                  |
+| ---------------------------------------------------- | --------------------------------------------- |
+| `murmuration init [dir]`                             | Interactive scaffold of a new murmuration     |
+| `murmuration init --example hello [dir]`             | Scaffold the bundled hello-circle example     |
+| `murmuration doctor [--live] [--fix] [--json]`       | Diagnose a murmuration's setup                |
+| `murmuration start [--root\|--name]`                 | Boot the daemon                               |
+| `murmuration convene --group <id> --directive "..."` | Convene a group meeting on demand             |
+| `murmuration directive --agent <id> "..."`           | Send a directive to a specific agent          |
+| `murmuration agents`                                 | List registered agents and their state        |
+| `murmuration attach <name>`                          | Interactive REPL attached to a running daemon |
+| `murmuration status`                                 | Show daemon + agent state summary             |
+| `murmuration stop`                                   | Graceful shutdown                             |
 
 Pass `--help` to any command for full flag documentation.
 

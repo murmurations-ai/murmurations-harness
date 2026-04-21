@@ -130,7 +130,7 @@ Honest path:
 
 5. **Validate end-to-end** with a group-wake once doctor is clean:
    ```sh
-   murmuration group-wake --group <your-group> --directive "test"
+   murmuration convene --group <your-group> --directive "test"
    ```
 
 The Emergent Praxis migration is the reference case study for this path. See [`xeeban/emergent-praxis` PRs #463–#465](https://github.com/xeeban/emergent-praxis/pulls?q=is%3Apr+adr-0026) for what it looked like in practice (with all the missteps we fixed in v0.5.0 by making them impossible to reproduce).

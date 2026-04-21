@@ -266,7 +266,7 @@ Usage:
   murmuration doctor [--live] [--fix] [--json]  Diagnose a murmuration's setup
   murmuration directive [options] "msg" Send a directive to agents/groups
   murmuration directive --list          Show all directives and responses
-  murmuration group-wake [options]     Convene a group meeting (on demand)
+  murmuration convene [options]        Convene a group meeting (on demand)
   murmuration backlog [options]         View/refresh a group's GitHub work queue
   murmuration providers list [--json]   List registered LLM providers
   murmuration status [--root|--name]     Show daemon status and agent summary
@@ -473,7 +473,16 @@ const main = async (): Promise<void> => {
       await runBacklog(argv.slice(1), resolveRoot(argv.slice(1)));
       break;
     }
+    case "convene": {
+      await runGroupWakeCommand(argv.slice(1), resolveRoot(argv.slice(1)));
+      break;
+    }
     case "group-wake": {
+      // Deprecated alias — unified with the REPL's `:convene` in v0.5.x.
+      // Remove after one release cycle.
+      process.stderr.write(
+        "murmuration: `group-wake` is deprecated and will be removed in a future release. Use `convene` instead.\n",
+      );
       await runGroupWakeCommand(argv.slice(1), resolveRoot(argv.slice(1)));
       break;
     }
