@@ -362,7 +362,9 @@ export class DaemonCommandExecutor {
     title: string;
   }[] = [];
   #meetingCacheAt = 0;
-  static readonly #MEETING_CACHE_TTL_MS = 60_000;
+  // Short TTL — operators hit :events right after a convene finishes
+  // and expect to see the meeting. 60s was too long in practice.
+  static readonly #MEETING_CACHE_TTL_MS = 15_000;
 
   /**
    * Load recent meetings from GitHub (source of truth) with local cache.
@@ -378,8 +380,13 @@ export class DaemonCommandExecutor {
       status: string;
     }[]
   > {
-    // Refresh cache if stale
-    if (Date.now() - this.#meetingCacheAt > DaemonCommandExecutor.#MEETING_CACHE_TTL_MS) {
+    // Refresh cache if stale OR if the cache is empty — an empty cache
+    // might mean "truly no meetings yet" OR "we haven't queried GitHub
+    // yet." Operators who ran convene expect to see the meeting within
+    // seconds; always re-querying when empty trades one extra GitHub
+    // call for a working :events right after the first meeting.
+    const stale = Date.now() - this.#meetingCacheAt > DaemonCommandExecutor.#MEETING_CACHE_TTL_MS;
+    if (stale || this.#meetingCache.length === 0) {
       await this.#refreshMeetingCache();
     }
 
@@ -415,7 +422,14 @@ export class DaemonCommandExecutor {
 
   async #refreshMeetingCache(): Promise<void> {
     const { githubClient, repoCoordinate } = this.#deps;
-    if (!githubClient || !repoCoordinate) return;
+    if (!githubClient || !repoCoordinate) {
+      // Daemon wasn't wired with a githubClient or no agent declared a
+      // github_scopes. :events will stay empty until those are set.
+      // Silent here — noisy logging on every :events call would drown
+      // the daemon log, and the dashboard / spirit skill already
+      // explains the GitHub-backed nature of the event history.
+      return;
+    }
 
     try {
       // Fetch meeting issues from GitHub (both open and closed, last 10)
