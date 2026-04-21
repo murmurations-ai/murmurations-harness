@@ -813,11 +813,21 @@ _Extend with agent-specific bright lines as they become clear._
     const secretName = typeof keyName === "string" ? keyName : "";
     if (secretName) secretNames.add(secretName);
     const groupLine = agent.group ? `\n  - "${agent.group}"` : "";
+    // Default github_scopes filters on `assigned:<agent-id>` so each
+    // agent sees action items directed to it (via GitHub issue labels)
+    // without being swamped by unrelated repo traffic. Operators can
+    // widen the filter later (e.g. add `group:<id>` label for group-
+    // wide tensions). Without these scopes, the signal aggregator has
+    // nothing to poll → `signal_count: 0` on every wake → agents can't
+    // discover their own assignments. Tester feedback 2026-04-21.
     const ghScopes = githubOwner
       ? `
   github_scopes:
     - owner: "${githubOwner}"
-      repo: "${githubRepoName}"`
+      repo: "${githubRepoName}"
+      filter:
+        state: "open"
+        labels: ["assigned:${agent.dir}"]`
       : "";
     const writeScopes = githubOwner
       ? `
