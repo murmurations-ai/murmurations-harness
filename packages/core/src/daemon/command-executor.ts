@@ -877,8 +877,11 @@ export class DaemonCommandExecutor {
     const result = await this.#deps.collaborationProvider.updateItemState({ id }, "closed");
     if (!result.ok) {
       if (result.error.code === "NOT_FOUND") {
+        const repoHint = this.#deps.repoCoordinate
+          ? `${this.#deps.repoCoordinate.owner}/${this.#deps.repoCoordinate.repo}`
+          : "(unknown)";
         throw new Error(
-          `could not close directive ${id}: GitHub returned "not found". If :directive list showed this item, the token likely lacks write access. Regenerate a PAT with \`repo\` scope (classic) or Issues: Read and write (fine-grained) and update .env.`,
+          `could not close directive ${id}: GitHub returned "not found" for ${repoHint}#${id}.\n  If :directive list showed this item, check two things:\n  1. Does the issue actually live in ${repoHint}? (The daemon is hitting that repo; if the directive was posted elsewhere, adjust harness.yaml collaboration.repo or the first agent's github_scopes.)\n  2. Does your GITHUB_TOKEN have Issues: Read and write on that repo? (GitHub returns 404 instead of 403 for unauthorized writes.)`,
         );
       }
       throw new Error(result.error.message);
