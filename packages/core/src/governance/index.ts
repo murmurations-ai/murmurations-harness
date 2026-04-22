@@ -241,6 +241,7 @@ export class GovernanceStateStore implements IGovernanceStateStore {
   readonly #now: () => Date;
   readonly #persistDir: string | undefined;
   readonly #onSync: GovernanceSyncCallbacks | undefined;
+  readonly #readOnly: boolean;
   #persistPending: Promise<void> | null = null;
 
   public constructor(
@@ -248,11 +249,19 @@ export class GovernanceStateStore implements IGovernanceStateStore {
       readonly now?: () => Date;
       readonly persistDir?: string | undefined;
       readonly onSync?: GovernanceSyncCallbacks | undefined;
+      /**
+       * When `true`, `create` and `transition` throw instead of mutating
+       * state. Use for CLI processes that share the on-disk `items.jsonl`
+       * with a running daemon — the daemon is the single writer
+       * (Engineering Standard #3). Default: `false`.
+       */
+      readonly readOnly?: boolean;
     } = {},
   ) {
     this.#now = options.now ?? ((): Date => new Date());
     this.#persistDir = options.persistDir;
     this.#onSync = options.onSync;
+    this.#readOnly = options.readOnly ?? false;
   }
 
   /**
@@ -329,6 +338,11 @@ export class GovernanceStateStore implements IGovernanceStateStore {
     payload: unknown,
     options: { readonly reviewAt?: Date } = {},
   ): GovernanceItem {
+    if (this.#readOnly) {
+      throw new Error(
+        "GovernanceStateStore: create() called on read-only instance. Only the daemon writes to items.jsonl; CLI processes must RPC the daemon.",
+      );
+    }
     const graph = this.#graphs.get(kind);
     if (!graph) {
       throw new Error(`governance: no state graph registered for kind "${kind}"`);
@@ -377,6 +391,11 @@ export class GovernanceStateStore implements IGovernanceStateStore {
     triggeredBy: string,
     reason?: string,
   ): GovernanceItem {
+    if (this.#readOnly) {
+      throw new Error(
+        "GovernanceStateStore: transition() called on read-only instance. Only the daemon writes to items.jsonl; CLI processes must RPC the daemon.",
+      );
+    }
     const item = this.#items.get(itemId);
     if (!item) throw new Error(`governance: item "${itemId}" not found`);
 
@@ -645,6 +664,26 @@ export interface GovernancePlugin {
    * its own internal state.
    */
   onTransition?(item: GovernanceItem, transition: GovernanceStateTransition): void;
+
+  /**
+   * After a group meeting produces a tally recommendation, the daemon
+   * calls this hook to decide whether the referenced governance items
+   * should transition to a terminal state. Generic daemon code cannot
+   * know what "resolve" / "ratify" / "approve" mean in every governance
+   * model, so the plugin owns the decision.
+   *
+   * Return `true` when the recommendation implies the item is done;
+   * the daemon will walk the plugin's own state graph to find the
+   * nearest terminal transition. Return `false` (or omit the hook)
+   * to leave items in their current state — the daemon will not
+   * auto-resolve anything it can't attribute to the plugin.
+   *
+   * S3 interprets "ratify" / "approve" / "consent" / "resolve" /
+   * "adopt" as resolving. Chain of Command interprets "approve" /
+   * "execute". Parliamentary interprets "pass" / "adopt". None of
+   * these vocabularies belong in core.
+   */
+  isResolvingRecommendation?(recommendation: string): boolean;
 
   /**
    * Optional hook called once when the daemon starts. Unlike

@@ -15,7 +15,8 @@
  */
 
 import type { Signal } from "../execution/index.js";
-import type { GovernanceItem } from "../governance/index.js";
+import type { GovernanceItem, GovernanceTerminology } from "../governance/index.js";
+import { DEFAULT_TERMINOLOGY } from "../governance/index.js";
 
 // ---------------------------------------------------------------------------
 // Group configuration (parsed from group docs)
@@ -76,9 +77,19 @@ export interface GroupWakeContext {
   readonly backlogContext?: string;
   /** Member identity summaries for peer review meetings. Map of agentId → role excerpt. */
   readonly memberIdentities?: ReadonlyMap<string, string>;
+  /**
+   * Display terms for human-facing prompt text (governance-model agnostic).
+   * Injected by the caller from the active `GovernancePlugin.terminology`.
+   * If absent, `DEFAULT_TERMINOLOGY` applies ("group" / "item" / etc.).
+   *
+   * Why it lives on the context, not hardcoded: core can't know whether the
+   * operator's governance model calls groups "circles" (S3), "departments"
+   * (chain of command), "committees" (parliamentary), or something else.
+   */
+  readonly terminology?: GovernanceTerminology;
 }
 
-/** A single agenda item for a circle meeting. */
+/** A single agenda item for a group meeting. */
 export interface AgendaItem {
   readonly title: string;
   readonly description: string;
@@ -399,6 +410,10 @@ export const runGroupWake = async (
   const contributions: MemberContribution[] = [];
   let totalInput = 0;
   let totalOutput = 0;
+  // Resolve display terms once per wake. The plugin's terminology (when
+  // supplied) overrides generic defaults; e.g. S3 maps `group -> "circle"`.
+  const terminology = context.terminology ?? DEFAULT_TERMINOLOGY;
+  const groupTerm = terminology.group;
 
   // =========================================================================
   // Phase 0: Agenda formation
@@ -462,7 +477,7 @@ ${memberInstructions}
 Keep your contribution focused and concise (3-5 paragraphs). Structure your response by agenda item.`;
 
     const response = await deps.callLLM({
-      systemPrompt: `You are agent ${memberId} participating in a ${context.kind} meeting of the ${context.groupId} circle. Your job is to address the meeting agenda — not to discuss anything outside of it.`,
+      systemPrompt: `You are agent ${memberId} participating in a ${context.kind} meeting of the ${context.groupId} ${groupTerm}. Your job is to address the meeting agenda — not to discuss anything outside of it.`,
       userPrompt,
       agentId: memberId,
       ...(signal ? { signal } : {}),
@@ -497,7 +512,7 @@ ${allContributions}
 
 ---
 
-You are ${context.facilitator}, the facilitator of the ${context.groupId} circle. Synthesize all member contributions into a meeting summary ORGANIZED BY AGENDA ITEM.
+You are ${context.facilitator}, the facilitator of the ${context.groupId} ${groupTerm}. Synthesize all member contributions into a meeting summary ORGANIZED BY AGENDA ITEM.
 
 ${
   context.kind === "governance"
@@ -534,7 +549,7 @@ Each action item MUST become a create-issue action with an "action-item" label a
 Only reference issue numbers that exist. Do not invent issue numbers.`;
 
   const synthesis = await deps.callLLM({
-    systemPrompt: `You are ${context.facilitator}, facilitator of the ${context.groupId} circle. Synthesize member contributions into clear decisions and action items organized by agenda item.`,
+    systemPrompt: `You are ${context.facilitator}, facilitator of the ${context.groupId} ${groupTerm}. Synthesize member contributions into clear decisions and action items organized by agenda item.`,
     userPrompt: facilitatorPrompt,
     agentId: context.facilitator,
     signal,
@@ -600,8 +615,9 @@ Only reference issue numbers that exist. Do not invent issue numbers.`;
 
 /** Build a meeting context header based on meeting kind. */
 function buildMeetingHeader(context: GroupWakeContext): string {
+  const groupTerm = (context.terminology ?? DEFAULT_TERMINOLOGY).group;
   if (context.kind === "governance") {
-    return `This is a GOVERNANCE MEETING for the ${context.groupId} circle.\n\nGovernance queue (${String(context.governanceQueue.length)} items):\n${
+    return `This is a GOVERNANCE MEETING for the ${context.groupId} ${groupTerm}.\n\nGovernance queue (${String(context.governanceQueue.length)} items):\n${
       context.governanceQueue
         .map((item) => {
           const issueNum = context.governanceIssueMap?.get(item.id);
@@ -612,9 +628,9 @@ function buildMeetingHeader(context: GroupWakeContext): string {
     }`;
   }
   if (context.kind === "retrospective" && context.retrospectiveMetrics) {
-    return `This is a RETROSPECTIVE for the ${context.groupId} circle.\n\nPeriod: ${context.retrospectiveMetrics.period}\n\n## Agent Metrics\n\n${context.retrospectiveMetrics.agentMetrics.map((m) => `  - ${m.agentId}: ${String(m.totalWakes)} wakes, ${String(m.totalArtifacts)} artifacts, ${String(m.idleWakes)} idle (${String(Math.round(m.idleRate * 100))}%), ${String(m.consecutiveFailures)} consecutive failures`).join("\n")}`;
+    return `This is a RETROSPECTIVE for the ${context.groupId} ${groupTerm}.\n\nPeriod: ${context.retrospectiveMetrics.period}\n\n## Agent Metrics\n\n${context.retrospectiveMetrics.agentMetrics.map((m) => `  - ${m.agentId}: ${String(m.totalWakes)} wakes, ${String(m.totalArtifacts)} artifacts, ${String(m.idleWakes)} idle (${String(Math.round(m.idleRate * 100))}%), ${String(m.consecutiveFailures)} consecutive failures`).join("\n")}`;
   }
-  return `This is an OPERATIONAL MEETING for the ${context.groupId} circle.`;
+  return `This is an OPERATIONAL MEETING for the ${context.groupId} ${groupTerm}.`;
 }
 
 /** Format agenda items as a numbered list for prompts. */
@@ -679,16 +695,17 @@ async function generateAgenda(
           .join("\n")}`
       : "";
 
-  const userPrompt = `You are ${context.facilitator}, facilitator of the ${context.groupId} circle. Generate the meeting agenda.
+  const groupTerm = (context.terminology ?? DEFAULT_TERMINOLOGY).group;
+  const userPrompt = `You are ${context.facilitator}, facilitator of the ${context.groupId} ${groupTerm}. Generate the meeting agenda.
 
-Review the governance queue, open issues, and signals below. Propose 3-5 focused agenda items for this ${context.kind} meeting. Each item should be actionable — something the circle can decide or act on in this meeting.
+Review the governance queue, open issues, and signals below. Propose 3-5 focused agenda items for this ${context.kind} meeting. Each item should be actionable — something the ${groupTerm} can decide or act on in this meeting.
 ${govSection}${backlogSection}${signalSection}
 
 ---
 
 Output the agenda as a numbered list. For each item:
 - A clear, specific title
-- One sentence describing what the circle needs to decide or do
+- One sentence describing what the ${groupTerm} needs to decide or do
 
 Format:
 1. **Title**: Description
@@ -698,7 +715,7 @@ Format:
 Keep it to 3-5 items maximum. Prioritize by urgency and impact.`;
 
   const response = await deps.callLLM({
-    systemPrompt: `You are ${context.facilitator}, facilitator of the ${context.groupId} circle. Generate a focused meeting agenda. Be specific and actionable — no generic items.`,
+    systemPrompt: `You are ${context.facilitator}, facilitator of the ${context.groupId} ${groupTerm}. Generate a focused meeting agenda. Be specific and actionable — no generic items.`,
     userPrompt,
     agentId: context.facilitator,
     ...(signal ? { signal } : {}),

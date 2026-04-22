@@ -151,7 +151,10 @@ const showStatus = async (rootDir: string): Promise<void> => {
 
   // Show agent summary from state store
   const { AgentStateStore } = await import("@murmurations-ai/core");
-  const store = new AgentStateStore({ persistDir: resolve(rootDir, ".murmuration", "agents") });
+  const store = new AgentStateStore({
+    persistDir: resolve(rootDir, ".murmuration", "agents"),
+    readOnly: true,
+  });
   const loaded = await store.load();
   if (loaded > 0) {
     const agents = store.getAllAgents();

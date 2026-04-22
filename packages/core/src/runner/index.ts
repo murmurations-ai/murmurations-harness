@@ -484,24 +484,17 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
     const outputs: AgentOutputArtifact[] = [];
     const governanceEvents: EmittedGovernanceEvent[] = [];
 
-    // 11. Parse governance event with type detection
+    // 11. Emit governance event. Core stays generic — the active
+    // GovernancePlugin decides what kind of item (if any) to create
+    // in its `onEventsEmitted` handler. The raw agent text goes in
+    // `payload.topic` verbatim; any model-specific prefix parsing
+    // (e.g. S3's `TENSION:` / `PROPOSAL:` / `REPORT:`) belongs to
+    // the plugin, not to core.
     if (reflection.governanceEvent) {
-      let govKind = "agent-governance-event";
-      let govTopic = reflection.governanceEvent;
-      if (govTopic.startsWith("PROPOSAL:")) {
-        govKind = "proposal-opened";
-        govTopic = govTopic.slice("PROPOSAL:".length).trim();
-      } else if (govTopic.startsWith("TENSION:")) {
-        govKind = "tension";
-        govTopic = govTopic.slice("TENSION:".length).trim();
-      } else if (govTopic.startsWith("REPORT:")) {
-        govKind = "report";
-        govTopic = govTopic.slice("REPORT:".length).trim();
-      }
       governanceEvents.push({
-        kind: govKind,
+        kind: "agent-governance-event",
         payload: {
-          topic: govTopic,
+          topic: reflection.governanceEvent,
           observation: reflection.observation,
           effectiveness: reflection.effectiveness,
           agentId,

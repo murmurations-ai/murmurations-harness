@@ -116,12 +116,53 @@ const S3GovernancePlugin = {
     return [TENSION_GRAPH, PROPOSAL_GRAPH];
   },
 
+  /**
+   * S3 treats these verbs in a tally recommendation as resolving a
+   * governance item. Substring match so "we ratify" / "will approve" /
+   * "consent with concern" all trigger. Used by the daemon to decide
+   * whether to advance the item to its terminal state.
+   */
+  isResolvingRecommendation(recommendation) {
+    const verbs = ["resolve", "ratif", "approve", "adopt", "agree", "pass", "consent"];
+    const lower = String(recommendation).toLowerCase();
+    return verbs.some((v) => lower.includes(v));
+  },
+
   async onEventsEmitted(batch, _reader) {
     const decisions = [];
 
     for (const event of batch.events) {
-      switch (event.kind) {
-        case "agent-governance-event":
+      // Generic "agent-governance-event" from core: parse the model-
+      // specific prefix from payload.topic to decide the item kind.
+      // "PROPOSAL:" → proposal-opened, "TENSION:" → tension,
+      // "REPORT:" → report. Unprefixed defaults to tension (the
+      // zero-ceremony path for agents who don't know the taxonomy).
+      let resolvedKind = event.kind;
+      let resolvedPayload = event.payload;
+      if (event.kind === "agent-governance-event") {
+        const topic =
+          typeof event.payload === "object" &&
+          event.payload !== null &&
+          typeof event.payload.topic === "string"
+            ? event.payload.topic
+            : "";
+        let kind = S3_TENSION;
+        let trimmed = topic;
+        if (topic.startsWith("PROPOSAL:")) {
+          kind = S3_PROPOSAL;
+          trimmed = topic.slice("PROPOSAL:".length).trim();
+        } else if (topic.startsWith("TENSION:")) {
+          kind = S3_TENSION;
+          trimmed = topic.slice("TENSION:".length).trim();
+        } else if (topic.startsWith("REPORT:")) {
+          kind = "report";
+          trimmed = topic.slice("REPORT:".length).trim();
+        }
+        resolvedKind = kind;
+        resolvedPayload = { ...event.payload, topic: trimmed };
+      }
+
+      switch (resolvedKind) {
         case S3_TENSION: {
           // Route to Source for visibility + to any targeted agent.
           /** @type {import('@murmurations-ai/core').GovernanceRouteTarget[]} */
@@ -132,7 +173,7 @@ const S3GovernancePlugin = {
           decisions.push({
             event,
             routes,
-            create: { kind: "tension", payload: event.payload },
+            create: { kind: "tension", payload: resolvedPayload },
           });
           break;
         }
@@ -142,7 +183,7 @@ const S3GovernancePlugin = {
           decisions.push({
             event,
             routes: [{ target: "source" }],
-            create: { kind: "proposal", payload: event.payload },
+            create: { kind: "proposal", payload: resolvedPayload },
           });
           break;
         }

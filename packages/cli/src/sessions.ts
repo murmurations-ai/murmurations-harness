@@ -102,6 +102,7 @@ export const listSessions = async (): Promise<void> => {
     try {
       const store = new AgentStateStore({
         persistDir: join(session.root, ".murmuration", "agents"),
+        readOnly: true,
       });
       const loaded = await store.load();
       agentCount = loaded > 0 ? String(store.getAllAgents().length) : "0";

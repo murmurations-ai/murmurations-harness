@@ -805,9 +805,12 @@ export class DaemonCommandExecutor {
     totalOutputTokens: number;
   }): Promise<{ itemId: string; to: string }[]> {
     const { governancePersistDir, governancePlugin } = this.#deps;
-    const resolveKeywords = ["resolve", "ratif", "approve", "adopt", "agree", "pass", "consent"];
+    // Core is governance-model-agnostic: delegate the "does this
+    // recommendation mean resolve?" question to the plugin.
+    // Without a plugin, nothing auto-resolves — operators ratify
+    // by explicit transition, not implicit keyword sniff.
     const shouldResolve = (text: string): boolean =>
-      resolveKeywords.some((kw) => text.toLowerCase().includes(kw));
+      governancePlugin?.isResolvingRecommendation?.(text) ?? false;
 
     try {
       const store = new GovernanceStateStore({
