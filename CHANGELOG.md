@@ -3,7 +3,7 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.5.0] — Unreleased (in tester validation)
+## [0.5.0] - 2026-04-21
 
 **"Out of the box" — a non-technical tester can go from `npm install` to a running meeting in under 10 minutes with zero file editing beyond pasting one API key.**
 
@@ -46,28 +46,80 @@ The v0.5.0 work started from a lived failure: on 2026-04-20, a motivated operato
 - **Operators saw `create-issue: UNKNOWN` on every GitHub action failure.** GitHub provider error codes now map correctly.
 - **`FrontmatterInvalidError` for numeric `agent_id`** used to be cryptic. Now explicitly suggests `agent_id: "<directory-name>"` as the fix (and in v0.5.0, the loader coerces automatically so operators rarely see the error at all).
 
+### Pre-release reviews (Phase A/B/C)
+
+Four specialized review agents (engineering, architecture, simplicity, security) audited the codebase before the tag. Findings were triaged against ADRs — anything representing design intent was preserved. Dead code, legacy supersession, and real security holes were fixed.
+
+#### Phase A — review cleanup (#208, #213)
+
+- **ADR-0021 supersession removed**: `GovernanceGitHubSync` legacy branch (~190 LoC + 62-line boot.ts shim) replaced by direct `GitHubCollaborationProvider` construction. Runner's `commitPathPrefix` GitHub fallback (60 LoC) similarly removed.
+- **Removed cruft**: `SIGNALS_STUB_VERSION` (Phase 1A legacy re-export), `cli/src/command-executor.ts` re-export shim, `collaboration-factory.writeScopesRepos` option (zero callers).
+- **Bug fixes**: `isValidWakeAction` rejects NaN / non-integer / non-positive `issueNumber` (same class as PR #174); MCP client reads version from `package.json` instead of hardcoded `"0.4.3"`.
+- **MCP wired at boot (ADR-0020 Phase 3)**: `McpToolLoader` is now instantiated when an agent declares `tools.mcp`. Zero overhead for agents that don't.
+- **Package metadata**: all 7 packages get `author: "Murmuration Harness Contributors"` and `publishConfig.access: "public"` so the first `npm publish` doesn't 402.
+- `docs/adr/UPCOMING.md` tracks 13 items needing ADRs before v1.0.
+
+#### Phase B — security hardening (#211)
+
+- **`scrubLogRecord` now matches value patterns, not just key names.** Gemini (`AIza…`), Anthropic (`sk-ant-…`), OpenAI (`sk-…`), all GitHub token shapes (`ghp_…` / `gho_…` / `github_pat_…` / `ghs_…` / `ghr_…` / `ghu_…`), Slack (`xox[baprs]-…`), and PEM private keys are redacted regardless of the enclosing key. Recurses into arrays. Addresses the PR #154 leak class where a provider echoed the API key into `error.message`.
+- **Identifier validation at the Zod boundary**: `IDENTIFIER_RE = /^[a-z0-9][a-z0-9._-]*$/i`, max 64 chars. Applied to `agent_id` and `group_memberships` in `role.md`. Blocks `../../../tmp/x` path traversal into `runs/`, `.murmuration/logs/`, and governance persist dirs.
+- **Dashboard auth token**: daemon mints a random 24-byte base64url token at boot, writes to `<root>/.murmuration/dashboard.token` (mode 0600). Every `/api/*` request requires the token via `X-Murmuration-Token` header or `?token=<value>` query param (constant-time comparison). Boot log emits the full URL so the operator can open the dashboard with one click.
+- **Host header validation**: rejects requests whose `Host` is not `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding defense).
+- **Dashboard XSS fixes**: `esc()` applied to every untrusted GitHub-sourced interpolation (topics, titles, kinds, dates, IDs, meeting summaries); `safeUrl()` validates href scheme (http/https/mailto only); `linkify()` re-validates every URL it emits; strict `Content-Security-Policy` on `/dashboard`; `X-Content-Type-Options: nosniff`; `Referrer-Policy: no-referrer`.
+
+#### Phase C — governance decoupling (#212)
+
+Core is now governance-model-agnostic. The S3 plugin owns every model-specific decision.
+
+- **`GovernanceTerminology` threaded through `runGroupWake`** — `GroupWakeContext.terminology` replaces eight hardcoded "circle" references in member/facilitator system prompts, meeting headers, and agenda generation. CLI loads the plugin's `terminology` export and injects it.
+- **Prefix parser moves from core runner to plugin** — core emits generic `kind: "agent-governance-event"` with the raw topic in payload. S3's `onEventsEmitted` handler parses `TENSION:` / `PROPOSAL:` / `REPORT:` prefixes and creates the model-specific item. Other plugins are free to interpret text however they want.
+- **`resolveKeywords` heuristic moves to plugin** — `GovernancePlugin.isResolvingRecommendation(text): boolean` is an optional hook. Daemon calls it; when no plugin is configured, nothing auto-resolves on keyword match. S3 plugin implements it with its own `resolve`/`ratif`/`approve`/`adopt`/`agree`/`pass`/`consent` vocabulary.
+- **Single-writer state stores enforced**: `GovernanceStateStore` and `AgentStateStore` accept `readOnly: true`. Mutation methods (`create`, `transition`, `register`, `recordWakeOutcome`) throw on read-only instances. All CLI instantiations (bin.ts status, group-wake.ts governance-queue + retro-metrics, sessions.ts agent-count listing) pass `readOnly: true`. Daemon's instantiations remain writable. Engineering Standard #3 now code-enforced, not just documented.
+
+### Added (additional v0.5.0 work beyond review phases)
+
+- **`runs/` moved out of `.murmuration/`** (#204) — digests are content; they belong in the visible root, not under a hidden ops directory. One-time auto-migration on first boot.
+- **Log consolidation** (#206) — `daemon.log` and `wake-<agent>.log` live under `<root>/.murmuration/logs/` (was: scattered at the root of `.murmuration/`). Helper functions `daemonLogPath()` / `wakeLogPath()` exported from core.
+- **Digest UX**:
+  - Digest filenames include full ISO date+time (`digest-2026-04-21T17-49-54Z-<shortid>.md`) for chronological sort (#199)
+  - `:show-digest <agent>` with lazy per-agent filename caching + tab completion + enter-for-latest (#197/#200/#201/#202)
+  - `:status <agent>` shows the actual most recent digest + path under each summary (#184/#194)
+- **REPL improvements**:
+  - Per-murmuration REPL history files (unattached REPL has its own) (#193/#195)
+  - `:stop <name>` / `:start <name>` / `:restart <name>` in unattached REPL with tab completion (#187/#190/#191)
+  - `:wake --force` resets circuit breaker; surfaces skip reason (#185)
+  - `:agents <text>` / `:groups <text>` / `:events <text>` substring filters with tab completion (#181/#183/#186)
+  - `:status <agent>` per-agent detail view (#180)
+  - Daemon disconnect drops back to unattached REPL instead of crashing (#176)
+- **`agent.maxSteps = 256`** (configurable in `harness.yaml`) — tool-use step budget with step-count in digest + budget-exhaustion warning (#196)
+- **`init` scaffolds `signals.github_scopes` with `assigned-label` filter** so new agents see their assigned work without operator configuration (#203)
+
+### Fixed
+
+- **`/issues/undefined` 404** (#174) — `GitHubCollaborationProvider` wraps `number` into `IssueNumber` brand correctly. `unknown`-typed interface parameters that hid the bug for months are tracked in `docs/adr/UPCOMING.md`.
+- **Empty digests** (#198) — LLM output is aggregated across all tool-use steps; final-step tool-call no longer loses intermediate text.
+- **`:directive close/delete` on non-directives** (#177) — assert target has `source-directive` label before acting.
+- **Closing an already-closed directive** (#178) — short-circuits with clear message instead of reporting false success.
+- **`:directive delete` on GitHub-backed murmurations** (#179) — refuses (GitHub REST can't delete via PAT); directs operator to `gh issue delete` with explicit command.
+- **SIGTERM doesn't exit cleanly** (#188) — socket server + HTTP server kept the event loop alive. Fixed by explicit `process.exit(0)` after shutdown log. REPL surfaces wake-timeout reason.
+- **`:status <agent>` shows stale data** (#184) — reloads state before rendering.
+- **Digest list ordered by filename** (#202) — sort by file mtime instead.
+- **Attached `:stop` with mismatched target** (#189) — refuses to prevent stopping the wrong murmuration.
+
 ### Engineering
 
-- 631 tests pass (+86 net from v0.4.5), 0 lint errors, format clean.
-- New modules: `packages/cli/src/init-secrets.ts`, `packages/cli/src/doctor.ts`, `packages/cli/src/examples/hello-circle/` (12 files).
-- New tests: `init-secrets.test.ts`, `init.test.ts`, `doctor.test.ts`, `init-example.test.ts` (+ updated `group-wake.test.ts`, `identity.test.ts`, `collaboration.test.ts`).
+- **650 tests pass** (+105 from v0.4.5), 0 lint errors, format clean.
+- **ADR tracker**: `docs/adr/UPCOMING.md` catalogs 13 items needing ADRs (bundled plugin convention, core's governance prefix parsing, dashboard polling, `setInterval` exemptions, direct-FS reads from dashboard, runs/pipeline visibility split, Strategy plugin, Collaboration provider ecosystem, 4 future-feature scaffolds, pre-1.0 "no back-compat" stance, ADR index automation).
+- **Follow-up issues filed**: #209 (upstreamAgentIds wiring), #210 (external governance-event routing).
+- **Strict-mode TypeScript discipline**: no new `any`, no new `unknown` leaks across interfaces, noUncheckedIndexedAccess + exactOptionalPropertyTypes compliant.
 
 ### Deferred to v0.5.1+
 
-- **Cross-repo write scopes in `CollaborationProvider`** — the engineering circle's attempt to cross-post meeting minutes onto a different repo's PR failed silently because providers are scoped to one repo. Design via ADR after v0.5.0 ships.
-- **S3 governance plugin as a standalone npm package** — v0.5.0 ships with the no-op plugin as default; real pluggable governance is v0.5.1 material.
-- **`murmuration init` live credential validation** — spec'd for M2 but deferred to `murmuration doctor --live` where it unifies with the other live checks.
-
-### Not yet released
-
-This entry documents the v0.5.0 scope. Source (Nori) wants to test locally before publishing to npm. When ready:
-
-```sh
-pnpm version minor            # bumps 0.4.5 → 0.5.0 across packages
-git tag v0.5.0
-git push --tags
-pnpm -F '@murmurations-ai/*' publish --access public
-```
+- **Cross-repo write scopes in `CollaborationProvider`** — providers are scoped to one repo; multi-repo coordination needs ADR design.
+- **Thin composition root** — `boot.ts` is 1800+ lines; architecture reviewer flagged it. Split into named classes in a dedicated refactor PR.
+- **`dashboard-tui` off direct FS reads** — TUI reads `.murmuration/state.json` / `items.jsonl` / `logs/daemon.log` directly. Should route through the daemon's typed API.
+- **Boundary-type hardening** — several internal seams still use `unknown` where branded types would prevent PR #174-class bugs.
+- **Eight more ADRs** per `docs/adr/UPCOMING.md`.
 
 ## [0.4.5] - 2026-04-19
 
