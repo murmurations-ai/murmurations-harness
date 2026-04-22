@@ -65,6 +65,9 @@ importers:
       '@murmurations-ai/llm':
         specifier: workspace:*
         version: link:../llm
+      '@murmurations-ai/mcp':
+        specifier: workspace:*
+        version: link:../mcp
       '@murmurations-ai/secrets-dotenv':
         specifier: workspace:*
         version: link:../secrets-dotenv

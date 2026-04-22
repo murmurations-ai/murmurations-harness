@@ -663,19 +663,22 @@ export const parseWakeActions = (text: string): WakeAction[] => {
   }
 };
 
+const isPositiveIssueNumber = (v: unknown): v is number =>
+  typeof v === "number" && Number.isInteger(v) && v > 0;
+
 const isValidWakeAction = (item: unknown): item is WakeAction => {
   if (typeof item !== "object" || item === null) return false;
   const obj = item as Record<string, unknown>;
   if (typeof obj.kind !== "string" || !VALID_WAKE_ACTION_KINDS.has(obj.kind)) return false;
   switch (obj.kind) {
     case "label-issue":
-      return typeof obj.issueNumber === "number" && typeof obj.label === "string";
+      return isPositiveIssueNumber(obj.issueNumber) && typeof obj.label === "string";
     case "create-issue":
       return typeof obj.title === "string";
     case "close-issue":
-      return typeof obj.issueNumber === "number";
+      return isPositiveIssueNumber(obj.issueNumber);
     case "comment-issue":
-      return typeof obj.issueNumber === "number" && typeof obj.body === "string";
+      return isPositiveIssueNumber(obj.issueNumber) && typeof obj.body === "string";
     case "commit-file":
       return typeof obj.filePath === "string" && typeof obj.fileContent === "string";
     default:

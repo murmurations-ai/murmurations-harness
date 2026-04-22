@@ -93,10 +93,7 @@ export class CollaborationBuildError extends Error {
  * Throws {@link CollaborationBuildError} on configuration problems so
  * callers can produce command-specific error messages.
  */
-export const buildCollaborationProvider = async (
-  rootDir: string,
-  opts: { readonly writeScopesRepos?: readonly string[] } = {},
-): Promise<BuiltCollaboration> => {
+export const buildCollaborationProvider = async (rootDir: string): Promise<BuiltCollaboration> => {
   const config = await loadHarnessConfig(rootDir);
 
   if (config.collaboration.provider === "local") {
@@ -133,14 +130,13 @@ export const buildCollaborationProvider = async (
   }
 
   const repoKey = `${repo.owner}/${repo.repo}`;
-  const writeScopesRepos = opts.writeScopesRepos ?? [repoKey];
   const client = createGithubClient({
     token: secretsProvider.get(GITHUB_TOKEN),
     writeScopes: {
-      issueComments: [...writeScopesRepos],
+      issueComments: [repoKey],
       branchCommits: [],
-      labels: [...writeScopesRepos],
-      issues: [...writeScopesRepos],
+      labels: [repoKey],
+      issues: [repoKey],
     },
   });
 

@@ -3,7 +3,7 @@
   "version": "0.4.5",
   "description": "Default SecretsProvider for the Murmuration Harness — reads from a .env file at the murmuration root.",
   "license": "MIT",
-  "author": "Emergent Praxis murmuration",
+  "author": "Murmuration Harness Contributors",
   "homepage": "https://github.com/murmurations-ai/murmurations-harness/tree/main/packages/secrets-dotenv",
   "repository": {
     "type": "git",
@@ -38,5 +38,8 @@
   "dependencies": {
     "@murmurations-ai/core": "workspace:*",
     "dotenv": "^16.4.5"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

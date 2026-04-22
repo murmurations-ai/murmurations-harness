@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import {
   AgentStateStore,
+  DaemonCommandExecutor,
   DaemonEventBus,
   HARNESS_VERSION,
   makeAgentId,
@@ -12,7 +13,6 @@ import {
   type DaemonEvent,
   type RegisteredAgent,
 } from "@murmurations-ai/core";
-import { DaemonCommandExecutor } from "./command-executor.js";
 
 // ---------------------------------------------------------------------------
 // Test fixtures

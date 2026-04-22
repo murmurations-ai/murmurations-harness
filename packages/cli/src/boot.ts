@@ -29,6 +29,7 @@ import {
   AgentStateStore,
   Daemon,
   DispatchExecutor,
+  GitHubCollaborationProvider,
   GovernanceGitHubSync,
   DaemonHttp,
   DaemonSocket,
@@ -44,6 +45,7 @@ import {
   type AgentExecutor,
   type AgentRunner,
   type BudgetCeiling,
+  type CollaborationProvider,
   type DaemonConfig,
   type RegisteredAgent,
   type SecretDeclaration,
@@ -68,6 +70,7 @@ import {
   type LLMCostHook,
 } from "@murmurations-ai/llm";
 import { resolveLLMCost } from "@murmurations-ai/llm/pricing";
+import { McpToolLoader } from "@murmurations-ai/mcp";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
@@ -1194,9 +1197,16 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
             });
             const firstBranchScope = capturedAgent.githubWriteScopes.branchCommits[0];
             const targetRepo = firstBranchScope ? parseRepoKey(firstBranchScope.repo) : undefined;
+            // Agents that declare `tools.mcp` in role.md get an MCP tool
+            // loader so the runner can spawn their declared MCP servers at
+            // wake time and inject the tools into the LLM call. Agents
+            // without tools.mcp pay no overhead — loader is lazy per-wake.
+            const mcpToolLoader =
+              capturedAgent.tools.mcp.length > 0 ? new McpToolLoader() : undefined;
             return {
               ...(wakeClients.llm ? { llm: wakeClients.llm } : {}),
               ...(wakeClients.github ? { github: wakeClients.github } : {}),
+              ...(mcpToolLoader ? { mcpToolLoader } : {}),
               ...(targetRepo ? { targetRepo } : {}),
               targetBranch: "main",
             };
@@ -1236,81 +1246,29 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       })) ?? [],
   );
 
-  // Construct governance sync — prefer CollaborationProvider (ADR-0021), fall back to GitHub
-  const governanceSync = localCollaborationProvider
+  // Construct governance sync via CollaborationProvider (ADR-0021).
+  // Local mode uses LocalCollaborationProvider; GitHub mode builds a
+  // GitHubCollaborationProvider from the authenticated client.
+  const governanceCollaborationProvider: CollaborationProvider | undefined =
+    localCollaborationProvider ??
+    (githubClient && allRegistered[0]?.signalScopes?.githubScopes?.[0]
+      ? new GitHubCollaborationProvider({
+          client: githubClient,
+          repo: makeRepoCoordinate(
+            allRegistered[0].signalScopes.githubScopes[0].owner,
+            allRegistered[0].signalScopes.githubScopes[0].repo,
+          ),
+        })
+      : undefined);
+
+  const governanceSync = governanceCollaborationProvider
     ? new GovernanceGitHubSync({
-        provider: localCollaborationProvider,
+        provider: governanceCollaborationProvider,
         ...(allRegistered[0]?.groupMemberships[0]
           ? { defaultGroup: allRegistered[0].groupMemberships[0] }
           : {}),
       })
-    : githubClient
-      ? new GovernanceGitHubSync({
-          github: {
-            createIssue: async (input) => {
-              const result = await githubClient.createIssue(
-                makeRepoCoordinate(
-                  allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
-                  allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
-                ),
-                { title: input.title, body: input.body, labels: [...input.labels] },
-              );
-              if (!result.ok) return { ok: false, error: result.error.message };
-              return {
-                ok: true,
-                issueNumber: result.value.number.value,
-                htmlUrl: result.value.htmlUrl,
-              };
-            },
-            createIssueComment: async (issueNumber, body) => {
-              const result = await githubClient.createIssueComment(
-                makeRepoCoordinate(
-                  allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
-                  allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
-                ),
-                makeIssueNumber(issueNumber),
-                { body },
-              );
-              if (!result.ok) return { ok: false, error: result.error.message };
-              return { ok: true };
-            },
-            addLabels: async (issueNumber, labels) => {
-              const repo = makeRepoCoordinate(
-                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
-                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
-              );
-              const result = await githubClient.addLabels(repo, makeIssueNumber(issueNumber), [
-                ...labels,
-              ]);
-              if (!result.ok) return { ok: false, error: result.error.message };
-              return { ok: true };
-            },
-            removeLabels: async (issueNumber, labels) => {
-              const repo = makeRepoCoordinate(
-                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
-                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
-              );
-              for (const label of labels) {
-                await githubClient.removeLabel(repo, makeIssueNumber(issueNumber), label);
-              }
-              return { ok: true };
-            },
-            closeIssue: async (issueNumber) => {
-              const repo = makeRepoCoordinate(
-                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.owner ?? "unknown",
-                allRegistered[0]?.signalScopes?.githubScopes?.[0]?.repo ?? "unknown",
-              );
-              const result = await githubClient.updateIssueState(
-                repo,
-                makeIssueNumber(issueNumber),
-                "closed",
-              );
-              if (!result.ok) return { ok: false, error: result.error.message };
-              return { ok: true };
-            },
-          },
-        })
-      : undefined;
+    : undefined;
 
   // Build the onWakeActions callback — executes structured actions
   // from individual agent wakes against GitHub.
@@ -1495,7 +1453,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   // Command executor — owns command dispatch, status building, and detail handlers
   // (extracted from boot.ts per Engineering Standard #8)
-  const { DaemonCommandExecutor } = await import("./command-executor.js");
+  const { DaemonCommandExecutor } = await import("@murmurations-ai/core");
 
   // Resolve the repo coordinate for both GitHub collaboration and the
   // command-executor's status/issue-listing path. Try harness.yaml's

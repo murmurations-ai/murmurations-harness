@@ -4,5 +4,8 @@
     "tsBuildInfoFile": "./.tsbuildinfo.build"
   },
   "exclude": ["dist", "node_modules", "**/*.test.ts"],
-  "references": [{ "path": "../core/tsconfig.build.json" }]
+  "references": [
+    { "path": "../core/tsconfig.build.json" },
+    { "path": "../mcp/tsconfig.build.json" }
+  ]
 }
