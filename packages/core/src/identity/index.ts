@@ -197,6 +197,26 @@ export class FrontmatterInvalidError extends IdentityLoaderError {
 const modelTierSchema = z.enum(["fast", "balanced", "deep"]);
 
 /**
+ * Valid shape for an agent or group identifier. Must not contain
+ * path-separators or traversal sequences — these values are joined
+ * into filesystem paths (`runs/<id>/`, `.murmuration/logs/wake-<id>.log`,
+ * governance persist dirs) and would otherwise enable an attacker-
+ * controlled `role.md` to escape the murmuration root. Matches the
+ * regex the HTTP handler already uses at its boundary (http.ts:136).
+ *
+ * Rules:
+ *   - Must start with a letter or digit
+ *   - Subsequent chars: letters, digits, `.`, `_`, `-`
+ *   - Length 1..64
+ */
+export const IDENTIFIER_RE = /^[a-z0-9][a-z0-9._-]*$/i;
+const IDENTIFIER_MAX_LENGTH = 64;
+const identifierSchema = z.string().min(1).max(IDENTIFIER_MAX_LENGTH).regex(IDENTIFIER_RE, {
+  message:
+    "identifier must start with a letter or digit and contain only letters, digits, `.`, `_`, or `-` (max 64 chars)",
+});
+
+/**
  * LLM provider enum — kept in sync with `@murmurations-ai/llm`'s
  * `ProviderId`. Extended in ADR-0016 (Phase 2C role template).
  */
@@ -359,14 +379,14 @@ const pluginsSchema = z
 
 /** Shape expected from `role.md` YAML frontmatter. Spec §5.3 + ADR-0016. */
 export const roleFrontmatterSchema = z.object({
-  agent_id: z.string().min(1),
+  agent_id: identifierSchema,
   name: z.string().min(1),
   soul_file: z.string().min(1).optional(),
 
   // legacy compat (Phase 1B)
   model_tier: modelTierSchema,
   wake_schedule: wakeScheduleSchema.optional(),
-  group_memberships: z.array(z.string().min(1)).default([]),
+  group_memberships: z.array(identifierSchema).default([]),
   max_wall_clock_ms: z.number().int().positive().default(15_000),
 
   // new in ADR-0016 (Phase 2C)

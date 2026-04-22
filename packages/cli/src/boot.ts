@@ -1613,10 +1613,23 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     daemonSocket.start();
   }
 
-  // Start HTTP server for web dashboard (SSE events + REST API)
+  // Start HTTP server for web dashboard (SSE events + REST API).
+  // Mint a per-daemon auth token and persist to .murmuration/dashboard.token
+  // (0600) so only the operator account can read it. API clients present
+  // it via `?token=<value>` or `X-Murmuration-Token` header.
   const httpPort = parseInt(process.env.MURMURATION_HTTP_PORT ?? "0", 10);
+  let dashboardToken: string | undefined;
+  if (httpPort > 0 && !once) {
+    const { randomBytes, writeFileSync } = await import("node:fs").then(async (fs) => ({
+      randomBytes: (await import("node:crypto")).randomBytes,
+      writeFileSync: fs.writeFileSync,
+    }));
+    dashboardToken = randomBytes(24).toString("base64url");
+    const tokenPath = resolve(exampleRoot, ".murmuration", "dashboard.token");
+    writeFileSync(tokenPath, dashboardToken + "\n", { mode: 0o600 });
+  }
   const daemonHttp =
-    httpPort > 0 && !once
+    httpPort > 0 && !once && dashboardToken !== undefined
       ? new DaemonHttp({
           port: httpPort,
           statusHandler: () => executor.buildStatus(),
@@ -1624,9 +1637,9 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
           groupDetailHandler: (groupId) => executor.groupDetail(groupId),
           commandHandler: (method, params) => executor.execute(method, params),
           eventBus,
+          authToken: dashboardToken,
         })
       : null;
-  // All handlers are now in DaemonCommandExecutor (command-executor.ts).
   if (daemonHttp) {
     daemonHttp.start();
     process.stdout.write(
@@ -1635,6 +1648,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         level: "info",
         event: "daemon.http.started",
         port: httpPort,
+        dashboard_url: `http://127.0.0.1:${String(httpPort)}/dashboard?token=${dashboardToken ?? ""}`,
       })}\n`,
     );
   }

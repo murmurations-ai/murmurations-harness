@@ -241,40 +241,103 @@ export const SENSITIVE_FIELD_NAME_RE =
 export const SCRUB_MIN_LENGTH = 8;
 
 /**
- * Walk a logger record and return a shallow copy with sensitive values
- * replaced by redaction sentinels. The walker is intentionally
- * non-recursive on arrays/objects to keep logger overhead low; nested
- * sensitive data should go under the {@link REDACT} symbol.
+ * Value-level secret patterns. Match known vendor key formats in any
+ * string value regardless of the enclosing field name. This catches
+ * leaks that bypass the name-based scrub — most commonly: keys
+ * embedded in provider error messages, HTTP response bodies echoed
+ * into stack traces, subprocess stderr tails, and agent-authored
+ * strings that inadvertently quote tool output.
+ *
+ * Named groups so the replacement can identify which pattern hit,
+ * which helps operators tell whether a leak is from a human-visible
+ * identifier (harmless false positive) or an actual credential.
+ *
+ * Priority order: longer/more-specific patterns first so overlapping
+ * matches resolve to the most informative label.
+ */
+export const VALUE_SECRET_PATTERNS: readonly { readonly name: string; readonly re: RegExp }[] = [
+  // PEM keys
+  { name: "pem", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g },
+  // Google (Gemini) API keys
+  { name: "gemini", re: /AIza[0-9A-Za-z_-]{30,}/g },
+  // Anthropic API keys
+  { name: "anthropic", re: /sk-ant-[a-zA-Z0-9_-]{30,}/g },
+  // GitHub Personal Access Tokens (classic)
+  { name: "github-pat", re: /ghp_[A-Za-z0-9]{30,}/g },
+  // GitHub OAuth tokens
+  { name: "github-oauth", re: /gho_[A-Za-z0-9]{30,}/g },
+  // GitHub fine-grained PATs
+  { name: "github-fg-pat", re: /github_pat_[A-Za-z0-9_]{30,}/g },
+  // GitHub server-to-server
+  { name: "github-s2s", re: /ghs_[A-Za-z0-9]{30,}/g },
+  // GitHub refresh + user tokens
+  { name: "github-refresh", re: /ghr_[A-Za-z0-9]{30,}/g },
+  { name: "github-user", re: /ghu_[A-Za-z0-9]{30,}/g },
+  // Slack bot/app/user/refresh tokens
+  { name: "slack", re: /xox[baprs]-[A-Za-z0-9-]{20,}/g },
+  // OpenAI-style "sk-" keys (kept last; least specific — 'sk-ant-' already handled above)
+  { name: "openai", re: /sk-[a-zA-Z0-9]{30,}/g },
+];
+
+/**
+ * Apply every {@link VALUE_SECRET_PATTERNS} entry to a string and
+ * replace each match with `[REDACTED:<name>]`. Non-destructive if the
+ * string has no matches.
+ */
+export const scrubValuePatterns = (value: string): string => {
+  let out = value;
+  for (const { name, re } of VALUE_SECRET_PATTERNS) {
+    out = out.replace(re, `[REDACTED:${name}]`);
+  }
+  return out;
+};
+
+/**
+ * Walk a logger record and return a deep copy with sensitive values
+ * replaced by redaction sentinels.
  *
  * Rules:
  *
  *  1. Any field under the {@link REDACT} symbol is removed entirely.
- *  2. Any string-valued field whose **key name** matches
- *     {@link SENSITIVE_FIELD_NAME_RE} and whose value length is at least
- *     {@link SCRUB_MIN_LENGTH} is replaced with
- *     `"[REDACTED:scrubbed-by-name]"`.
- *  3. Any {@link SecretValue} already serializes to its own sentinel
- *     via `toJSON`, so the scrubber need not special-case it.
+ *  2. Any string whose **key name** matches {@link SENSITIVE_FIELD_NAME_RE}
+ *     and whose length is at least {@link SCRUB_MIN_LENGTH} is replaced
+ *     with `"[REDACTED:scrubbed-by-name]"`.
+ *  3. Any remaining string is passed through {@link scrubValuePatterns}
+ *     so vendor-format secrets embedded in error messages, stderr
+ *     tails, or agent output are caught even when the enclosing key
+ *     is benign (`error`, `message`, `stderr`, `output`).
+ *  4. Arrays are walked; each element is scrubbed in place.
+ *  5. {@link SecretValue} already serializes to its own sentinel via
+ *     `toJSON`, so the scrubber need not special-case it.
  */
 export const scrubLogRecord = (data: Record<string, unknown>): Record<string, unknown> => {
-  const scrub = (obj: Record<string, unknown>): Record<string, unknown> => {
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(obj)) {
+  const scrubValue = (value: unknown, keyForNameMatch?: string): unknown => {
+    if (typeof value === "string") {
       if (
-        typeof value === "string" &&
-        SENSITIVE_FIELD_NAME_RE.test(key) &&
+        keyForNameMatch !== undefined &&
+        SENSITIVE_FIELD_NAME_RE.test(keyForNameMatch) &&
         value.length >= SCRUB_MIN_LENGTH
       ) {
-        out[key] = "[REDACTED:scrubbed-by-name]";
-        continue;
+        return "[REDACTED:scrubbed-by-name]";
       }
-      if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-        out[key] = scrub(value as Record<string, unknown>);
-        continue;
-      }
-      out[key] = value;
+      return scrubValuePatterns(value);
+    }
+    if (Array.isArray(value)) {
+      return value.map((v) => scrubValue(v));
+    }
+    if (value !== null && typeof value === "object") {
+      return scrubObject(value as Record<string, unknown>);
+    }
+    return value;
+  };
+
+  const scrubObject = (obj: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      out[key] = scrubValue(value, key);
     }
     return out;
   };
-  return scrub(data);
+
+  return scrubObject(data);
 };

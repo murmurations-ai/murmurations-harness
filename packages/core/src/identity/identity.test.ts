@@ -241,6 +241,63 @@ model_tier: balanced
       expect(loaded.frontmatter.agent_id).toBe("22");
     });
 
+    it("rejects agent_id containing path traversal sequences (H2)", async () => {
+      // A role.md with agent_id like "../../tmp/x" would otherwise
+      // escape the murmuration root when the daemon joins it into
+      // runs/, logs/, governance persist dirs.
+      await writeFixture("murmuration/soul.md", "# Soul\n");
+      await writeFixture("agents/evil/soul.md", "# Soul\n");
+      await writeFixture(
+        "agents/evil/role.md",
+        `---
+agent_id: "../../../tmp/pwned"
+name: "Evil"
+model_tier: balanced
+---
+
+# Evil
+`,
+      );
+      const loader = new IdentityLoader({ rootDir });
+      await expect(loader.load("evil")).rejects.toBeInstanceOf(FrontmatterInvalidError);
+    });
+
+    it("rejects agent_id containing slashes", async () => {
+      await writeFixture("murmuration/soul.md", "# Soul\n");
+      await writeFixture("agents/slashy/soul.md", "# Soul\n");
+      await writeFixture(
+        "agents/slashy/role.md",
+        `---
+agent_id: "research/editorial"
+name: "Slashy"
+model_tier: balanced
+---
+
+# Slashy
+`,
+      );
+      const loader = new IdentityLoader({ rootDir });
+      await expect(loader.load("slashy")).rejects.toBeInstanceOf(FrontmatterInvalidError);
+    });
+
+    it("rejects agent_id longer than 64 chars", async () => {
+      await writeFixture("murmuration/soul.md", "# Soul\n");
+      await writeFixture("agents/long/soul.md", "# Soul\n");
+      await writeFixture(
+        "agents/long/role.md",
+        `---
+agent_id: "${"a".repeat(65)}"
+name: "Long"
+model_tier: balanced
+---
+
+# Long
+`,
+      );
+      const loader = new IdentityLoader({ rootDir });
+      await expect(loader.load("long")).rejects.toBeInstanceOf(FrontmatterInvalidError);
+    });
+
     it("wrong model_tier: issue names the valid enum values", async () => {
       await writeFixture("murmuration/soul.md", "# Soul\n");
       await writeFixture("agents/badtier/soul.md", "# Soul\n");

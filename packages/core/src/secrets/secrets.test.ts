@@ -136,6 +136,64 @@ describe("scrubLogRecord", () => {
     const out = scrubLogRecord({ token: secret });
     expect(JSON.stringify(out.token)).toBe('"[REDACTED:length=14]"');
   });
+
+  it("scrubs value-pattern secrets regardless of key name (H1)", () => {
+    // Each bucket is a real incident class: keys echoed in error messages,
+    // stderr tails, or agent-authored strings. Every one must be caught
+    // even when the enclosing key is benign (error, message, output, stderr).
+    const inputs = [
+      { key: "error", value: "401: AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8", pat: "gemini" },
+      {
+        key: "message",
+        value: "invalid api key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
+        pat: "anthropic",
+      },
+      {
+        key: "stderr",
+        value: "git failed with token ghp_abcdefghijklmnopqrstuvwxyz0123456",
+        pat: "github-pat",
+      },
+      {
+        key: "output",
+        value: "OpenAI: sk-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF",
+        pat: "openai",
+      },
+      {
+        key: "body",
+        value: "github_pat_11ABCDEFG0abcdefghijkl_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJ",
+        pat: "github-fg-pat",
+      },
+    ];
+    for (const { key, value, pat } of inputs) {
+      const out = scrubLogRecord({ [key]: value });
+      expect(out[key]).toContain(`[REDACTED:${pat}]`);
+      expect(out[key]).not.toContain(value);
+    }
+  });
+
+  it("scrubs value-pattern secrets inside nested objects and arrays", () => {
+    const out = scrubLogRecord({
+      stderrChunks: [
+        "first line ok",
+        "found AIzaSyA1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8 in response",
+      ],
+      nested: {
+        detail: { cause: "ghp_abcdefghijklmnopqrstuvwxyz0123456" },
+      },
+    });
+    const chunks = out.stderrChunks as string[];
+    expect(chunks[0]).toBe("first line ok");
+    expect(chunks[1]).toContain("[REDACTED:gemini]");
+    const nested = out.nested as { detail: { cause: string } };
+    expect(nested.detail.cause).toContain("[REDACTED:github-pat]");
+  });
+
+  it("passes through strings that happen to look key-ish but do not match any pattern", () => {
+    const out = scrubLogRecord({
+      message: "wake completed in 1234ms across 5 agents",
+    });
+    expect(out.message).toBe("wake completed in 1234ms across 5 agents");
+  });
 });
 
 describe("SENSITIVE_FIELD_NAME_RE", () => {
