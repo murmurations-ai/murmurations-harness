@@ -85,10 +85,32 @@ export class AgentStateStore implements IAgentStateStore {
   readonly #wakesByAgent = new Map<string, string[]>(); // agentId → wakeId[]
   readonly #persistDir: string | undefined;
   readonly #now: () => Date;
+  readonly #readOnly: boolean;
 
-  public constructor(options: { readonly persistDir?: string; readonly now?: () => Date } = {}) {
+  public constructor(
+    options: {
+      readonly persistDir?: string;
+      readonly now?: () => Date;
+      /**
+       * When `true`, mutation methods (`register`, `recordWakeOutcome`,
+       * `flush`) throw. CLI processes that read agent state while the
+       * daemon is running should pass `readOnly: true` — the daemon is
+       * the single writer (Engineering Standard #3). Default: `false`.
+       */
+      readonly readOnly?: boolean;
+    } = {},
+  ) {
     this.#persistDir = options.persistDir;
     this.#now = options.now ?? ((): Date => new Date());
+    this.#readOnly = options.readOnly ?? false;
+  }
+
+  #guardWrite(method: string): void {
+    if (this.#readOnly) {
+      throw new Error(
+        `AgentStateStore: ${method}() called on read-only instance. Only the daemon writes to state.json; CLI processes must RPC the daemon.`,
+      );
+    }
   }
 
   /** Load persisted state from disk. Call once at daemon start. */
@@ -124,6 +146,7 @@ export class AgentStateStore implements IAgentStateStore {
 
   /** Register an agent. Idempotent — re-registering preserves history. */
   public register(agentId: string, maxWallClockMs: number): void {
+    this.#guardWrite("register");
     const existing = this.#agents.get(agentId);
     if (existing) {
       // Update maxWallClockMs but preserve history
@@ -152,6 +175,7 @@ export class AgentStateStore implements IAgentStateStore {
 
   /** Transition an agent to a new state. */
   public transition(agentId: string, to: AgentLifecycleState, wakeId?: string): void {
+    this.#guardWrite("transition");
     const agent = this.#agents.get(agentId);
     if (!agent)
       throw new Error(
@@ -217,6 +241,7 @@ export class AgentStateStore implements IAgentStateStore {
       artifactCount?: number | undefined;
     } = {},
   ): void {
+    this.#guardWrite("recordWakeOutcome");
     const wake = this.#wakes.get(wakeId);
     if (!wake) return;
 

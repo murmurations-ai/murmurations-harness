@@ -270,7 +270,12 @@ describe("createDefaultRunner", () => {
 
     expect(result.governanceEvents).toBeDefined();
     expect(result.governanceEvents!.length).toBeGreaterThanOrEqual(1);
-    expect(result.governanceEvents![0]?.kind).toBe("tension");
+    // Core emits generic "agent-governance-event"; the governance plugin
+    // decides the concrete kind (tension / proposal / report / …) in its
+    // onEventsEmitted handler. This keeps core governance-model-agnostic.
+    expect(result.governanceEvents![0]?.kind).toBe("agent-governance-event");
+    const payload = result.governanceEvents![0]?.payload as { topic?: string } | undefined;
+    expect(payload?.topic).toContain("TENSION:");
   });
 });
 

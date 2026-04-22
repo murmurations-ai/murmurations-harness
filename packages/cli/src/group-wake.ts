@@ -24,6 +24,7 @@ import {
   type GroupWakeContext,
   type GroupWakeKind,
   type GovernanceItem,
+  type GovernanceTerminology,
   type MeetingAction,
   type ActionReceipt,
   type GovernanceTally,
@@ -469,37 +470,52 @@ export const runGroupWakeCommand = async (
     );
   }
 
+  // Resolve plugin terminology (for meeting prompts) and state graphs
+  // (for governance queue filtering). Both are read once up front from
+  // the --governance-plugin argument, if supplied.
+  let pluginTerminology: GovernanceTerminology | undefined;
+  const govPluginIdx = args.indexOf("--governance-plugin");
+  const govPluginPath = govPluginIdx >= 0 ? args[govPluginIdx + 1] : undefined;
+  let govPluginGraphs:
+    | readonly {
+        kind: string;
+        initialState: string;
+        terminalStates: readonly string[];
+        transitions: readonly { from: string; to: string; trigger: string }[];
+      }[]
+    | undefined;
+  if (govPluginPath) {
+    try {
+      const { pathToFileURL } = await import("node:url");
+      const pluginMod = (await import(pathToFileURL(resolve(govPluginPath)).href)) as {
+        default?: {
+          terminology?: GovernanceTerminology;
+          stateGraphs?: () => {
+            kind: string;
+            initialState: string;
+            terminalStates: readonly string[];
+            transitions: readonly { from: string; to: string; trigger: string }[];
+          }[];
+        };
+      };
+      pluginTerminology = pluginMod.default?.terminology;
+      govPluginGraphs = pluginMod.default?.stateGraphs?.();
+    } catch {
+      /* best effort — fall back to generic terminology + no graph validation */
+    }
+  }
+
   // Load governance queue if governance meeting (read-only — transitions
   // are applied by the daemon after this function returns)
   const governanceQueue: GovernanceItem[] = [];
   if (isGovernance) {
     const govStore = new GovernanceStateStore({
       persistDir: join(root, ".murmuration", "governance"),
+      readOnly: true,
     });
 
-    // Register governance plugin graphs so transitions validate correctly
-    const govPluginIdx = args.indexOf("--governance-plugin");
-    const govPluginPath = govPluginIdx >= 0 ? args[govPluginIdx + 1] : undefined;
-    if (govPluginPath) {
-      try {
-        const { pathToFileURL } = await import("node:url");
-        const pluginMod = (await import(pathToFileURL(resolve(govPluginPath)).href)) as {
-          default?: {
-            stateGraphs?: () => {
-              kind: string;
-              initialState: string;
-              terminalStates: readonly string[];
-              transitions: readonly { from: string; to: string; trigger: string }[];
-            }[];
-          };
-        };
-        const graphs = pluginMod.default?.stateGraphs?.() ?? [];
-        for (const g of graphs) {
-          govStore.registerGraph(g);
-        }
-      } catch {
-        /* best effort — transitions will be skipped if graphs aren't available */
-      }
+    if (govPluginGraphs) {
+      for (const g of govPluginGraphs) govStore.registerGraph(g);
     }
 
     await govStore.load();
@@ -557,6 +573,7 @@ export const runGroupWakeCommand = async (
     const { AgentStateStore } = await import("@murmurations-ai/core");
     const stateStore = new AgentStateStore({
       persistDir: join(root, ".murmuration", "agents"),
+      readOnly: true,
     });
     await stateStore.load();
     const agentMetrics = config.members.map((memberId) => {
@@ -589,6 +606,7 @@ export const runGroupWakeCommand = async (
     ...(directiveBody ? { directiveBody } : {}),
     ...(backlogForAgenda ? { backlogContext: backlogForAgenda } : {}),
     ...(retrospectiveMetrics ? { retrospectiveMetrics } : {}),
+    ...(pluginTerminology ? { terminology: pluginTerminology } : {}),
   };
 
   // Run the group wake
