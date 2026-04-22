@@ -110,6 +110,3 @@ export interface SignalAggregator {
   aggregate(context: SignalAggregationContext): Promise<SignalAggregationResult>;
   capabilities(): SignalAggregatorCapabilities;
 }
-
-// Legacy re-export for backwards compatibility with the Phase 1A stub.
-export const SIGNALS_STUB_VERSION = "0.0.0-phase1b-d" as const;

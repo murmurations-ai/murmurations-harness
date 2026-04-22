@@ -3,7 +3,7 @@
   "version": "0.4.5",
   "description": "Default SignalAggregator for the Murmuration Harness — github + filesystem sources with interim trust taxonomy.",
   "license": "MIT",
-  "author": "Emergent Praxis murmuration",
+  "author": "Murmuration Harness Contributors",
   "homepage": "https://github.com/murmurations-ai/murmurations-harness/tree/main/packages/signals",
   "repository": {
     "type": "git",
@@ -38,5 +38,8 @@
   "dependencies": {
     "@murmurations-ai/core": "workspace:*",
     "@murmurations-ai/github": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -1,7 +1,11 @@
-/* eslint-disable @typescript-eslint/no-deprecated -- testing legacy interface backwards compat */
 import { describe, it, expect, vi } from "vitest";
-import { GovernanceGitHubSync, type GovernanceSyncGitHub } from "./github-sync.js";
+import { GovernanceGitHubSync } from "./github-sync.js";
 import type { GovernanceItem, GovernanceStateTransition } from "./index.js";
+import {
+  CollaborationError,
+  type CollaborationProvider,
+  type ItemRef,
+} from "../collaboration/types.js";
 import { makeAgentId } from "../execution/index.js";
 
 const makeItem = (overrides: Partial<GovernanceItem> = {}): GovernanceItem => ({
@@ -26,50 +30,49 @@ const makeTransition = (
   ...overrides,
 });
 
-const makeMockGitHub = (): GovernanceSyncGitHub & {
+interface MockProvider extends CollaborationProvider {
   calls: { method: string; args: unknown[] }[];
-} => {
+}
+
+const makeMockProvider = (): MockProvider => {
   const calls: { method: string; args: unknown[] }[] = [];
   return {
     calls,
-    createIssue: vi.fn((input) => {
-      calls.push({ method: "createIssue", args: [input] });
-      return Promise.resolve({
-        ok: true as const,
-        issueNumber: 42,
-        htmlUrl: "https://github.com/test/repo/issues/42",
-      });
+    createItem: vi.fn((input: unknown) => {
+      calls.push({ method: "createItem", args: [input] });
+      const ref: ItemRef = { id: "42", url: "https://github.com/test/repo/issues/42" };
+      return Promise.resolve({ ok: true as const, value: ref });
     }),
-    createIssueComment: vi.fn((n: number, b: string) => {
-      calls.push({ method: "createIssueComment", args: [n, b] });
-      return Promise.resolve({ ok: true as const });
+    postComment: vi.fn((ref: ItemRef, body: string) => {
+      calls.push({ method: "postComment", args: [ref, body] });
+      return Promise.resolve({ ok: true as const, value: undefined });
     }),
-    addLabels: vi.fn((n: number, l: readonly string[]) => {
-      calls.push({ method: "addLabels", args: [n, [...l]] });
-      return Promise.resolve({ ok: true as const });
+    addLabels: vi.fn((ref: ItemRef, labels: readonly string[]) => {
+      calls.push({ method: "addLabels", args: [ref, [...labels]] });
+      return Promise.resolve({ ok: true as const, value: undefined });
     }),
-    removeLabels: vi.fn((n: number, l: readonly string[]) => {
-      calls.push({ method: "removeLabels", args: [n, [...l]] });
-      return Promise.resolve({ ok: true as const });
+    removeLabel: vi.fn((ref: ItemRef, label: string) => {
+      calls.push({ method: "removeLabel", args: [ref, label] });
+      return Promise.resolve({ ok: true as const, value: undefined });
     }),
-    closeIssue: vi.fn((n: number) => {
-      calls.push({ method: "closeIssue", args: [n] });
-      return Promise.resolve({ ok: true as const });
+    updateItemState: vi.fn((ref: ItemRef, state: "open" | "closed") => {
+      calls.push({ method: "updateItemState", args: [ref, state] });
+      return Promise.resolve({ ok: true as const, value: undefined });
     }),
-  };
+  } as unknown as MockProvider;
 };
 
-describe("GovernanceGitHubSync", () => {
-  it("onCreate creates issue with correct labels and returns URL", async () => {
-    const gh = makeMockGitHub();
-    const sync = new GovernanceGitHubSync({ github: gh, defaultGroup: "intelligence" });
+describe("GovernanceGitHubSync (CollaborationProvider)", () => {
+  it("onCreate creates item with correct labels and returns URL", async () => {
+    const provider = makeMockProvider();
+    const sync = new GovernanceGitHubSync({ provider, defaultGroup: "intelligence" });
     const item = makeItem();
 
     const url = await sync.onCreate(item);
 
     expect(url).toBe("https://github.com/test/repo/issues/42");
-    expect(gh.calls[0]?.method).toBe("createIssue");
-    const input = gh.calls[0]?.args[0] as { title: string; labels: string[] };
+    expect(provider.calls[0]?.method).toBe("createItem");
+    const input = provider.calls[0]?.args[0] as { title: string; labels: string[] };
     expect(input.title).toContain("[TENSION]");
     expect(input.title).toContain("Agent needs web search tools");
     expect(input.labels).toContain("governance:tension");
@@ -78,20 +81,25 @@ describe("GovernanceGitHubSync", () => {
     expect(input.labels).toContain("group:intelligence");
   });
 
-  it("onCreate stores issue number in issueMap", async () => {
-    const gh = makeMockGitHub();
-    const sync = new GovernanceGitHubSync({ github: gh });
-    const item = makeItem();
+  it("onCreate stores item ref in itemMap", async () => {
+    const provider = makeMockProvider();
+    const sync = new GovernanceGitHubSync({ provider });
 
-    await sync.onCreate(item);
+    await sync.onCreate(makeItem());
 
+    expect(sync.itemMap.get("test-item-001")?.id).toBe("42");
     expect(sync.issueMap.get("test-item-001")).toBe(42);
   });
 
   it("onCreate returns undefined on failure", async () => {
-    const gh = makeMockGitHub();
-    gh.createIssue = vi.fn(() => Promise.resolve({ ok: false as const, error: "rate limited" }));
-    const sync = new GovernanceGitHubSync({ github: gh });
+    const provider = makeMockProvider();
+    provider.createItem = vi.fn(() =>
+      Promise.resolve({
+        ok: false as const,
+        error: new CollaborationError("test", "RATE_LIMITED", "rate limited"),
+      }),
+    );
+    const sync = new GovernanceGitHubSync({ provider });
 
     const url = await sync.onCreate(makeItem());
 
@@ -99,51 +107,47 @@ describe("GovernanceGitHubSync", () => {
   });
 
   it("onTransition posts comment and swaps labels", async () => {
-    const gh = makeMockGitHub();
-    const sync = new GovernanceGitHubSync({ github: gh });
+    const provider = makeMockProvider();
+    const sync = new GovernanceGitHubSync({ provider });
 
-    // First create to populate issueMap
     await sync.onCreate(makeItem());
-    gh.calls.length = 0;
+    provider.calls.length = 0;
 
-    // Now transition
-    const transition = makeTransition();
-    await sync.onTransition(makeItem({ currentState: "resolved" }), transition, false);
+    await sync.onTransition(makeItem({ currentState: "resolved" }), makeTransition(), false);
 
-    // Should: comment + removeLabels(state:open) + addLabels(state:resolved)
-    const methods = gh.calls.map((c) => c.method);
-    expect(methods).toContain("createIssueComment");
-    expect(methods).toContain("removeLabels");
+    const methods = provider.calls.map((c) => c.method);
+    expect(methods).toContain("postComment");
+    expect(methods).toContain("removeLabel");
     expect(methods).toContain("addLabels");
 
-    const removeCall = gh.calls.find((c) => c.method === "removeLabels");
-    expect(removeCall?.args[1]).toEqual(["state:open"]);
+    const removeCall = provider.calls.find((c) => c.method === "removeLabel");
+    expect(removeCall?.args[1]).toBe("state:open");
 
-    const addCall = gh.calls.find((c) => c.method === "addLabels");
+    const addCall = provider.calls.find((c) => c.method === "addLabels");
     expect(addCall?.args[1]).toEqual(["state:resolved"]);
   });
 
-  it("onTransition closes issue when isTerminal is true", async () => {
-    const gh = makeMockGitHub();
-    const sync = new GovernanceGitHubSync({ github: gh });
+  it("onTransition closes item when isTerminal is true", async () => {
+    const provider = makeMockProvider();
+    const sync = new GovernanceGitHubSync({ provider });
 
     await sync.onCreate(makeItem());
-    gh.calls.length = 0;
+    provider.calls.length = 0;
 
     await sync.onTransition(makeItem({ currentState: "resolved" }), makeTransition(), true);
 
-    const methods = gh.calls.map((c) => c.method);
-    expect(methods).toContain("closeIssue");
-    const closeCall = gh.calls.find((c) => c.method === "closeIssue");
-    expect(closeCall?.args[0]).toBe(42);
+    const methods = provider.calls.map((c) => c.method);
+    expect(methods).toContain("updateItemState");
+    const closeCall = provider.calls.find((c) => c.method === "updateItemState");
+    expect(closeCall?.args[1]).toBe("closed");
   });
 
-  it("onTransition does NOT close issue when isTerminal is false", async () => {
-    const gh = makeMockGitHub();
-    const sync = new GovernanceGitHubSync({ github: gh });
+  it("onTransition does NOT close when isTerminal is false", async () => {
+    const provider = makeMockProvider();
+    const sync = new GovernanceGitHubSync({ provider });
 
     await sync.onCreate(makeItem());
-    gh.calls.length = 0;
+    provider.calls.length = 0;
 
     await sync.onTransition(
       makeItem({ currentState: "proposal-needed" }),
@@ -151,17 +155,16 @@ describe("GovernanceGitHubSync", () => {
       false,
     );
 
-    const methods = gh.calls.map((c) => c.method);
-    expect(methods).not.toContain("closeIssue");
+    const methods = provider.calls.map((c) => c.method);
+    expect(methods).not.toContain("updateItemState");
   });
 
-  it("onTransition skips unknown items (not in issueMap)", async () => {
-    const gh = makeMockGitHub();
-    const sync = new GovernanceGitHubSync({ github: gh });
+  it("onTransition skips unknown items (not in itemMap)", async () => {
+    const provider = makeMockProvider();
+    const sync = new GovernanceGitHubSync({ provider });
 
-    // Don't call onCreate — issueMap is empty
     await sync.onTransition(makeItem(), makeTransition(), true);
 
-    expect(gh.calls).toHaveLength(0);
+    expect(provider.calls).toHaveLength(0);
   });
 });

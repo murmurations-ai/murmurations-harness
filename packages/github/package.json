@@ -3,7 +3,7 @@
   "version": "0.4.5",
   "description": "Typed GitHub REST client for the Murmuration Harness — rate-limited, cache-aware, secret-safe.",
   "license": "MIT",
-  "author": "Emergent Praxis murmuration",
+  "author": "Murmuration Harness Contributors",
   "homepage": "https://github.com/murmurations-ai/murmurations-harness/tree/main/packages/github",
   "repository": {
     "type": "git",
@@ -41,5 +41,8 @@
   },
   "devDependencies": {
     "undici": "^6.19.8"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

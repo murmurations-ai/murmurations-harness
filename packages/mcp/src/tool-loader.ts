@@ -13,10 +13,21 @@
  * - Cleans up all connections on close()
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { jsonSchema } from "ai";
 import type { ToolDefinition } from "@murmurations-ai/llm";
+
+const CLIENT_VERSION = ((): string => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const pkgPath = join(here, "..", "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+  return pkg.version;
+})();
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -141,7 +152,7 @@ export class McpToolLoader {
 
     const client = new Client({
       name: "murmurations-harness",
-      version: "0.4.3",
+      version: CLIENT_VERSION,
     });
 
     await client.connect(transport);

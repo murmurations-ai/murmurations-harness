@@ -3,7 +3,7 @@
   "version": "0.4.5",
   "description": "Command-line interface for the Murmuration Harness daemon — start, stop, status.",
   "license": "MIT",
-  "author": "Emergent Praxis murmuration",
+  "author": "Murmuration Harness Contributors",
   "homepage": "https://github.com/murmurations-ai/murmurations-harness/tree/main/packages/cli",
   "repository": {
     "type": "git",
@@ -43,6 +43,7 @@
     "@murmurations-ai/core": "workspace:*",
     "@murmurations-ai/github": "workspace:*",
     "@murmurations-ai/llm": "workspace:*",
+    "@murmurations-ai/mcp": "workspace:*",
     "@murmurations-ai/secrets-dotenv": "workspace:*",
     "@murmurations-ai/signals": "workspace:*",
     "yaml": "^2.8.3",
@@ -50,5 +51,8 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
