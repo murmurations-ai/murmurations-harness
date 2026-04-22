@@ -172,20 +172,83 @@
 </div>
 
 <script>
+// ---------------------------------------------------------------------------
+// Auth + security helpers (Phase B: v0.5.0 security review C1)
+// ---------------------------------------------------------------------------
+
+// Read the per-daemon auth token from the URL on first load and persist it
+// for subsequent fetches. The operator opens `/dashboard?token=<value>` once;
+// the token survives navigation within the SPA. Without a token every API
+// call gets a 401 from the server.
+(function () {
+  var urlParams = new URLSearchParams(window.location.search);
+  var t = urlParams.get('token');
+  if (t) {
+    try { sessionStorage.setItem('murmurationToken', t); } catch (_) { /* storage disabled */ }
+  }
+})();
+
+function getToken() {
+  try { return sessionStorage.getItem('murmurationToken') || ''; }
+  catch (_) { return ''; }
+}
+
+// Escape an untrusted string for safe interpolation inside HTML text content
+// or double-quoted attribute values. Use for anything coming from GitHub
+// (topic, title, labels, body), LLM output (digest content), or user input.
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Only permit http:, https:, and mailto: schemes in user-supplied URLs.
+// Rejects javascript:, data:, file:, etc. If the URL is invalid or uses a
+// non-allowlisted scheme, returns '#'.
+function safeUrl(u) {
+  if (typeof u !== 'string') return '#';
+  try {
+    var parsed = new URL(u, window.location.origin);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'mailto:') {
+      return parsed.href;
+    }
+  } catch (_) { /* fallthrough */ }
+  return '#';
+}
+
+// All data-fetching routes through this so the auth token is always included.
+function apiFetch(path, init) {
+  var opts = init || {};
+  var headers = Object.assign({}, opts.headers || {});
+  var tok = getToken();
+  if (tok) headers['X-Murmuration-Token'] = tok;
+  return fetch(path, Object.assign({}, opts, { headers: headers }));
+}
+
+// SSE needs the token in the query string since EventSource can't set headers.
+function apiEventSource(path) {
+  var tok = getToken();
+  var sep = path.indexOf('?') >= 0 ? '&' : '?';
+  return new EventSource(tok ? path + sep + 'token=' + encodeURIComponent(tok) : path);
+}
+
 var lastStatusData = null;
 async function refresh() {
   try {
-    const r = await fetch('/api/status');
+    const r = await apiFetch('/api/status');
     const d = await r.json();
     lastStatusData = d;
     const m = d.murmuration || {};
     document.getElementById('title').textContent = (d.name || 'Murmuration') + ' Dashboard';
     document.title = (d.name || 'Murmuration') + ' Dashboard';
-    const ghLink = d.githubUrl ? ' | <a href="' + d.githubUrl + '/issues" style="color:#58a6ff" target="_blank">GitHub Issues</a>' : '';
+    const ghLink = d.githubUrl ? ' | <a href="' + esc(safeUrl(d.githubUrl + '/issues')) + '" style="color:#58a6ff" target="_blank" rel="noopener">GitHub Issues</a>' : '';
     const g = d.governance || {};
     const govName = g.model || 'none';
     const govMeta = govName !== 'none' ? ' | Governance: ' + govName : '';
-    document.getElementById('meta').innerHTML = 'v' + d.version + ' | PID ' + d.pid + govMeta + ' | ' + new Date().toLocaleTimeString() + ghLink;
+    document.getElementById('meta').innerHTML = 'v' + esc(d.version) + ' | PID ' + esc(d.pid) + esc(govMeta) + ' | ' + new Date().toLocaleTimeString() + ghLink;
 
     // 1. Overview
     const idleRate = m.totalWakes > 0 ? Math.round((m.idleWakes / m.totalWakes) * 100) : 0;
@@ -200,18 +263,18 @@ async function refresh() {
     // 2. Groups
     document.getElementById('groups').innerHTML = (d.groups || []).map(g => {
       const gIdle = g.totalWakes > 0 ? Math.round((g.idleWakes / g.totalWakes) * 100) : 0;
-      return '<div class="group-card"><h3><a href="#" onclick="showGroup(\'' + g.groupId + '\');return false" style="color:#58a6ff;text-decoration:none">' + g.groupId + '</a></h3>' +
+      return '<div class="group-card"><h3><a href="#" data-group-id="' + esc(g.groupId) + '" onclick="showGroup(this.dataset.groupId);return false" style="color:#58a6ff;text-decoration:none">' + esc(g.groupId) + '</a></h3>' +
         '<div class="group-stats">' +
-        g.memberCount + ' members | ' +
-        '<span>' + g.totalWakes + '</span> wakes | ' +
-        '<span>' + g.totalArtifacts + '</span> artifacts | ' +
-        gIdle + '% idle' +
+        esc(g.memberCount) + ' members | ' +
+        '<span>' + esc(g.totalWakes) + '</span> wakes | ' +
+        '<span>' + esc(g.totalArtifacts) + '</span> artifacts | ' +
+        esc(gIdle) + '% idle' +
         '</div>' +
         '<div class="group-members">' +
         g.members.map(id => {
           const a = d.agents.find(x => x.agentId === id);
           const cls = a && a.totalArtifacts > 0 ? 'active' : a && a.totalWakes > 0 ? 'idle' : '';
-          return '<span class="member-tag ' + cls + '">' + id + '</span>';
+          return '<span class="member-tag ' + esc(cls) + '">' + esc(id) + '</span>';
         }).join('') +
         '</div></div>';
     }).join('');
@@ -229,46 +292,46 @@ async function refresh() {
     if (pending.length > 0) {
       govHtml += '<div class="group-card"><h3>Pending ' + itemLabel + 's (' + pending.length + ')</h3>';
       govHtml += pending.map(i => {
-        var label = '[' + i.kind + '] ' + (i.topic || '(no topic)').slice(0, 60);
+        var label = '[' + esc(i.kind) + '] ' + esc((i.topic || '(no topic)').slice(0, 60));
         var topicSearch = (i.topic || '').slice(0, 40).replace(/[^\w\s]/g, '').trim().split(/\s+/).slice(0, 4).join('+');
-        var itemUrl = i.githubIssueUrl || (ghIssuesUrl ? ghIssuesUrl + '?q=is:issue+%5B' + i.kind.toUpperCase() + '%5D+' + topicSearch : '');
-        var link = itemUrl ? '<a href="' + itemUrl + '" style="color:#8b949e" target="_blank">' + label + '</a>' : label;
+        var itemUrl = i.githubIssueUrl || (ghIssuesUrl ? ghIssuesUrl + '?q=is:issue+%5B' + encodeURIComponent(String(i.kind).toUpperCase()) + '%5D+' + encodeURIComponent(topicSearch) : '');
+        var link = itemUrl ? '<a href="' + esc(safeUrl(itemUrl)) + '" style="color:#8b949e" target="_blank" rel="noopener">' + label + '</a>' : label;
 
         // Only show meeting state for items that were specifically convened
         var cState = convenedItems[i.id];
         var stateText, stateColor, btnHtml;
         if (cState === 'done') {
           var mUrl = meetingMinutesUrl[Object.keys(meetingMinutesUrl)[0] || ''] || (ghIssuesUrl ? ghIssuesUrl + '?q=is:issue+%5BGOVERNANCE+MEETING%5D+in:title+sort:created-desc' : '');
-          stateText = mUrl ? '<a href="' + mUrl + '" target="_blank" style="color:#3fb950">meeting complete — view minutes</a>' : '<span style="color:#3fb950">meeting complete</span>';
+          stateText = mUrl ? '<a href="' + esc(safeUrl(mUrl)) + '" target="_blank" rel="noopener" style="color:#3fb950">meeting complete — view minutes</a>' : '<span style="color:#3fb950">meeting complete</span>';
           stateColor = '#3fb950';
           btnHtml = '';
         } else if (cState) {
-          stateText = convenedLabel(cState);
+          stateText = esc(convenedLabel(cState));
           stateColor = '#d29922';
           btnHtml = '';
         } else {
-          stateText = i.state;
+          stateText = esc(i.state);
           stateColor = '';
-          btnHtml = '<button data-convene="' + i.id + '" data-kind="' + i.kind + '" data-topic="' + (i.topic||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;') + '" data-createdby="' + (i.createdBy || '') + '" onclick="conveneGovernance(this)" style="font-size:0.65rem;padding:2px 6px;background:#238636;color:#c9d1d9;border:1px solid #238636;border-radius:4px;cursor:pointer">Convene</button>';
+          btnHtml = '<button data-convene="' + esc(i.id) + '" data-kind="' + esc(i.kind) + '" data-topic="' + esc(i.topic || '') + '" data-createdby="' + esc(i.createdBy || '') + '" onclick="conveneGovernance(this)" style="font-size:0.65rem;padding:2px 6px;background:#238636;color:#c9d1d9;border:1px solid #238636;border-radius:4px;cursor:pointer">Convene</button>';
         }
-        return '<div class="stat" style="align-items:center"><span class="label">' + link + '</span><span style="display:flex;gap:6px;align-items:center"><span class="value" id="gov-state-' + i.id + '"' + (stateColor ? ' style="color:' + stateColor + '"' : '') + '>' + stateText + '</span>' + btnHtml + '</span></div>';
+        return '<div class="stat" style="align-items:center"><span class="label">' + link + '</span><span style="display:flex;gap:6px;align-items:center"><span class="value" id="gov-state-' + esc(i.id) + '"' + (stateColor ? ' style="color:' + stateColor + '"' : '') + '>' + stateText + '</span>' + btnHtml + '</span></div>';
       }).join('');
       govHtml += '</div>';
     }
     if (recent.length > 0) {
       govHtml += '<div class="group-card"><h3>Recent Decisions</h3>';
       govHtml += recent.map(i => {
-        var label = '[' + i.kind + '] ' + (i.topic || '(no topic)').slice(0, 60);
+        var label = '[' + esc(i.kind) + '] ' + esc((i.topic || '(no topic)').slice(0, 60));
         var topicSearch = (i.topic || '').slice(0, 40).replace(/[^\w\s]/g, '').trim().split(/\s+/).slice(0, 4).join('+');
-        var issueUrl = i.githubIssueUrl || (ghIssuesUrl ? ghIssuesUrl + '?q=is:issue+%5B' + i.kind.toUpperCase() + '%5D+' + topicSearch : '');
-        var labelLink = issueUrl ? '<a href="' + issueUrl + '" style="color:#8b949e" target="_blank">' + label + '</a>' : label;
-        var stateLink = issueUrl ? '<a href="' + issueUrl + '" style="color:#3fb950" target="_blank">' + i.state + '</a>' : i.state;
+        var issueUrl = i.githubIssueUrl || (ghIssuesUrl ? ghIssuesUrl + '?q=is:issue+%5B' + encodeURIComponent(String(i.kind).toUpperCase()) + '%5D+' + encodeURIComponent(topicSearch) : '');
+        var labelLink = issueUrl ? '<a href="' + esc(safeUrl(issueUrl)) + '" style="color:#8b949e" target="_blank" rel="noopener">' + label + '</a>' : label;
+        var stateLink = issueUrl ? '<a href="' + esc(safeUrl(issueUrl)) + '" style="color:#3fb950" target="_blank" rel="noopener">' + esc(i.state) + '</a>' : esc(i.state);
         return '<div class="stat"><span class="label">' + labelLink + '</span><span class="value state-idle">' + stateLink + '</span></div>';
       }).join('');
       govHtml += '</div>';
     }
     if (govHtml === '') {
-      govHtml = '<div class="group-card"><h3>No governance items</h3><div class="stat"><span class="label">File a ' + eventLabel + ' to start governance</span><span class="value">—</span></div></div>';
+      govHtml = '<div class="group-card"><h3>No governance items</h3><div class="stat"><span class="label">File a ' + esc(eventLabel) + ' to start governance</span><span class="value">—</span></div></div>';
     }
     document.getElementById('governance').innerHTML = govHtml;
 
@@ -281,9 +344,10 @@ async function refresh() {
       meetingsHtml += meetingsData.map(function(m) {
         var kindColors = { governance: '#d29922', retrospective: '#f85149', operational: '#3fb950' };
         var kc = kindColors[m.kind] || '#8b949e';
-        var label = m.title ? m.title.replace(/</g, '&lt;').replace(/^\[.*?\]\s*/, '').slice(0, 70) : m.groupId;
+        var rawLabel = m.title ? String(m.title).replace(/^\[.*?\]\s*/, '').slice(0, 70) : m.groupId;
+        var label = esc(rawLabel);
         var titleHtml = m.minutesUrl
-          ? '<a href="' + m.minutesUrl + '" target="_blank" style="color:#c9d1d9;text-decoration:none">' + label + '</a>'
+          ? '<a href="' + esc(safeUrl(m.minutesUrl)) + '" target="_blank" rel="noopener" style="color:#c9d1d9;text-decoration:none">' + label + '</a>'
           : '<span style="color:#c9d1d9">' + label + '</span>';
         var statusHtml = m.status === 'running'
           ? '<span style="color:#d29922">in progress</span>'
@@ -291,16 +355,16 @@ async function refresh() {
         return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d;font-size:0.8rem">' +
           '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + titleHtml + '</span>' +
           '<span style="display:flex;gap:8px;align-items:center;flex-shrink:0;margin-left:12px">' +
-          '<span style="color:' + kc + ';font-size:0.7rem">' + m.kind + '</span>' +
-          '<span style="color:#8b949e;font-size:0.7rem">' + m.date + '</span>' +
+          '<span style="color:' + kc + ';font-size:0.7rem">' + esc(m.kind) + '</span>' +
+          '<span style="color:#8b949e;font-size:0.7rem">' + esc(m.date) + '</span>' +
           statusHtml + '</span></div>';
       }).join('');
       if (allMeetingsUrl) {
-        meetingsHtml += '<div style="text-align:right;padding-top:6px"><a href="' + allMeetingsUrl + '" target="_blank" style="color:#58a6ff;font-size:0.7rem">all meetings in GitHub &rarr;</a></div>';
+        meetingsHtml += '<div style="text-align:right;padding-top:6px"><a href="' + esc(safeUrl(allMeetingsUrl)) + '" target="_blank" rel="noopener" style="color:#58a6ff;font-size:0.7rem">all meetings in GitHub &rarr;</a></div>';
       }
       meetingsHtml += '</div>';
     } else if (allMeetingsUrl) {
-      meetingsHtml = '<div class="group-card" style="padding:10px 14px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem"><span style="color:#8b949e">No meetings this session</span><a href="' + allMeetingsUrl + '" target="_blank" style="color:#58a6ff;font-size:0.7rem">view in GitHub &rarr;</a></div></div>';
+      meetingsHtml = '<div class="group-card" style="padding:10px 14px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:0.8rem"><span style="color:#8b949e">No meetings this session</span><a href="' + esc(safeUrl(allMeetingsUrl)) + '" target="_blank" rel="noopener" style="color:#58a6ff;font-size:0.7rem">view in GitHub &rarr;</a></div></div>';
     }
     document.getElementById('meetings').innerHTML = meetingsHtml;
 
@@ -342,13 +406,14 @@ async function refresh() {
       var ir = a.totalWakes > 0 ? Math.round((a.idleWakes / a.totalWakes) * 100) : 0;
       var ar = a.totalWakes > 0 ? (a.totalArtifacts / a.totalWakes).toFixed(1) : '0';
       var sc2 = a.state === 'idle' ? 'state-idle' : a.state === 'running' ? 'state-running' : 'state-failed';
-      return '<div class="card"><h3><a href="#" onclick="showAgent(\'' + a.agentId + '\');return false" style="color:#58a6ff;text-decoration:none">' + a.agentId + '</a></h3>' +
-        st('State', '<span class="' + sc2 + '">' + a.state + '</span>') +
+      var agentIdE = esc(a.agentId);
+      return '<div class="card"><h3><a href="#" data-agent-id="' + agentIdE + '" onclick="showAgent(this.dataset.agentId);return false" style="color:#58a6ff;text-decoration:none">' + agentIdE + '</a></h3>' +
+        st('State', '<span class="' + sc2 + '">' + esc(a.state) + '</span>') +
         st('Wakes', a.totalWakes) + st('Artifacts', a.totalArtifacts) +
         st('Art/Wake', ar) + st('Idle', ir + '%') + st('Failures', a.consecutiveFailures) +
         '<div class="bar"><div class="bar-fill' + (ir > 50 ? ' warn' : '') +
         '" style="width:' + Math.max(5, (a.totalArtifacts / Math.max(a.totalWakes, 1)) * 100) + '%"></div></div>' +
-        '<div style="margin-top:8px"><button data-wake="' + a.agentId + '" onclick="wakeNow(\'' + a.agentId + '\')" style="font-size:0.75rem;padding:3px 8px;background:#21262d;color:#58a6ff;border:1px solid #30363d;border-radius:4px;cursor:pointer">Wake Now</button></div></div>';
+        '<div style="margin-top:8px"><button data-wake="' + agentIdE + '" onclick="wakeNow(this.dataset.wake)" style="font-size:0.75rem;padding:3px 8px;background:#21262d;color:#58a6ff;border:1px solid #30363d;border-radius:4px;cursor:pointer">Wake Now</button></div></div>';
     }).join('');
   } catch (e) {
     document.getElementById('meta').textContent = 'Disconnected: ' + e.message;
@@ -358,7 +423,7 @@ async function refresh() {
 function sc(n, l) { return '<div class="stat-card"><div class="num">' + n + '</div><div class="lbl">' + l + '</div></div>'; }
 function st(l, v) { return '<div class="stat"><span class="label">' + l + '</span><span class="value">' + v + '</span></div>'; }
 
-const sse = new EventSource('/api/events');
+const sse = apiEventSource('/api/events');
 sse.onmessage = function(e) {
   var div = document.createElement('div');
   div.textContent = new Date().toLocaleTimeString() + ' ' + e.data;
@@ -422,7 +487,7 @@ function renderLog() {
   if (!viewer) return;
   viewer.innerHTML = filtered.slice(0, 50).map(function(e) {
     var c = LOG_COLORS[e.level] || '#8b949e';
-    return '<div style="padding:1px 0;border-bottom:1px solid #21262d"><span style="color:#8b949e">' + e.ts + '</span> <span style="color:' + c + ';font-weight:600">' + e.level + '</span> ' + e.text + '</div>';
+    return '<div style="padding:1px 0;border-bottom:1px solid #21262d"><span style="color:#8b949e">' + esc(e.ts) + '</span> <span style="color:' + c + ';font-weight:600">' + esc(e.level) + '</span> ' + esc(e.text) + '</div>';
   }).join('');
 }
 
@@ -455,7 +520,7 @@ function closeModal(id) { document.getElementById(id).classList.remove('show'); 
 
 async function sendCmd(method, params) {
   try {
-    const r = await fetch('/api/command', {
+    const r = await apiFetch('/api/command', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ method, params })
     });
@@ -489,14 +554,15 @@ function sendGroupWake() {
 
 async function showAgent(agentId) {
   try {
-    const r = await fetch('/api/agent/' + agentId);
+    if (!/^[a-z0-9][a-z0-9._-]*$/i.test(String(agentId))) return;
+    const r = await apiFetch('/api/agent/' + encodeURIComponent(agentId));
     const d = await r.json();
     document.getElementById('agent-detail-title').textContent = d.agentId;
     document.getElementById('agent-detail-stats').innerHTML =
-      st('State', d.state) + st('Wakes', d.totalWakes) + st('Artifacts', d.totalArtifacts) +
+      st('State', esc(d.state)) + st('Wakes', d.totalWakes) + st('Artifacts', d.totalArtifacts) +
       st('Idle Wakes', d.idleWakes) + st('Failures', d.consecutiveFailures);
     const digests = (d.recentDigests || []).map(function(dig) {
-      return '<div style="margin:8px 0;padding:8px;background:#0d1117;border:1px solid #21262d;border-radius:6px"><strong>' + dig.date + '</strong><pre style="white-space:pre-wrap;margin:4px 0 0;font-size:0.75rem;color:#c9d1d9">' + linkify(dig.summary.replace(/</g,'&lt;')) + '</pre></div>';
+      return '<div style="margin:8px 0;padding:8px;background:#0d1117;border:1px solid #21262d;border-radius:6px"><strong>' + esc(dig.date) + '</strong><pre style="white-space:pre-wrap;margin:4px 0 0;font-size:0.75rem;color:#c9d1d9">' + linkify(esc(dig.summary)) + '</pre></div>';
     }).join('');
     document.getElementById('agent-detail-digests').innerHTML = digests || '<div style="color:#8b949e">No digests yet</div>';
     document.getElementById('agent-detail-wake').onclick = function() { closeModal('agent-modal'); wakeNow(agentId); };
@@ -516,11 +582,11 @@ function wakeNow(agentId) {
 function updateDropdowns(d) {
   const gs = document.getElementById('group-select');
   gs.innerHTML = '<option value="">Convene Group...</option>' +
-    (d.groups || []).map(g => '<option value="' + g.groupId + '">' + g.groupId + '</option>').join('');
+    (d.groups || []).map(g => '<option value="' + esc(g.groupId) + '">' + esc(g.groupId) + '</option>').join('');
   const ds = document.getElementById('dir-scope');
   ds.innerHTML = '<option data-scope="--all">All Agents</option>' +
-    (d.groups || []).map(g => '<option data-scope="--group" data-target="' + g.groupId + '">Group: ' + g.groupId + '</option>').join('') +
-    d.agents.map(a => '<option data-scope="--agent" data-target="' + a.agentId + '">Agent: ' + a.agentId + '</option>').join('');
+    (d.groups || []).map(g => '<option data-scope="--group" data-target="' + esc(g.groupId) + '">Group: ' + esc(g.groupId) + '</option>').join('') +
+    d.agents.map(a => '<option data-scope="--agent" data-target="' + esc(a.agentId) + '">Agent: ' + esc(a.agentId) + '</option>').join('');
 }
 
 // Track convened governance items so refresh doesn't reset their visual state
@@ -529,17 +595,25 @@ var convenedItems = {};
 var meetingState = {};
 var meetingMinutesUrl = {};
 
-// Linkify URLs in text (GitHub issues, PRs, commits, general URLs)
+// Linkify URLs in already-escaped text. Input must be HTML-escaped before
+// this is called — we match the escaped form (e.g. `&lt;` won't break out).
+// Output href is re-validated through safeUrl to reject anything that isn't
+// http/https, even though the match already only accepts http(s) prefixes.
 function linkify(text) {
-  return text.replace(/(https?:\/\/[^\s<)]+)/g, '<a href="$1" target="_blank" style="color:#58a6ff">$1</a>');
+  return text.replace(/(https?:\/\/[^\s<)"']+)/g, function(match) {
+    var href = safeUrl(match);
+    if (href === '#') return match;
+    return '<a href="' + esc(href) + '" target="_blank" rel="noopener" style="color:#58a6ff">' + match + '</a>';
+  });
 }
 
 // Group detail modal
 let currentGroupId = '';
 async function showGroup(groupId) {
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(String(groupId))) return;
   currentGroupId = groupId;
   try {
-    const r = await fetch('/api/group/' + encodeURIComponent(groupId));
+    const r = await apiFetch('/api/group/' + encodeURIComponent(groupId));
     const d = await r.json();
     document.getElementById('group-detail-title').textContent = d.groupId;
     document.getElementById('group-detail-stats').innerHTML =
@@ -547,12 +621,12 @@ async function showGroup(groupId) {
     document.getElementById('group-detail-members').innerHTML =
       (d.members || []).map(function(m) {
         const cls = m.totalArtifacts > 0 ? 'active' : m.totalWakes > 0 ? 'idle' : '';
-        return '<span class="member-tag ' + cls + '">' + m.agentId + '</span>';
+        return '<span class="member-tag ' + esc(cls) + '">' + esc(m.agentId) + '</span>';
       }).join('');
     const meetings = (d.recentMeetings || []).map(function(mtg) {
       return '<div style="margin:8px 0;padding:8px;background:#0d1117;border:1px solid #21262d;border-radius:6px">' +
-        '<strong>' + mtg.date + '</strong> <span style="color:#8b949e;font-size:0.7rem">' + mtg.kind + '</span>' +
-        '<pre style="white-space:pre-wrap;margin:4px 0 0;font-size:0.75rem;color:#c9d1d9">' + linkify(mtg.summary.replace(/</g,'&lt;')) + '</pre></div>';
+        '<strong>' + esc(mtg.date) + '</strong> <span style="color:#8b949e;font-size:0.7rem">' + esc(mtg.kind) + '</span>' +
+        '<pre style="white-space:pre-wrap;margin:4px 0 0;font-size:0.75rem;color:#c9d1d9">' + linkify(esc(mtg.summary)) + '</pre></div>';
     }).join('');
     document.getElementById('group-detail-meetings').innerHTML = meetings || '<div style="color:#8b949e">No meetings yet</div>';
     document.getElementById('group-detail-modal').classList.add('show');
