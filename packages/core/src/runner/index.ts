@@ -10,8 +10,11 @@
  *   - Wake mode handling
  *   - Capability display
  *   - Self-reflection parsing (EFFECTIVENESS/OBSERVATION/GOVERNANCE_EVENT)
- *   - Governance event type detection (TENSION:/PROPOSAL:/REPORT:)
- *   - GitHub commit logic
+ *   - Emits a generic `agent-governance-event` — model-specific
+ *     interpretation (e.g. S3's TENSION/PROPOSAL/REPORT prefixes)
+ *     happens in the governance plugin's `onEventsEmitted` hook,
+ *     not here
+ *   - Artifact commit via CollaborationProvider (ADR-0021)
  *   - Upstream digest reading
  */
 
