@@ -624,7 +624,7 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
     if (existsSync(defaultRolePath)) {
       const roleContent = await readFile(defaultRolePath, "utf8");
       const stripped = roleContent.replace(
-        /tools:\n {2}mcp:\n {4}- name: github\n {6}command: npx\n {6}args: \["-y", "@modelcontextprotocol\/server-github"\]\n {6}env:\n {8}GITHUB_TOKEN: "\$GITHUB_TOKEN"\n/g,
+        /tools:\n {2}mcp:\n {4}- name: github\n {6}command: npx\n {6}args: \["-y", "@modelcontextprotocol\/server-github"\]\n {6}env:\n {8}GITHUB_PERSONAL_ACCESS_TOKEN: "\$GITHUB_TOKEN"\n/g,
         "",
       );
       await writeFile(defaultRolePath, stripped);

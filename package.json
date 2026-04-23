@@ -38,6 +38,7 @@
     "@murmurations-ai/core": "workspace:*",
     "@murmurations-ai/llm": "workspace:*",
     "@murmurations-ai/secrets-dotenv": "workspace:*",
+    "@octokit/rest": "^22.0.1",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^4.1.4",
     "eslint": "^10.2.0",
