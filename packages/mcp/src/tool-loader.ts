@@ -1,68 +1,27 @@
-/**
- * McpToolLoader — connects to MCP servers via stdio transport,
- * discovers tools, and converts them to ToolDefinition[] for the
- * Vercel AI SDK generateText() tool calling loop.
- *
- * ADR-0020 Phase 3: MCP integration.
- *
- * Key responsibilities:
- * - Spawns MCP server processes via StdioClientTransport
- * - Lists tools from each server
- * - Wraps MCP JSON Schema → Vercel AI SDK jsonSchema()
- * - Wraps callTool() as ToolDefinition.execute()
- * - Cleans up all connections on close()
- */
-
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { jsonSchema } from "ai";
 import type { ToolDefinition } from "@murmurations-ai/llm";
 
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
-
-/** Configuration for a single MCP server (from agent role.md frontmatter). */
 export interface McpServerConfig {
   readonly name: string;
   readonly command: string;
   readonly args?: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
-  /** Working directory for the spawned process. */
   readonly cwd?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Extract text from MCP callTool result.content (typed as unknown). @internal */
 export const extractTextContent = (raw: unknown): string => {
-  if (!Array.isArray(raw)) return JSON.stringify(raw);
-  const items = raw as readonly Record<string, unknown>[];
-  const texts: string[] = [];
-  for (const c of items) {
-    if (c.type === "text" && typeof c.text === "string") {
-      texts.push(c.text);
-    }
-  }
-  return texts.length > 0 ? texts.join("\n") : JSON.stringify(raw);
+  if (typeof raw !== "object" || raw === null) return JSON.stringify(raw);
+  const r = raw as { content?: { type?: string; text?: string }[] };
+  if (!Array.isArray(r.content)) return JSON.stringify(raw);
+  const textBlocks = r.content.filter((c) => c.type === "text").map((c) => c.text ?? "");
+  return textBlocks.join("\n");
 };
-
-// ---------------------------------------------------------------------------
-// McpToolLoader
-// ---------------------------------------------------------------------------
 
 export class McpToolLoader {
   readonly #clients = new Map<string, { client: Client; transport: StdioClientTransport }>();
 
-  /**
-   * Connect to the listed MCP servers, discover their tools, and return
-   * a flat array of ToolDefinition objects ready for generateText().
-   *
-   * Each tool name is prefixed with the server name to avoid collisions
-   * (e.g. "filesystem__read_file").
-   */
   async loadTools(
     servers: readonly McpServerConfig[],
     parentEnv?: Readonly<Record<string, string>>,
@@ -86,25 +45,21 @@ export class McpToolLoader {
               name: mcpTool.name,
               arguments: input,
             });
-            // Extract text content; fall back to JSON for non-text responses
-            return extractTextContent(result.content);
+            return extractTextContent(result);
           },
         });
       }
-
       this.#clients.set(server.name, { client, transport });
     }
-
     return allTools;
   }
 
-  /** Disconnect all MCP clients and kill spawned processes. */
   async close(): Promise<void> {
     const closeTasks = [...this.#clients.values()].map(async ({ client, transport }) => {
       try {
         await client.close();
       } catch {
-        // Best-effort — process may already be dead
+        // Best-effort
       }
       try {
         await transport.close();
@@ -116,22 +71,15 @@ export class McpToolLoader {
     this.#clients.clear();
   }
 
-  // -------------------------------------------------------------------------
-  // Private
-  // -------------------------------------------------------------------------
-
   async #connect(
     server: McpServerConfig,
     parentEnv?: Readonly<Record<string, string>>,
   ): Promise<{ client: Client; transport: StdioClientTransport }> {
-    // Merge parent environment (resolved secrets) with server-specific env.
-    // Server env wins on conflict.
     const env: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) {
       if (v !== undefined) env[k] = v;
     }
     Object.assign(env, parentEnv ?? {});
-    Object.assign(env, server.env ?? {});
 
     // Evaluate shell-variable syntax in server.env
     if (server.env) {
@@ -145,11 +93,13 @@ export class McpToolLoader {
           } else {
             env[k] = v;
           }
+        } else {
+          env[k] = v;
         }
       }
     }
 
-    // Hardcode GITHUB_PERSONAL_ACCESS_TOKEN for @modelcontextprotocol/server-github
+    // Hardcode fallback for @modelcontextprotocol/server-github
     if (env["GITHUB_TOKEN"] && !env["GITHUB_PERSONAL_ACCESS_TOKEN"]) {
       env["GITHUB_PERSONAL_ACCESS_TOKEN"] = env["GITHUB_TOKEN"];
     }
@@ -159,7 +109,7 @@ export class McpToolLoader {
       args: server.args ? [...server.args] : [],
       env,
       ...(server.cwd ? { cwd: server.cwd } : {}),
-      stderr: "pipe", // Don't pollute daemon stderr
+      stderr: "pipe",
     });
 
     const client = new Client({
