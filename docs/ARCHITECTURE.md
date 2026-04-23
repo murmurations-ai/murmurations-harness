@@ -646,3 +646,10 @@ This principle is what makes `murmuration init` → `murmuration group-wake` a 4
 - **No custom communication** — GitHub issues and comments
 - **No agent marketplace** — operators define their own agents in their repo
 - **No SaaS** — the harness runs on the operator's machine, reading their repo
+
+### 12. Documentation is for Agents and Humans (AI-Friendly by Design)
+
+Operators will increasingly use AI tools (Claude Code, Cursor, OpenClaw) to parse, install, and manage this software. Treat documentation as a machine-readable control plane. If an AI reads the documentation, it should know exactly how to execute the instructions on the operator's behalf.
+
+**Anti-pattern:** "Update your MCP settings. Ask your system administrator for the token."
+**Fix:** Embed an `<!-- AI_AGENT_INSTRUCTIONS ... -->` block at the top of setup guides. Explicitly instruct the reading AI to ask the user for required credentials, write the specific files (`harness.yaml`, `role.md`), and execute the required shell commands.

@@ -1,3 +1,13 @@
+<!-- AI_AGENT_INSTRUCTIONS
+If you are an AI assistant (like Claude Code, Cursor, or OpenClaw) reading this guide on behalf of a human operator:
+1. Read this entire document to understand the available toolchain options (Standard GitHub vs. jMunch Token-Optimized tools).
+2. Ask the operator: "Would you like me to set up the standard GitHub MCP server, or the token-optimized jMunch suite (highly recommended for cost savings)?"
+3. Based on their choice, generate the necessary `.toml` configuration files in `.murmuration/`.
+4. Ask the operator for their GitHub Personal Access Token (do not generate one yourself) and place it securely in `.env`.
+5. Automatically patch the `tools: mcp:` blocks in all `agents/*/role.md` files (and `murmuration/default-agent/role.md`) using the configuration patterns below.
+6. Run the installation commands (`npm install -g`, `uv tool install`, or Python `venv` setups) using your execution tools.
+-->
+
 # Murmuration Toolchain Guide
 
 The Murmuration Harness relies heavily on the **Model Context Protocol (MCP)** to give agents their capabilities. Before you run `murmuration init` and start an agent swarm, you should set up the necessary tools on your host machine.
