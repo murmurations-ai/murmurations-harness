@@ -34,6 +34,7 @@ For a real murmuration (no example), run `murmuration init` without `--example` 
 
 → Full walkthrough: [docs/GETTING-STARTED.md](./docs/GETTING-STARTED.md)
 → Upgrading from pre-v0.5: [docs/MIGRATION-GUIDE.md](./docs/MIGRATION-GUIDE.md)
+→ External tools setup: [docs/TOOLCHAIN-GUIDE.md](./docs/TOOLCHAIN-GUIDE.md)
 
 ## Philosophy: Source as a human role
 
@@ -204,6 +205,7 @@ murmurations-harness/
 ├── docs/
 │   ├── ARCHITECTURE.md          # Architecture + 10 Engineering Standards
 │   ├── GETTING-STARTED.md       # Setup guide
+│   ├── TOOLCHAIN-GUIDE.md       # External tools setup guide
 │   └── adr/                     # 20 Architecture Decision Records
 └── .github/workflows/ci.yml    # CI: build, typecheck, lint, format, test (Node 20 + 22)
 ```

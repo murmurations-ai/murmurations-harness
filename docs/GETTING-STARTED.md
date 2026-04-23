@@ -11,6 +11,7 @@ This guide walks you from zero to a running meeting in under 10 minutes. No prio
 - **Node.js 20+** (`node --version`)
 - **npm** (ships with Node)
 - **An API key** for your LLM provider of choice. Free-tier Gemini works great for testing — get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (no credit card required).
+- **Required Tools:** Agents need MCP servers installed to perform their duties. See the [Toolchain Setup Guide](./TOOLCHAIN-GUIDE.md) for instructions on setting up GitHub, jMunch, etc.
 - **Optional: a GitHub personal access token** if you want agents to read/write GitHub Issues. For the tutorial you can skip it — the example uses local-only collaboration.
 
 ---
