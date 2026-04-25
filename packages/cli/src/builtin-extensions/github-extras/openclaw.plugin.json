@@ -1,0 +1,6 @@
+{
+  "id": "github-extras",
+  "contracts": {
+    "tools": ["github__get_issue_comments"]
+  }
+}
