@@ -1,9 +1,11 @@
-# ADR-0003: GitHub Actions for Continuous Integration
+# ADR-0033 — GitHub Actions for Continuous Integration
 
-- **Status**: Proposed
-- **Date**: 2026-04-26
-- **Author**: Architecture Agent (#23)
-- **Reviewers**: Engineering Circle (#22, #24, #25, #26, #27)
+- **Status:** Accepted (retroactive — `.github/workflows/ci.yml` has been the active CI pipeline since v0.1)
+- **Date:** 2026-04-26
+- **Author:** Architecture Agent (#23)
+- **Reviewers:** Engineering Circle (#22, #24, #25, #26, #27)
+
+> Renumbered from `0003` to `0033` on 2026-04-27 to resolve a numbering collision with the already-accepted ADR-0003 (`esm-module-system`). Survivor of three competing drafts (commits `9ecb464`, `725e6c2`, `f2cd288`); the runners-up were deleted.
 
 ## Context and Problem Statement
 

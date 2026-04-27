@@ -1,9 +1,11 @@
-# 1. Use MADR for Architectural Decisions
+# ADR-0030 — Use MADR for Architectural Decisions
 
-*   **Status:** Proposed
-*   **Date:** 2026-04-25
-*   **Deciders:** Architecture Agent (#23), Engineering Circle
-*   **Technical Story:** [murmurations-ai/murmurations-harness#6](https://github.com/murmurations-ai/murmurations-harness/issues/6) (placeholder)
+- **Status:** Accepted (retroactive — MADR-style template has been in use since ADR-0001)
+- **Date:** 2026-04-25
+- **Deciders:** Architecture Agent (#23), Engineering Circle
+- **Technical Story:** [murmurations-ai/murmurations-harness#6](https://github.com/murmurations-ai/murmurations-harness/issues/6)
+
+> Renumbered from `0001` to `0030` on 2026-04-27 to resolve a numbering collision with the already-accepted ADR-0001 (`pnpm-workspaces`). Original commit: `4344c65`.
 
 ## Context and Problem Statement
 
@@ -11,11 +13,11 @@ The Engineering Circle needs a consistent, lightweight, and version-controlled p
 
 ## Decision Drivers
 
-*   **Clarity:** The chosen format must be easy to read and understand.
-*   **Lightweight:** The process should not be overly bureaucratic. A simple template is preferred.
-*   **Version Control:** Decisions must live in the Git repository alongside the code they affect.
-*   **Discoverability:** It should be easy to find and browse past decisions.
-*   **Tool-Friendliness:** A plain text format like Markdown is ideal.
+- **Clarity:** The chosen format must be easy to read and understand.
+- **Lightweight:** The process should not be overly bureaucratic. A simple template is preferred.
+- **Version Control:** Decisions must live in the Git repository alongside the code they affect.
+- **Discoverability:** It should be easy to find and browse past decisions.
+- **Tool-Friendliness:** A plain text format like Markdown is ideal.
 
 ## Considered Options
 
@@ -34,14 +36,14 @@ The status of an ADR can be "Proposed", "Accepted", "Rejected", or "Superseded".
 
 ## Consequences
 
-*   **Positive:**
-    *   All architectural decisions will have a consistent, discoverable home.
-    *   The project's architectural history will be clear and auditable.
-    *   The process for proposing and ratifying decisions is standardized.
-*   **Negative:**
-    *   There is a small amount of overhead in creating an ADR file versus making a decision informally. This is an accepted trade-off for clarity and longevity.
+- **Positive:**
+  - All architectural decisions will have a consistent, discoverable home.
+  - The project's architectural history will be clear and auditable.
+  - The process for proposing and ratifying decisions is standardized.
+- **Negative:**
+  - There is a small amount of overhead in creating an ADR file versus making a decision informally. This is an accepted trade-off for clarity and longevity.
 
 ## Links
 
-*   [MADR Project](https://github.com/adr/madr)
-*   [Original ADR concept by Michael Nygard](http://thinkrelevance.com/blog/2011/11/15/documenting-architecture-decisions)
+- [MADR Project](https://github.com/adr/madr)
+- [Original ADR concept by Michael Nygard](http://thinkrelevance.com/blog/2011/11/15/documenting-architecture-decisions)
