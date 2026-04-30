@@ -957,22 +957,33 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
    * Backward compat: when `agent.plugins` is empty, return all loaded
    * extension tools (matches pre-gating behavior).
    *
-   * Local-governance auto-include: when the murmuration uses the local
-   * `CollaborationProvider`, agents need file access to record
-   * governance artifacts (proposals, decisions, tensions). Without
-   * file-writes they can't participate in governance. So we auto-grant
-   * the built-in `files` plugin to every agent that has declared any
-   * plugins at all — the agent still sees their other declared plugins
-   * explicitly; we just add `files` on top. Empty declaration still
-   * gets everything via the backward-compat path.
+   * Built-in tool auto-include: every agent gets `files` + `memory` on
+   * top of any plugins they declare. These two are floor capabilities
+   * — agents need file access to read repo docs / write artifacts, and
+   * memory access to persist state across wakes (ADR-0029). Without
+   * them an agent reaches the LLM with an empty tool catalog and can
+   * only narrate (Boundary 5 hallucination shape).
+   *
+   * History: this auto-include used to fire only for the local
+   * collaboration provider, on the (incorrect) reasoning that github
+   * agents posted everything to GitHub and didn't need filesystem.
+   * Live discovery 2026-04-30: every wake of every EP engineering
+   * agent (github collab) produced `tool_calls: 0` because their
+   * declared plugin (`github-extras` — phantom, not actually loaded)
+   * filtered the tool set down to nothing. The runner reached the LLM
+   * with `tools=undefined`, which collapses the agent into pure
+   * narrative output — exactly the ARCHITECTURE.md §12 anti-pattern
+   * the harness exists to detect.
+   *
+   * Empty plugins declaration still gets the full extension tool set
+   * via the backward-compat path below.
    */
   const selectExtensionToolsFor = (
     agent: RegisteredAgent,
     agentDir: string,
   ): readonly (typeof extensionTools)[number][] => {
     // ADR-0029: memory is agent-scoped — tools are built per-agent,
-    // not shared across agents. Emit them whenever the agent declared
-    // memory explicitly OR when local-gov auto-includes them.
+    // not shared across agents.
     const buildAgentBoundMemory = (): readonly (typeof extensionTools)[number][] =>
       buildMemoryToolsForAgent({
         rootDir: exampleRoot,
@@ -980,14 +991,9 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       }) as readonly (typeof extensionTools)[number][];
 
     if (agent.plugins.length === 0) {
-      // Backward compat: agents with no explicit declaration see the
-      // shared extension tools. Memory is agent-bound so we add
-      // per-agent tools on top only when local-gov makes it
-      // automatic.
-      if (config.collaboration.provider === "local") {
-        return [...extensionTools, ...buildAgentBoundMemory()];
-      }
-      return extensionTools;
+      // Backward compat: agents with no explicit declaration see all
+      // shared extension tools + per-agent memory tools.
+      return [...extensionTools, ...buildAgentBoundMemory()];
     }
 
     const declared = new Set<string>();
@@ -997,23 +1003,22 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       const last = parts[parts.length - 1];
       if (last !== undefined && parts.length > 1) declared.add(last);
     }
-    if (config.collaboration.provider === "local") {
-      declared.add("files");
-      declared.add("@murmurations-ai/files");
-      declared.add("memory");
-      declared.add("@murmurations-ai/memory");
-    }
+    // Auto-include floor capabilities for every agent regardless of
+    // collaboration provider. There is no legitimate scenario today
+    // for waking an agent with zero tools; an opt-out mechanism can
+    // be added if a use case emerges.
+    declared.add("files");
+    declared.add("@murmurations-ai/files");
+    declared.add("memory");
+    declared.add("@murmurations-ai/memory");
 
     const sharedTools = loadedExtensions
       .filter((ext) => declared.has(ext.id))
       .flatMap((ext) => ext.tools);
 
-    // Attach per-agent memory tools if the memory plugin is declared
-    // (either explicitly or via the local-gov auto-include above).
-    if (declared.has("memory") || declared.has("@murmurations-ai/memory")) {
-      return [...sharedTools, ...buildAgentBoundMemory()];
-    }
-    return sharedTools;
+    // Attach per-agent memory tools — memory is auto-included above
+    // for all agents, so this branch always fires.
+    return [...sharedTools, ...buildAgentBoundMemory()];
   };
 
   // -------------------------------------------------------------------
