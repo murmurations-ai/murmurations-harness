@@ -159,6 +159,46 @@ Warnings flow into the `WakeOutcome` and into `daemon.wake.aggregator.warning` l
 
 **3.3 Non-silent failure path.** Daemon log surface for every warning. Dashboard surface so operators can see warning counts at a glance. Critically: when `scopes-empty-but-sources-include-github-issue` fires, the wake artifact records the warning so it appears in the wake summary, not just in the boot logs.
 
+## Boundary 4 (deferred — follow-up sprint): role.md `group_memberships` ↔ `governance/groups/<g>.md` `## Members` (#238)
+
+**Status: out of scope for this sprint. Documented here so the next sprint picks it up cleanly under the same pattern.**
+
+This boundary was surfaced 2026-04-30 during the active consent round on this proposal — the same round that brings B1–B3 into scope. It is the fourth instance of the same architectural pattern at a fourth layer, but folding it into the in-flight 3-boundary scope would invalidate the consent already given by 5 specialists. It is therefore filed as [#238](https://github.com/murmurations-ai/murmurations-harness/issues/238) and deferred to the next sprint, with this section as the spec stub.
+
+### Current state
+
+| Property           | Status                                                                                                                                                                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Typed contract     | **Partial.** Both sources of truth have typed parsers (Zod for role.md, regex parser in `packages/cli/src/group-wake.ts:201`). They share no consistency check — agreement is informal.                                                                      |
+| Round-trip test    | **None.** No test asserts that "an agent declaring `group_memberships: [X]` is also listed in `governance/groups/X.md` `## Members`," or the reverse.                                                                                                        |
+| Non-silent failure | **Silent.** `murmuration doctor` walks groups → members → checks each named member is a real agent dir. It does not walk agents → group_memberships → check each named group lists this agent. Drift is invisible until a Source consent round counts votes. |
+
+### Drift incident
+
+Discovered 2026-04-30 during the consent round on this proposal. Three EP agents (cfo-agent, quality-analyst-agent, knowledge-management-agent) declare `group_memberships: [..., engineering]` in their role.md but are not listed in `governance/groups/engineering.md` `## Members`. cfo-agent and quality-analyst-agent posted CONSENT on EP #592 self-identifying as engineering members. From the daemon's per-wake `groupMemberships` perspective they are; from the formal `## Members` perspective they are not. The 3-of-6 formal-member consent count vs the 5-of-N "everyone who self-identified" count diverge.
+
+### Deliverables (sketch — to be finalized when the issue is picked up)
+
+**4.1 Typed contract.** Establish a canonical reconciliation rule: `## Members` is canonical for circle composition (who is invited to consent rounds, group-wake meetings, formal governance); `group_memberships` is canonical for per-wake routing (which `scope:group:<g>` labels reach this agent). The two sources of truth serve different purposes and need not always agree, but disagreement is operationally meaningful and must be surfaced.
+
+**4.2 Round-trip integration test.** New `doctor.membership-consistency.test.ts` covering both directions with controlled fixtures (agent in `## Members` but not in `group_memberships`; agent in `group_memberships` but not in `## Members`).
+
+**4.3 Non-silent failure path.** New doctor check `schema.group.<g>.membership-consistency` that fails bidirectionally:
+
+- An agent declares `group_memberships: [X]` but is not in `governance/groups/X.md` `## Members` → error.
+- An agent is in `governance/groups/X.md` `## Members` but does not declare `X` in `group_memberships` → error.
+- Optional: `murmuration doctor --reconcile-memberships` command surfaces a diff and offers to write either direction (operator picks per-agent).
+
+### Why deferred, not folded in
+
+Three reasons:
+
+1. **Consent integrity.** Five specialists have already consented to a 3-boundary scope. Expanding scope mid-round would either require re-consent (slow) or silently expand what they consented to (a second-order instance of the same drift problem we are trying to fix).
+2. **Sprint shape.** The current sprint is 3 days. Adding a fourth boundary changes the sprint to 4 days and risks all four landing late.
+3. **Independence.** B4's deliverables don't unlock B1–B3 and are not blocked by them. It is a clean follow-up.
+
+The follow-up sprint that picks up #238 should also retire any other instances of the pattern that have surfaced by then. The amendments section below records this discovery for the consent round.
+
 ## Cross-cutting principles
 
 These three boundaries are the in-scope work for this proposal. The principles below are the design rules the work should follow — and the rules future cross-module boundaries should also follow.
@@ -182,6 +222,7 @@ These three boundaries are the in-scope work for this proposal. The principles b
 - Round-trip integration tests for each.
 - Non-silent failure paths for each.
 - One ADR ratifying the "typed + tested + observable" pattern as a harness convention.
+- Documentation of Boundary 4 (#238) as a deferred follow-up under the same pattern. This sprint does not implement B4; it does commit to the pattern that B4 will follow when picked up.
 
 **Non-goals:**
 
@@ -273,6 +314,14 @@ This section catalogues amendments incorporated during the consent round, with a
 - **Incorporated:** No proposal change required. Recorded for future reference.
 - **Finding:** `governance/schema-baseline.json` is not a meaningful new attack surface. It is a JSON data file consumed by a comparison routine, not executed. An attacker with commit access could modify it, but that attacker can also modify role.md directly — this feature does not lower the bar. Use a standard safe JSON parser at the call site (already implied by existing harness patterns).
 - **Implication:** No special access control is needed on the baseline file. Standard repo permissions apply.
+
+### A4 — Boundary 4 (membership drift) documented as deferred follow-up
+
+- **Surfaced by:** Source (Nori / Kozan), 2026-04-30, during the consent round
+- **Tracked at:** [#238](https://github.com/murmurations-ai/murmurations-harness/issues/238)
+- **Incorporated:** New "Boundary 4 (deferred)" section between B3 and Cross-cutting principles. Scope and non-goals updated to explicitly include "documenting B4" and exclude "implementing B4" in this sprint.
+- **Rule:** `governance/groups/<g>.md` `## Members` is canonical for circle composition (who is invited to consent rounds and group-wake); `role.md group_memberships` is canonical for per-wake routing (`scope:group:<g>` label fan-out). The two sources of truth serve different purposes and need not always agree, but disagreement is operationally meaningful and must be surfaced via doctor.
+- **Rationale:** During this consent round, three EP agents (cfo-agent, quality-analyst-agent, knowledge-management-agent) posted consent self-identifying as engineering members based on their role.md `group_memberships`, while the formal `governance/groups/engineering.md` `## Members` lists 6 ratified members that do not include them. The drift made the round count ambiguous (3-of-6 formal vs 5-of-N self-identified). Surfacing this is itself a fourth instance of the proposal's pattern. Folding it into the in-flight scope would invalidate consent already given; deferring it preserves consent integrity while putting the boundary on the record under the same pattern.
 
 ### A3 — `runtime.allow_zero_signals` must announce itself
 
