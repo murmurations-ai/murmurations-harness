@@ -77,8 +77,27 @@ export interface DefaultSignalAggregatorConfig {
 // Text hygiene — bounds + control-char scrub
 // ---------------------------------------------------------------------------
 
-const EXCERPT_MAX_CHARS = 500;
-const SUMMARY_MAX_CHARS = 300;
+/**
+ * Default policy: pass full signal content through to the agent. Modern
+ * LLM context windows (≥1M tokens for current frontier models) make
+ * 500-char-style summary truncation more harmful than helpful — it
+ * silently corrupts authoritative content (live case 2026-04-30: a
+ * 2800-char source-directive lost its per-agent task definitions and
+ * agents honestly reported "the signal excerpt is missing details").
+ *
+ * The caps below are runaway-payload guards, not summarization. They
+ * fire only on extreme content (e.g., a malformed source dumping a
+ * binary blob into an issue body). When a real summary IS needed —
+ * that is, when an agent genuinely cannot use the full content — the
+ * right shape is LLM-driven summarization, NOT substring slicing with
+ * a `[...]` suffix. Slicing produces incoherent excerpts that drop
+ * critical detail; summarization preserves intent.
+ *
+ * Tracked as a follow-up: replace `sanitizeText` slice fallback with
+ * an LLM summarizer once an aggregator-side LLM client is available.
+ */
+const EXCERPT_MAX_CHARS = 64_000;
+const SUMMARY_MAX_CHARS = 8_000;
 // eslint-disable-next-line no-control-regex
 const CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 

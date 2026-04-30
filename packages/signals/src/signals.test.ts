@@ -327,6 +327,52 @@ describe("DefaultSignalAggregator", () => {
     }
   });
 
+  it("issue body content reaches the agent intact for normal-sized payloads", async () => {
+    // Live regression 2026-04-30: a 2800-char source-directive body was
+    // truncated to 500 chars, dropping per-agent task definitions. Modern
+    // context windows make summary-style truncation harmful by default —
+    // pass full content through and reserve slicing for runaway-payload
+    // protection only.
+    const longBody = `**Header**\n\n${"x".repeat(2500)}\n\n**Per-agent asks below.**`;
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub([fakeIssue({ body: longBody, labels: ["source-directive"] })]),
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("07-wren"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const signal = result.bundle.signals[0];
+      expect(signal?.kind).toBe("github-issue");
+      if (signal?.kind === "github-issue") {
+        expect(signal.excerpt.length).toBeGreaterThan(2500);
+        expect(signal.excerpt).toContain("Per-agent asks below.");
+        expect(signal.excerpt).not.toContain("[...]");
+      }
+    }
+  });
+
+  it("only at extreme size does runaway-payload protection slice the excerpt", async () => {
+    // The cap exists as a defense-in-depth runaway guard. It should not
+    // fire for any reasonable directive or issue body. When it does fire,
+    // operators see [...] as the explicit "this was truncated" marker.
+    const runaway = "z".repeat(70_000); // > 64K cap
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub([fakeIssue({ body: runaway, labels: ["bug"] })]),
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("07-wren"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const signal = result.bundle.signals[0];
+      if (signal?.kind === "github-issue") {
+        expect(signal.excerpt.length).toBeLessThan(70_000);
+        expect(signal.excerpt).toContain("[...]");
+      }
+    }
+  });
+
   it("control characters are stripped from excerpts", async () => {
     const agg = new DefaultSignalAggregator({
       rootDir,
