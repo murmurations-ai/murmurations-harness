@@ -49,8 +49,17 @@ export interface ToolCallResult {
 
 /** Input to {@link LLMClient.complete}. */
 export interface LLMRequest {
-  /** Concrete model id; resolved via tier table if omitted in the client config. */
-  readonly model: string;
+  /**
+   * Concrete model id, optional. The Vercel adapter uses the model
+   * bound to the LLMClient at construction (`createLLMClient({ model })`)
+   * and ignores this field. Callers pass it for observability /
+   * downstream logging when known; it is not authoritative routing.
+   * harness#252: previously the runner synthesized a Gemini-specific
+   * value here, which was both misleading and a latent regression
+   * (any future adapter that respected the field would silently swap
+   * every agent to a Gemini model name).
+   */
+  readonly model?: string;
   readonly messages: readonly LLMMessage[];
   readonly maxOutputTokens: number;
   readonly temperature?: number;

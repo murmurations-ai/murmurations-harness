@@ -131,6 +131,24 @@ describe("createDefaultRunner", () => {
     expect(result.wakeSummary).toContain("test-agent");
   });
 
+  it("does not pass a model field — bound LLMClient model is the source of truth (harness#252)", async () => {
+    const runner = createDefaultRunner("test-agent", [], {}, rootDir);
+    const llm = makeLlmClient("Hello.");
+
+    await runner({
+      spawn: makeSpawn(),
+      clients: { llm },
+    });
+
+    const calls = (llm as unknown as { _calls: Record<string, unknown>[] })._calls;
+    expect(calls).toHaveLength(1);
+    // Regression guard: the runner used to synthesize "gemini-2.5-flash"
+    // / "gemini-2.5-pro" from modelTier here, which silently overrode
+    // every non-Gemini agent in adapters that respected request.model.
+    // The fix dropped the field entirely.
+    expect(calls[0]).not.toHaveProperty("model");
+  });
+
   it("skips when no LLM client provided", async () => {
     const runner = createDefaultRunner("test-agent", [], {}, rootDir);
     const result = await runner({
