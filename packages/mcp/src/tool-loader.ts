@@ -14,6 +14,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,6 +22,39 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { jsonSchema } from "ai";
 import type { ToolDefinition } from "@murmurations-ai/llm";
+
+/**
+ * Expand `~` (home directory) and `${VAR}` / `$VAR` env-var references in
+ * a path string so MCP server commands declared in role.md can be portable
+ * across users and platforms. Bare command names (no path separators) are
+ * returned unchanged so they continue to resolve via the system PATH —
+ * which is the recommended portable form.
+ *
+ * Examples:
+ *   "jdocmunch-mcp"                              → "jdocmunch-mcp"
+ *   "~/Code/jmunch-mcp/.venv/bin/jmunch-mcp"     → "/Users/foo/Code/.../jmunch-mcp"
+ *   "${HOME}/Code/jmunch-mcp/.venv/bin/...mcp"   → same
+ *   "/abs/path/binary"                           → unchanged
+ *
+ * Live failure case 2026-04-30: agent role.md files baked in
+ * `/home/nnishigaya/...` Linux-only paths that ENOENT'd on macOS.
+ */
+export const expandPath = (raw: string): string => {
+  let s = raw;
+  if (s.startsWith("~/") || s === "~") {
+    s = s === "~" ? homedir() : join(homedir(), s.slice(2));
+  }
+  // Expand ${VAR} and $VAR_NAME tokens. Unset variables expand to "" so
+  // an unintended ${TYPO} produces an obviously-broken path that fails
+  // loudly at spawn rather than silently substituting something else.
+  s = s.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => {
+    return process.env[name] ?? "";
+  });
+  s = s.replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, name: string) => {
+    return process.env[name] ?? "";
+  });
+  return s;
+};
 
 const CLIENT_VERSION = ((): string => {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -142,11 +176,18 @@ export class McpToolLoader {
       ...(server.env ?? {}),
     };
 
+    // Expand `~` and `${VAR}` in the command, args, and cwd so role.md
+    // can declare portable paths that resolve against the operator's
+    // current shell environment instead of baking in absolute paths
+    // tied to one developer's home directory or OS.
+    const expandedCommand = expandPath(server.command);
+    const expandedArgs = (server.args ?? []).map(expandPath);
+    const expandedCwd = server.cwd !== undefined ? expandPath(server.cwd) : undefined;
     const transport = new StdioClientTransport({
-      command: server.command,
-      args: server.args ? [...server.args] : [],
+      command: expandedCommand,
+      args: [...expandedArgs],
       env,
-      ...(server.cwd ? { cwd: server.cwd } : {}),
+      ...(expandedCwd !== undefined ? { cwd: expandedCwd } : {}),
       stderr: "pipe", // Don't pollute daemon stderr
     });
 
