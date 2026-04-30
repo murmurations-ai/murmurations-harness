@@ -388,13 +388,42 @@ export function createDefaultRunner(
 
     // 7b. Capabilities — including the live tool inventory.
     const caps = spawn.capabilities;
+    // MCP servers like jdocmunch / jcodemunch persist their indexes to
+    // disk across wakes. Triggering an indexing operation in-wake when a
+    // fresh index already exists wastes 1M+ tokens of confirmation data.
+    // Live regression 2026-04-30 (harness#255): GPT-5.5 wake re-ran
+    // doc_index_repo on the harness despite the index being current,
+    // costing $1.42 of pure overhead. We pattern-match the typical
+    // expensive/inventory tool name shapes and tell the agent to check
+    // before indexing. Pattern-based so this fires for any future MCP
+    // server that follows the same naming convention.
+    const expensiveSetupTools =
+      tools?.filter((t) =>
+        /__(?:doc_index_repo|index_repo|index_folder|index_local|index_file|embed_repo)$/.test(
+          t.name,
+        ),
+      ) ?? [];
+    const inventoryTools =
+      tools?.filter((t) => /__(?:doc_list_repos|list_repos)$/.test(t.name)) ?? [];
+    const setupDisciplineBlock =
+      expensiveSetupTools.length > 0 && inventoryTools.length > 0
+        ? `\n\n**MCP setup discipline.** Some tools above (${expensiveSetupTools
+            .map((t) => `\`${t.name}\``)
+            .join(
+              ", ",
+            )}) trigger expensive indexing/embedding operations whose state persists across wakes. Before calling them, use the inventory tools (${inventoryTools
+            .map((t) => `\`${t.name}\``)
+            .join(
+              ", ",
+            )}) to check whether the repo is already indexed. Skip indexing when state is current — re-indexing dumps massive confirmation payloads into your context (verified: 1M+ tokens for one needless re-index).`
+        : "";
     const toolsBlock =
       tools && tools.length > 0
         ? `\n### Tools you can call this wake\n${tools
             .map((t) => `- \`${t.name}\`${t.description ? ` — ${t.description}` : ""}`)
             .join(
               "\n",
-            )}\n\nThese are real tool calls. **Use them** — do not narrate "I will read X" or "I would post Y." Either call the tool to do the work, or file a GOVERNANCE_EVENT explaining the specific blocker that prevents the call. Narrating an action without calling its tool is a Boundary 5 hallucination and will be flagged in your wake artifacts.`
+            )}\n\nThese are real tool calls. **Use them** — do not narrate "I will read X" or "I would post Y." Either call the tool to do the work, or file a GOVERNANCE_EVENT explaining the specific blocker that prevents the call. Narrating an action without calling its tool is a Boundary 5 hallucination and will be flagged in your wake artifacts.${setupDisciplineBlock}`
         : `\n### Tools you can call this wake\n_None._ If your task requires a tool you don't have, file a GOVERNANCE_EVENT requesting the capability rather than narrating fictional completion.`;
     const capsBlock = caps
       ? `\n\n## Your Capabilities\nIf any capability you need to fulfill your role is missing, file a GOVERNANCE_EVENT requesting it.\n### GitHub\n- Commit files: ${caps.github.canCommit ? `YES (paths: ${caps.github.commitPaths.join(", ")})` : "NO"}\n- Comment on issues: ${caps.github.canCommentIssues ? "YES" : "NO"}\n- Create issues: ${caps.github.canCreateIssues ? "YES" : "NO"}\n- Label issues: ${caps.github.canLabelIssues ? "YES" : "NO"}${caps.cliTools.length > 0 ? `\n### CLI Tools\n${caps.cliTools.map((t) => `- ${t}`).join("\n")}` : ""}${caps.mcpServers.length > 0 ? `\n### MCP Servers\n${caps.mcpServers.map((s) => `- ${s}`).join("\n")}` : ""}\n### Signal Sources\n${caps.signalSources.map((s) => `- ${s}`).join("\n") || "- (none configured)"}${toolsBlock}`
