@@ -370,11 +370,35 @@ export function createDefaultRunner(
         ? `\n\n_Wake mode: ${wakeMode} — you are participating in a group meeting. Contribute your perspective; do NOT execute action items._`
         : "";
 
-    // 7. Capabilities
+    // 7a. Load tools first — the system prompt needs to surface them
+    //     so the LLM uses tool calls instead of narration. Live
+    //     regression 2026-04-30: 7 tools threaded via the API but
+    //     tool_calls: 0 across Gemini and Anthropic because the prompt
+    //     never told the LLM the tools existed (Boundary 5 root cause).
+    const allTools: RunnerToolDefinition[] = [];
+    if (options.extensionTools && options.extensionTools.length > 0) {
+      allTools.push(...options.extensionTools);
+    }
+    const mcpConfigs = spawn.mcpServerConfigs ?? [];
+    if (clients.mcpToolLoader && mcpConfigs.length > 0) {
+      const mcpTools = await clients.mcpToolLoader.loadTools(mcpConfigs, spawn.environment);
+      allTools.push(...mcpTools);
+    }
+    const tools: RunnerToolDefinition[] | undefined = allTools.length > 0 ? allTools : undefined;
+
+    // 7b. Capabilities — including the live tool inventory.
     const caps = spawn.capabilities;
+    const toolsBlock =
+      tools && tools.length > 0
+        ? `\n### Tools you can call this wake\n${tools
+            .map((t) => `- \`${t.name}\`${t.description ? ` — ${t.description}` : ""}`)
+            .join(
+              "\n",
+            )}\n\nThese are real tool calls. **Use them** — do not narrate "I will read X" or "I would post Y." Either call the tool to do the work, or file a GOVERNANCE_EVENT explaining the specific blocker that prevents the call. Narrating an action without calling its tool is a Boundary 5 hallucination and will be flagged in your wake artifacts.`
+        : `\n### Tools you can call this wake\n_None._ If your task requires a tool you don't have, file a GOVERNANCE_EVENT requesting the capability rather than narrating fictional completion.`;
     const capsBlock = caps
-      ? `\n\n## Your Capabilities\nIf any capability you need to fulfill your role is missing, file a GOVERNANCE_EVENT requesting it.\n### GitHub\n- Commit files: ${caps.github.canCommit ? `YES (paths: ${caps.github.commitPaths.join(", ")})` : "NO"}\n- Comment on issues: ${caps.github.canCommentIssues ? "YES" : "NO"}\n- Create issues: ${caps.github.canCreateIssues ? "YES" : "NO"}\n- Label issues: ${caps.github.canLabelIssues ? "YES" : "NO"}${caps.cliTools.length > 0 ? `\n### CLI Tools\n${caps.cliTools.map((t) => `- ${t}`).join("\n")}` : ""}${caps.mcpServers.length > 0 ? `\n### MCP Servers\n${caps.mcpServers.map((s) => `- ${s}`).join("\n")}` : ""}\n### Signal Sources\n${caps.signalSources.map((s) => `- ${s}`).join("\n") || "- (none configured)"}`
-      : "";
+      ? `\n\n## Your Capabilities\nIf any capability you need to fulfill your role is missing, file a GOVERNANCE_EVENT requesting it.\n### GitHub\n- Commit files: ${caps.github.canCommit ? `YES (paths: ${caps.github.commitPaths.join(", ")})` : "NO"}\n- Comment on issues: ${caps.github.canCommentIssues ? "YES" : "NO"}\n- Create issues: ${caps.github.canCreateIssues ? "YES" : "NO"}\n- Label issues: ${caps.github.canLabelIssues ? "YES" : "NO"}${caps.cliTools.length > 0 ? `\n### CLI Tools\n${caps.cliTools.map((t) => `- ${t}`).join("\n")}` : ""}${caps.mcpServers.length > 0 ? `\n### MCP Servers\n${caps.mcpServers.map((s) => `- ${s}`).join("\n")}` : ""}\n### Signal Sources\n${caps.signalSources.map((s) => `- ${s}`).join("\n") || "- (none configured)"}${toolsBlock}`
+      : toolsBlock;
 
     // 8. Assemble user prompt
     const dayUtc = new Date().toISOString().slice(0, 10);
@@ -404,24 +428,7 @@ GOVERNANCE_EVENT: none — OR one of:
 If you were asked to draft a proposal (e.g. an action item saying "draft proposal for X"), file it as PROPOSAL: <your proposal>
 `;
 
-    // 9. Load tools: extensions (ADR-0023) + MCP (ADR-0020 Phase 3)
-    const allTools: RunnerToolDefinition[] = [];
-
-    // Extension tools (loaded at boot, available to all agents)
-    if (options.extensionTools && options.extensionTools.length > 0) {
-      allTools.push(...options.extensionTools);
-    }
-
-    // MCP tools (per-agent, loaded at wake time)
-    const mcpConfigs = spawn.mcpServerConfigs ?? [];
-    if (clients.mcpToolLoader && mcpConfigs.length > 0) {
-      const mcpTools = await clients.mcpToolLoader.loadTools(mcpConfigs, spawn.environment);
-      allTools.push(...mcpTools);
-    }
-
-    const tools: RunnerToolDefinition[] | undefined = allTools.length > 0 ? allTools : undefined;
-
-    // 10. Call LLM
+    // 9. Call LLM (tools loaded above as section 7a)
     const llmModel =
       spawn.identity.frontmatter.modelTier === "fast"
         ? "gemini-2.5-flash"
