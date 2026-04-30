@@ -3,6 +3,44 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.1] - 2026-04-30
+
+**Boundary 5 hardening — agents actually call tools instead of narrating about them, and stop wasting tokens on operations whose state already exists.**
+
+Today's investigation traced a chronic failure mode where agent wakes returned `tool_calls: 0` and produced sophisticated narrative claims ("I have posted CONSENT on #592") with no actual tool invocations. The root cause was two compounding bugs in the runner. v0.5.1 fixes both, then adds a second class of guard against agents re-running expensive tool setup operations whose state was already on disk from a prior wake.
+
+### Fixed
+
+- **Agents now actually call their tools** (#249). Two compounding bugs were defeating tool calling end-to-end:
+  - `selectExtensionToolsFor` filtered the built-in `files` and `memory` tools by the agent's declared plugin list. Agents that declared a phantom or non-extension plugin (`github-extras` in EP) ended up with zero tools threaded into the LLM API request despite the runtime having loaded both extensions. Fix: built-in `files` and `memory` are now auto-included for every agent regardless of declared plugins.
+  - The runner's system prompt never listed the loaded tools to the LLM. Even when the API request had tools threaded in, Gemini and Anthropic defaulted to pure narration because nothing in the prompt told them tools existed. Fix: tools are now loaded **before** capabilities are assembled, and the system prompt includes a `### Tools you can call this wake` block listing each tool by name + description, with an explicit instruction to call them rather than narrate about them. Boundary 5 hallucination is named in the prompt as the failure to avoid.
+- **`murmuration directive` silently dropped unknown flags and could post empty-body directives** (#247). The body extraction logic (`args.filter(a => !a.startsWith("--")).pop()`) didn't know which flags consumed their next token, so flag values fell through as positional candidates. Fix: explicit `VALUE_FLAGS` and `BOOLEAN_FLAGS` sets, unknown-flag rejection, `--body-file <path>` support for long bodies, title extraction from the first non-empty line.
+- **Signal aggregator no longer truncates issue/comment bodies to 500 characters by default** (#248). `EXCERPT_MAX_CHARS` bumped from 500 → 64,000 and `SUMMARY_MAX_CHARS` from 300 → 8,000. The slicing path is now documented as a runaway-payload guard, not a summarization mechanism — the principle is "default to full content; only truncate to prevent pathological payloads."
+- **MCP server commands now expand `~`, `${VAR}`, and `$VAR` in command, args, and cwd** (#250). Live failure 2026-04-30: agent role.md files baked in `/home/<linux-user>/...` paths that ENOENT'd on macOS. Bare commands resolved via PATH (the recommended portable form) continue to work unchanged. Unset variables substitute to empty string so typos like `${TYPO}` produce obviously-broken paths that fail loudly at spawn rather than silently substituting something else.
+- **Agents no longer re-trigger expensive MCP setup operations when persistent state already exists** (#257, closes #255). Live regression 2026-04-30: a GPT-5.5 cost test showed enabling jdocmunch made wakes 3.7× more expensive per KB of useful output (~\$0.76 → ~\$2.18). The agent was calling `doc_index_repo` in-wake despite the index already being current on disk, dumping ~1.27M tokens of confirmation data into the wake context. Fix: when the runner detects both an expensive setup tool (matching `__doc_index_repo` / `__index_repo` / `__index_folder` / `__embed_repo` / etc.) AND its inventory counterpart (`__doc_list_repos` / `__list_repos`), it appends an "MCP setup discipline" block to the system prompt instructing the agent to inventory first and only index if state is missing or stale. Pattern-based on tool-name suffix; no hardcoded allow-list. Re-verified live: GPT-5.5 + jdocmunch cost dropped to ~\$0.85 (within 12% of the no-jdocmunch baseline).
+
+### Added
+
+- **Boundary 5 detection — directive validation requires structured evidence** (#240). Wakes whose narrative claims to address a directive but produce no matching tool-call evidence are now flagged as `narrative-only-claim` in `daemon.wake.directives.unaddressed` events. Detection runs in `validateWake` and surfaces in operator-visible artifacts. Word-boundary regex prevents `#5` matching `#592`. Phase 1: detection only (warn, not block).
+
+### Changed
+
+- **System prompt explicitly names Boundary 5 hallucination as the failure to avoid** when tools are loaded. Agents are told that narrating an action without calling its tool will be flagged in their wake artifacts.
+- **`tools.mcp` declarations in role.md now accept platform-portable command paths** via `~` and env-var expansion (see Fixed → portable MCP paths above).
+
+### Internals
+
+- 691 tests passing across 50 test files (up from 671 in v0.5.0; 20 new tests for `expandPath` plus B5 detection coverage).
+- ADRs 0030–0033 renumbered after deduping colliding ADRs from parallel agent wakes (#228).
+
+### Follow-ups filed (not in this release)
+
+- #251 — pricing catalog gap: `gpt-5.x` and recent OpenAI models report \$0 cost
+- #252 — Gemini-specific tool-call gap: same prompt + tools, Gemini=0, Anthropic=1, OpenAI=27 tool calls
+- #253 — runner hardcodes Gemini model name for facilitator resolution
+- #254 — role.md mixes per-agent intent with per-installation deployment config
+- #256 — signal aggregator should bundle issue bodies so agents stop re-fetching via `read_issue` (cheap layer-1 fix for GitHub-issue retrieval cost; harness#255's sibling)
+
 ## [0.5.0] - 2026-04-21
 
 **"Out of the box" — a non-technical tester can go from `npm install` to a running meeting in under 10 minutes with zero file editing beyond pasting one API key.**
