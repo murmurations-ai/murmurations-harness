@@ -73,7 +73,13 @@ export interface DefaultRunnerClients {
   readonly llm?: {
     complete(
       opts: {
-        model: string;
+        /**
+         * Concrete model id is optional — the underlying LLMClient binds
+         * its model at construction and ignores this field. Pass it for
+         * observability when known; the bound model wins regardless.
+         * See harness#252.
+         */
+        model?: string;
         messages: { role: string; content: string }[];
         systemPromptOverride?: string;
         maxOutputTokens?: number;
@@ -458,18 +464,25 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
 `;
 
     // 9. Call LLM (tools loaded above as section 7a)
-    const llmModel =
-      spawn.identity.frontmatter.modelTier === "fast"
-        ? "gemini-2.5-flash"
-        : spawn.identity.frontmatter.modelTier === "deep"
-          ? "gemini-2.5-pro"
-          : "gemini-2.5-flash";
-
+    //
+    // We do NOT pass a model — the LLMClient was constructed with the
+    // agent's resolved provider+model at boot, and the Vercel adapter
+    // uses that bound model regardless of what's in the request. The
+    // bound model is the single source of truth.
+    //
+    // Previous code (harness#252) synthesized a Gemini model name from
+    // modelTier here regardless of the agent's actual provider. The
+    // adapter ignored it for non-Gemini agents (which is why nothing
+    // visibly broke), but it was a latent regression — any future
+    // adapter that respected request.model would silently swap every
+    // agent to a Gemini name. It also produced the wrong default for
+    // the one provider it actually applied to (balanced → flash, not
+    // pro). The actual model used in the wake is reported back via
+    // `result.value.modelUsed` and logged below.
     let result: Awaited<ReturnType<NonNullable<DefaultRunnerClients["llm"]>["complete"]>>;
     try {
       result = await clients.llm.complete(
         {
-          model: llmModel,
           messages: [{ role: "user", content: userPrompt }],
           systemPromptOverride: systemPrompt,
           maxOutputTokens: 16000,
