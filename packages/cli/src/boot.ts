@@ -50,6 +50,7 @@ import {
   type RegisteredAgent,
   type SecretDeclaration,
   type SecretKey,
+  type USDMicros,
   type SignalAggregator,
   type SubprocessCommand,
   type WakeCostBuilder,
@@ -91,34 +92,60 @@ const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
  * ADR-0015 catalog at emit time. Exported so future per-wake executors
  * can build one hook per `WakeCostBuilder` without re-implementing the
  * catalog lookup. See ADR-0014 §Cost hook contract.
+ *
+ * When the (provider, model) pair isn't in the catalog the call still
+ * lands as `costMicros: 0` — hard-failing here would swallow a
+ * successful LLM call on a catalog gap. But silent zeros let stale
+ * catalog entries hide for weeks (harness#251). The optional `logger`
+ * argument fires a one-shot `daemon.cost.pricing.unknown` warn the
+ * first time each pair is seen, with dedupe state held on the hook
+ * instance so test wakes don't bleed into each other.
  */
-export const makeDaemonHook = (builder: WakeCostBuilder): LLMCostHook => ({
-  onLlmCall: (call) => {
-    const priced = resolveLLMCost({
-      provider: call.provider,
-      model: call.model,
-      inputTokens: call.inputTokens,
-      outputTokens: call.outputTokens,
-      ...(call.cacheReadTokens !== undefined ? { cacheReadTokens: call.cacheReadTokens } : {}),
-      ...(call.cacheWriteTokens !== undefined ? { cacheWriteTokens: call.cacheWriteTokens } : {}),
-    });
-    // Pricing errors (unknown model, negative tokens) degrade to a
-    // zero-cost record — the token counts still post to the builder,
-    // the observability event still fires, and the boot-time warn
-    // catches misconfiguration before a real wake. Hard-failing here
-    // would swallow a successful LLM call on a pricing catalog gap.
-    const costMicros = priced.ok ? priced.value : makeUSDMicros(0);
-    builder.addLlmTokens({
-      inputTokens: call.inputTokens,
-      outputTokens: call.outputTokens,
-      ...(call.cacheReadTokens !== undefined ? { cacheReadTokens: call.cacheReadTokens } : {}),
-      ...(call.cacheWriteTokens !== undefined ? { cacheWriteTokens: call.cacheWriteTokens } : {}),
-      modelProvider: call.provider,
-      modelName: call.model,
-      costMicros,
-    });
-  },
-});
+export const makeDaemonHook = (
+  builder: WakeCostBuilder,
+  logger?: { warn: (event: string, fields?: Record<string, unknown>) => void },
+): LLMCostHook => {
+  const warned = new Set<string>();
+  return {
+    onLlmCall: (call) => {
+      const priced = resolveLLMCost({
+        provider: call.provider,
+        model: call.model,
+        inputTokens: call.inputTokens,
+        outputTokens: call.outputTokens,
+        ...(call.cacheReadTokens !== undefined ? { cacheReadTokens: call.cacheReadTokens } : {}),
+        ...(call.cacheWriteTokens !== undefined ? { cacheWriteTokens: call.cacheWriteTokens } : {}),
+      });
+      let costMicros: USDMicros;
+      if (priced.ok) {
+        costMicros = priced.value;
+      } else {
+        costMicros = makeUSDMicros(0);
+        const key = `${call.provider}:${call.model}`;
+        if (logger && !warned.has(key)) {
+          warned.add(key);
+          logger.warn("daemon.cost.pricing.unknown", {
+            provider: call.provider,
+            model: call.model,
+            code: priced.error.code,
+            message: priced.error.message,
+            impact:
+              "wake cost reports as $0 until this model is added to packages/llm/src/pricing/catalog.ts",
+          });
+        }
+      }
+      builder.addLlmTokens({
+        inputTokens: call.inputTokens,
+        outputTokens: call.outputTokens,
+        ...(call.cacheReadTokens !== undefined ? { cacheReadTokens: call.cacheReadTokens } : {}),
+        ...(call.cacheWriteTokens !== undefined ? { cacheWriteTokens: call.cacheWriteTokens } : {}),
+        modelProvider: call.provider,
+        modelName: call.model,
+        costMicros,
+      });
+    },
+  };
+};
 
 /**
  * Parse an `"owner/repo"` write-scope key into a typed
@@ -283,6 +310,9 @@ interface BuildAgentClientsArgs {
   readonly costBuilder?: WakeCostBuilder;
   readonly dryRun: boolean;
   readonly ollamaBaseUrl: string | undefined;
+  /** Optional logger so the cost hook can emit `daemon.cost.pricing.unknown`
+   *  warns when a model isn't in the pricing catalog (harness#251). */
+  readonly logger?: { warn: (event: string, fields?: Record<string, unknown>) => void };
 }
 
 interface BuildAgentClientsResult {
@@ -306,6 +336,7 @@ const buildAgentClients = ({
   costBuilder,
   dryRun,
   ollamaBaseUrl,
+  logger,
 }: BuildAgentClientsArgs): BuildAgentClientsResult => {
   const result: {
     llm?: LLMClient;
@@ -324,7 +355,7 @@ const buildAgentClients = ({
       if (!resolvedModel) {
         result.llmSkipReason = `no model for provider "${agent.llm.provider}" (pin role.md llm.model)`;
       } else {
-        const costHook = costBuilder ? makeDaemonHook(costBuilder) : undefined;
+        const costHook = costBuilder ? makeDaemonHook(costBuilder, logger) : undefined;
         if (providerDef.envKeyName === null) {
           // Keyless provider (e.g. local Ollama).
           result.llm = createLLMClient({
@@ -1199,6 +1230,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               costBuilder,
               dryRun,
               ollamaBaseUrl,
+              logger,
             });
             const firstBranchScope = capturedAgent.githubWriteScopes.branchCommits[0];
             const targetRepo = firstBranchScope ? parseRepoKey(firstBranchScope.repo) : undefined;
