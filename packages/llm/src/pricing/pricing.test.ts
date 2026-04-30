@@ -120,6 +120,48 @@ describe("resolveLLMCost", () => {
     if (result.ok) expect(result.value.value).toBe(1_250);
   });
 
+  it("gpt-5.5 50K input + 8K output computes against verified pricing", () => {
+    // gpt-5.5: $5/M input, $30/M output (verified 2026-04-30)
+    // input:  50_000 * 5_000_000 / 1M = 250_000 micros
+    // output:  8_000 * 30_000_000 / 1M = 240_000 micros
+    // total: 490_000 micros = $0.49
+    const result = resolveLLMCost({
+      provider: "openai",
+      model: "gpt-5.5",
+      inputTokens: 50_000,
+      outputTokens: 8_000,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.value).toBe(490_000);
+  });
+
+  it("gpt-5.4-pro applies the deep-tier $30/$180 rates", () => {
+    // input:  1_000 * 30_000_000 / 1M = 30_000 micros
+    // output: 1_000 * 180_000_000 / 1M = 180_000 micros
+    const result = resolveLLMCost({
+      provider: "openai",
+      model: "gpt-5.4-pro",
+      inputTokens: 1_000,
+      outputTokens: 1_000,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.value).toBe(210_000);
+  });
+
+  it("claude-opus-4-7 applies cache read at 0.1× input", () => {
+    // Opus 4.7: $5/M input, $25/M output, $0.50/M cache read.
+    // 100_000 cache read * 500_000 / 1M = 50_000 micros
+    const result = resolveLLMCost({
+      provider: "anthropic",
+      model: "claude-opus-4-7",
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 100_000,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.value).toBe(50_000);
+  });
+
   it("Sonnet 4.5 mixed 50K input + 8K output matches hand computation", () => {
     // input: 50_000 * 3_000_000 / 1M = 150_000 micros
     // output: 8_000 * 15_000_000 / 1M = 120_000 micros
