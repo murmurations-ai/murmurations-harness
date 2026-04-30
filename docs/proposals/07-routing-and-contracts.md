@@ -1,10 +1,11 @@
 # Architectural Proposal 07: Routing & Contracts
 
-- **Status:** Draft — engineering circle review requested
+- **Status:** Draft — incorporating engineering circle amendments (review in progress until 2026-05-07)
 - **Date:** 2026-04-30
 - **Author:** Source (Nori / Kozan)
 - **Scope:** three boundary contracts; ~1 sprint of focused work
 - **Tracks:** [#232](https://github.com/murmurations-ai/murmurations-harness/issues/232), [#235](https://github.com/murmurations-ai/murmurations-harness/issues/235), [#236](https://github.com/murmurations-ai/murmurations-harness/issues/236)
+- **Amendments incorporated:** see § Amendments at end of document
 
 ## Context
 
@@ -112,6 +113,8 @@ export type OperationalGap =
 
 This sits between the Zod parse and the runtime composition. The Zod schema continues to allow defaults (templates, tests need this); the operational validator declares which defaults are dangerous in a real murmuration.
 
+**Constraint on `reason` content** (security-agent amendment, 2026-04-30): the `reason` string must be constructed from static template strings plus configuration values that the operator already controls (agent id, source kind, repo coordinate). It must not embed dynamic system data — full filesystem paths, environment variables, raw stack traces, or anything that could leak host internals through a doctor or log surface. Acceptable: `` `Agent '${agentId}' has source 'github-issue' but no scopes defined` ``. Not acceptable: `` `Agent failed at /Users/operator/.../role.md line 42` ``.
+
 **2.2 Round-trip integration test.** New `identity.operational-completeness.test.ts` with one fixture per `OperationalGap` code, asserting the validator returns the expected gap. New `daemon.boot.gaps.test.ts` asserting that when an `error`-severity gap is present, daemon boot logs `daemon.compose.agent.gaps` and (if `runtime.allow_incomplete_agents !== true` in harness.yaml) refuses to register the agent.
 
 **2.3 Non-silent failure path.** Three call sites:
@@ -164,7 +167,9 @@ These three boundaries are the in-scope work for this proposal. The principles b
 
 2. **Round-trip tests for cross-module behavior.** Any "X causes Y to happen" that spans more than one module needs an integration test. Unit tests of X and Y separately do not catch contract drift; they only catch implementation bugs within each module.
 
-3. **Loud-on-zero.** When a system expects N items but finds 0, that is almost always wrong. Treat zero as a warning by default. Suppress warnings only with explicit operator opt-in (`harness.yaml: runtime.allow_zero_signals: true` or similar).
+3. **Loud-on-zero.** When a system expects N items but finds 0, that is almost always wrong. Treat zero as a warning by default. Suppress warnings only with explicit operator opt-in (`harness.yaml: runtime.allow_zero_signals: true` or similar). When suppression is active, the system must announce it loudly, not silently honor it (security-agent amendment, 2026-04-30):
+   - At daemon boot, log a `WARN`-level message to stderr: `SECURITY: Silent signal degradation is enabled via harness.yaml. Operational warnings will be suppressed.`
+   - `murmuration doctor` must include a check that flags `runtime.allow_zero_signals: true` as a `warning`-severity finding, with the reasoning that the operator has opted out of drift detection. This way, the suppression is visible to anyone running doctor, not just to the operator who set it.
 
 4. **Schema validity is not operational completeness.** Zod (or any schema layer) tells you the shape is parseable. It does not tell you the agent will function. A second validation layer between schema parse and runtime composition is required when defaults are sensible for templates but dangerous for production.
 
@@ -248,6 +253,34 @@ The engineering circle is asked to consent, object, or amend on:
 4. **Opt-out posture** — warnings on by default; operators must explicitly silence them.
 
 If consent is reached, the next step is for engineering-lead to file the implementation ADR and break this proposal into the three sub-PRs.
+
+## Amendments
+
+This section catalogues amendments incorporated during the consent round, with attribution to the agent who proposed them. Each amendment is also reflected inline in the body of the proposal.
+
+### A1 — `OperationalGap.reason` content constraint
+
+- **Proposed by:** security-agent (#25)
+- **Filed:** 2026-04-30, [PR #237 review](https://github.com/murmurations-ai/murmurations-harness/pull/237#issuecomment-4353550490)
+- **Incorporated:** Boundary 2, deliverable 2.1 — added "Constraint on `reason` content" paragraph
+- **Rule:** `OperationalGap.reason` must be built from static template strings + operator-controlled configuration values. Must not embed dynamic system data (filesystem paths, environment variables, raw stack traces) that could leak host internals through doctor output or log surfaces.
+- **Rationale:** The gap reasons surface in `murmuration doctor` output and daemon logs that operators may share or post in support channels; the data inside them is therefore a low-grade information disclosure surface. Static-template construction keeps that surface auditable.
+
+### A2 — `governance/schema-baseline.json` security review (no change)
+
+- **Proposed by:** security-agent (#25)
+- **Filed:** 2026-04-30, [PR #237 review](https://github.com/murmurations-ai/murmurations-harness/pull/237#issuecomment-4353550490)
+- **Incorporated:** No proposal change required. Recorded for future reference.
+- **Finding:** `governance/schema-baseline.json` is not a meaningful new attack surface. It is a JSON data file consumed by a comparison routine, not executed. An attacker with commit access could modify it, but that attacker can also modify role.md directly — this feature does not lower the bar. Use a standard safe JSON parser at the call site (already implied by existing harness patterns).
+- **Implication:** No special access control is needed on the baseline file. Standard repo permissions apply.
+
+### A3 — `runtime.allow_zero_signals` must announce itself
+
+- **Proposed by:** security-agent (#25)
+- **Filed:** 2026-04-30, [PR #237 review](https://github.com/murmurations-ai/murmurations-harness/pull/237#issuecomment-4353550490)
+- **Incorporated:** Cross-cutting principle 3 ("Loud-on-zero") — added the boot-time `WARN` log requirement and the doctor check requirement.
+- **Rule:** When `runtime.allow_zero_signals: true` is active, the daemon must log a prominent stderr `WARN` at boot: `SECURITY: Silent signal degradation is enabled via harness.yaml. Operational warnings will be suppressed.` `murmuration doctor` must surface the active suppression as a `warning`-severity finding.
+- **Rationale:** The escape hatch is necessary, but a silent escape hatch defeats the entire "loud-on-zero" purpose. Visibility-on-suppression keeps the cost of opting out commensurate with the cost of operating without drift detection.
 
 ## Links
 
