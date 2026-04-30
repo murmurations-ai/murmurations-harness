@@ -211,6 +211,16 @@ describe("parseWakeActions", () => {
     expect(actions).toHaveLength(1);
     expect(actions[0]?.kind).toBe("label-issue");
   });
+
+  it("commit-file without fileContent is invalid", () => {
+    const text = '```actions\n[{"kind": "commit-file", "filePath": "a.md"}]\n```';
+    expect(parseWakeActions(text)).toHaveLength(0);
+  });
+
+  it("commit-file without filePath is invalid", () => {
+    const text = '```actions\n[{"kind": "commit-file", "fileContent": "hello"}]\n```';
+    expect(parseWakeActions(text)).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -279,6 +289,41 @@ describe("validateWake", () => {
     expect(v.actionItemsAddressed).toBe(0);
     expect(v.productive).toBe(false);
     expect(v.reason).toContain("none addressed");
+  });
+
+  it("does NOT count an action item as addressed when its receipt failed (Boundary 5)", () => {
+    // Same anti-pattern as a wakeSummary-only mention: the agent emitted
+    // an action but it never landed (write-scope violation, GitHub error,
+    // dry-run). Treat as not addressed.
+    const actionItems = [makeIssueSignal(100, ["action-item", "assigned:test"])];
+    const result = {
+      ...emptyResult,
+      actions: [{ kind: "comment-issue" as const, issueNumber: 100, body: "done" }],
+    };
+    const receipts = [
+      {
+        action: { kind: "comment-issue" as const, issueNumber: 100, body: "done" },
+        success: false,
+        error: "scope-violation",
+      },
+    ];
+    const v = validateWake({ actionItems, signals: [] }, result, receipts);
+    expect(v.actionItemsAssigned).toBe(1);
+    expect(v.actionItemsAddressed).toBe(0);
+    expect(v.productive).toBe(false);
+  });
+
+  it("does NOT count an action item as addressed when an action was returned but never executed (no receipt)", () => {
+    // Intent without execution is the same Boundary 5 anti-pattern.
+    const actionItems = [makeIssueSignal(101, ["action-item", "assigned:test"])];
+    const result = {
+      ...emptyResult,
+      actions: [{ kind: "comment-issue" as const, issueNumber: 101, body: "done" }],
+    };
+    const v = validateWake({ actionItems, signals: [] }, result, []);
+    expect(v.actionItemsAssigned).toBe(1);
+    expect(v.actionItemsAddressed).toBe(0);
+    expect(v.productive).toBe(false);
   });
 
   it("flags unaddressed action items", () => {
@@ -424,6 +469,18 @@ describe("validateWake", () => {
           sourceAgentId: makeAgentId("test-agent"),
         },
       ],
+    };
+    const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
+    expect(v.directivesUnaddressed).toEqual([{ issueNumber: 5, reason: "no-structured-action" }]);
+  });
+
+  it("uses word-boundary matching for narrative-only-claim: directive #5 + wakeSummary mentioning only #592 classifies as no-structured-action, not narrative-only-claim", () => {
+    // Without word-boundary matching, plain `wakeSummary.includes("#5")`
+    // would false-positive on `#592` and misclassify the reason.
+    const directive = makeIssueSignal(5, ["source-directive", "assigned:test"]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "I have posted CONSENT on #592",
     };
     const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
     expect(v.directivesUnaddressed).toEqual([{ issueNumber: 5, reason: "no-structured-action" }]);
@@ -648,14 +705,35 @@ describe("amendWakeSummaryWithValidation", () => {
     expect(amended).toContain("directives_unaddressed: 1 (#1 no-structured-action)");
   });
 
-  it("commit-file without fileContent is invalid", () => {
-    const text = '```actions\n[{"kind": "commit-file", "filePath": "a.md"}]\n```';
-    expect(parseWakeActions(text)).toHaveLength(0);
-  });
+  it("does not rewrite a body line that quotes 'effectiveness: high' from a prior digest", () => {
+    // Header reports 'medium', body quotes a prior wake's `effectiveness: high`.
+    // The downgrade attribution must touch only the header line; otherwise we
+    // corrupt the persisted body and produce a lying attribution
+    // ("downgraded from agent-reported 'high'" — agent reported 'medium').
+    const summaryWithBody = `[agent] wake xyz
+  model: test
+  signal_count: 5
+  effectiveness: medium
+  governance_event: REPORT done
 
-  it("commit-file without filePath is invalid", () => {
-    const text = '```actions\n[{"kind": "commit-file", "fileContent": "hello"}]\n```';
-    expect(parseWakeActions(text)).toHaveLength(0);
+---
+
+Last wake produced:
+  signal_count: 8
+  effectiveness: high
+  governance_event: REPORT done
+`;
+    const v = {
+      productive: false,
+      artifactCount: 0,
+      actionItemsAddressed: 0,
+      actionItemsAssigned: 0,
+      directivesUnaddressed: [{ issueNumber: 1, reason: "narrative-only-claim" as const }],
+    };
+    const amended = amendWakeSummaryWithValidation(summaryWithBody, v);
+    expect(amended).toContain("\n  effectiveness: high\n");
+    expect(amended).not.toContain("downgraded from agent-reported 'high'");
+    expect(amended).toContain("  effectiveness: medium");
   });
 });
 

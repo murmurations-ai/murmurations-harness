@@ -545,11 +545,7 @@ export interface WakeActionReceipt {
  */
 export interface UnaddressedDirective {
   readonly issueNumber: number;
-  readonly reason:
-    | "no-structured-action"
-    | "no-successful-receipt"
-    | "narrative-only-claim"
-    | "governance-event-missing";
+  readonly reason: "no-structured-action" | "no-successful-receipt" | "narrative-only-claim";
 }
 
 export interface WakeValidationResult {
@@ -631,15 +627,15 @@ export const validateWake = (
   let actionItemsAddressed = 0;
 
   if (actionItemsAssigned > 0) {
-    // Check which action items were addressed by structured action
-    // referencing the issue number. Narrative mention in wakeSummary
-    // does NOT count as addressing — that's Boundary 5 hallucination.
+    // Check which action items were addressed by a *successful* action
+    // receipt referencing the issue number. Intent without a successful
+    // receipt (i.e. an action returned in result.actions but never executed,
+    // or executed and failed) is the same Boundary 5 anti-pattern: narration
+    // of "I will/did" without structured evidence the action landed.
     for (const item of context.actionItems) {
       if (item.kind !== "github-issue") continue;
       const issueNum = item.number;
-      const referenced =
-        result.actions.some((a) => a.issueNumber === issueNum) ||
-        actionReceipts.some((r) => r.action.issueNumber === issueNum);
+      const referenced = actionReceipts.some((r) => r.action.issueNumber === issueNum && r.success);
       if (referenced) actionItemsAddressed++;
     }
   }
@@ -708,7 +704,7 @@ export const validateWake = (
       continue;
     }
 
-    if (result.wakeSummary.includes(`#${String(issueNum)}`)) {
+    if (matchers.some((re) => re.test(result.wakeSummary))) {
       directivesUnaddressed.push({ issueNumber: issueNum, reason: "narrative-only-claim" });
       continue;
     }
@@ -781,18 +777,31 @@ export const amendWakeSummaryWithValidation = (
   const plural = validation.directivesUnaddressed.length === 1 ? "directive" : "directives";
   const downgradeAttribution = `low (downgraded from agent-reported 'high' due to ${String(validation.directivesUnaddressed.length)} unaddressed ${plural})`;
 
-  let amended = summary;
+  // Apply amendments only to the header section of the digest (the
+  // structured pre-`---` block built by the runner). Splitting on the
+  // first `\n---\n` keeps body content (which may quote prior digests'
+  // `effectiveness: high` lines verbatim) untouched, and prevents the
+  // downgrade attribution from rewriting an unrelated body line.
+  const sep = "\n---\n";
+  const sepIdx = summary.indexOf(sep);
+  const header = sepIdx >= 0 ? summary.slice(0, sepIdx) : summary;
+  const rest = sepIdx >= 0 ? summary.slice(sepIdx) : "";
+
+  let amendedHeader = header;
 
   const signalCountRegex = /^(\s+signal_count:.*)$/m;
-  if (signalCountRegex.test(amended)) {
-    amended = amended.replace(signalCountRegex, `$1\n${directivesLine}`);
+  if (signalCountRegex.test(amendedHeader)) {
+    amendedHeader = amendedHeader.replace(signalCountRegex, `$1\n${directivesLine}`);
   } else {
-    amended = `${amended}\n${directivesLine}`;
+    amendedHeader = `${amendedHeader}\n${directivesLine}`;
   }
 
-  amended = amended.replace(/^(\s+effectiveness:)\s+high\b.*$/m, `$1 ${downgradeAttribution}`);
+  amendedHeader = amendedHeader.replace(
+    /^(\s+effectiveness:)\s+high\b.*$/m,
+    `$1 ${downgradeAttribution}`,
+  );
 
-  return amended;
+  return amendedHeader + rest;
 };
 
 // ---------------------------------------------------------------------------
