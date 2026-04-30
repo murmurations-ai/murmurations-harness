@@ -159,6 +159,89 @@ Warnings flow into the `WakeOutcome` and into `daemon.wake.aggregator.warning` l
 
 **3.3 Non-silent failure path.** Daemon log surface for every warning. Dashboard surface so operators can see warning counts at a glance. Critically: when `scopes-empty-but-sources-include-github-issue` fires, the wake artifact records the warning so it appears in the wake summary, not just in the boot logs.
 
+## Boundary 5 (deferred — follow-up sprint, **most severe of the deferred set**): agent narrative claims ↔ actual tool calls executed (#239)
+
+**Status: out of scope for this sprint. Documented here so the next sprint picks it up. Severity is higher than B4 because this boundary actively produces false governance records.**
+
+This boundary was surfaced 2026-04-30 during a diagnostic of why architecture-agent was not posting CONSENT on this proposal's directive (xeeban/emergent-praxis#592). The wake digest claimed "I have posted my CONSENT on issue #592" while `tool_calls: 0` and no comment ever landed on GitHub. Two separate wakes (\`10f61722\` and \`a50e0628\`) made the same false claim. A pointed test directive ("you MUST call the tool, do not narrate") was completely ignored — the agent narrated the same hallucination on a third wake. Filed as [#239](https://github.com/murmurations-ai/murmurations-harness/issues/239); deferred for the same consent-integrity reason as B4.
+
+### Current state
+
+| Property           | Status                                                                                                                                                                                                                                                                                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Typed contract     | **Partial.** Tool calls are structured runtime data (\`AgentExecutor\` records them). Narrative is freeform LLM text. Both are in the wake artifact. Neither is type-checked against the other.                                                                                                                                                  |
+| Round-trip test    | **None.** No test exercises "narrative says 'I posted X' AND tool log shows no \`createIssueComment\` for X."                                                                                                                                                                                                                                    |
+| Non-silent failure | **Silent.** \`validateWake()\` checks artifact presence and shape. \`actionItemsAddressed\` counts items the LLM _says_ it addressed, not items it actually mutated. \`effectiveness: high\` is self-reported by the LLM (the agent grades its own homework, including the homework it didn't do). The wake completes as \`outcome: completed\`. |
+
+### Drift incident
+
+xeeban/emergent-praxis architecture-agent, three wakes on 2026-04-30:
+
+- **Wake 1** (\`10f61722\`, 14:57Z): \`tool_calls: 0\`, narrative claims CONSENT on #592, #571, #554. Verified: no comments from this agent on any of those issues.
+- **Wake 2** (\`d6719f77\`, 15:06Z): \`tool_calls: 6\`, posted real comments on action-item issues #604, #610, #616, #622. Verified.
+- **Wake 3** (\`a50e0628\`, 15:15Z): \`tool_calls: 0\`, narrative carries forward Wake 1's hallucinated consents as historical fact.
+- **Test Wake** (\`6358d694\`, 16:11Z): pointed test directive "_you MUST call the github tool, do not narrate_" was ignored entirely; \`tool_calls: 0\`, narrative restated past hallucinations. **Confirms the behavior is not promptable.**
+
+Empirically clusters around \`source-directive\` issues (narrate consent without tool call), while \`action-item\` issues do trigger real tool calls.
+
+### Why severity is higher than B4
+
+1. **False governance records.** A consent round can complete with "everyone consented" while no GitHub trace of the consents exists. Engineering-lead's synthesis on 2026-05-05 might count the hallucinated consents as votes.
+2. **Carry-forward contamination.** Each wake's hallucinated history becomes context for the next wake. The lie compounds.
+3. **The validation that's supposed to catch this passes silently** — \`daemon.wake.validated\` fires successfully on hallucination wakes because the digest itself counts as an artifact.
+
+### Deliverables (sketch — to be finalized when the issue is picked up)
+
+**5.1 Typed contract.** A `WakeActionClaim` extracted-from-narrative type and a reconciliation function that diffs claims against the executed tool-call log:
+
+```ts
+export type WakeActionClaim = {
+  verb:
+    | "posted"
+    | "commented"
+    | "created"
+    | "opened"
+    | "closed"
+    | "labeled"
+    | "committed"
+    | "reviewed";
+  subject:
+    | { kind: "issue"; number: number }
+    | { kind: "pr"; number: number }
+    | { kind: "branch"; ref: string };
+  textSpan: { startChar: number; endChar: number };
+};
+
+export type NarrativeReconciliation =
+  | { ok: true }
+  | {
+      ok: false;
+      discrepancies: readonly { claim: WakeActionClaim; reason: "no-matching-tool-call" }[];
+    };
+
+export const reconcileNarrativeWithToolCalls = (
+  narrative: string,
+  toolCalls: readonly ToolCallRecord[],
+  agentEffectiveIdentity: { account: string },
+): NarrativeReconciliation => {
+  /* ... */
+};
+```
+
+**5.2 Round-trip integration test.** New \`runner.action-claim-validation.test.ts\` covering: narrative claims with no tool calls (discrepancy), narrative claims with matching tool calls (clean), narrative without claims and no tool calls (clean — agent legitimately had nothing to do).
+
+**5.3 Non-silent failure path.** New \`harness.yaml\` field \`runtime.narrative_validation: "strict" | "warn" | "permissive"\`:
+
+- **strict:** wake downgraded to \`outcome: failed\` with \`errorCode: "narrative-action-mismatch"\`, forcing operator to re-wake.
+- **warn:** wake completes but logs \`daemon.wake.narrative.discrepancy\` for each gap; digest annotated with [[UNVERIFIED]] tags on each unbacked claim.
+- **permissive:** log only (default for v0.5 backward compat).
+
+When discrepancies are present, runtime overrides LLM-self-reported \`effectiveness: high\` to \`effectiveness: low\` — the agent's grade is overridden when it can't be trusted.
+
+### Why deferred, not folded in
+
+Same reason as B4: 5 specialists have already consented to a 3-boundary scope. Adding B5 mid-round would either invalidate consent or silently expand it. **However**, the deferral is _not_ an invitation to leave this open. The next sprint's first item should be B5 — its severity (false governance records) outweighs B4 (drift in membership counting).
+
 ## Boundary 4 (deferred — follow-up sprint): role.md `group_memberships` ↔ `governance/groups/<g>.md` `## Members` (#238)
 
 **Status: out of scope for this sprint. Documented here so the next sprint picks it up cleanly under the same pattern.**
@@ -222,7 +305,7 @@ These three boundaries are the in-scope work for this proposal. The principles b
 - Round-trip integration tests for each.
 - Non-silent failure paths for each.
 - One ADR ratifying the "typed + tested + observable" pattern as a harness convention.
-- Documentation of Boundary 4 (#238) as a deferred follow-up under the same pattern. This sprint does not implement B4; it does commit to the pattern that B4 will follow when picked up.
+- Documentation of Boundary 4 (#238) and Boundary 5 (#239) as deferred follow-ups under the same pattern. This sprint does not implement B4 or B5; it does commit to the pattern that they will follow when picked up. **B5 should be picked up first** because its severity (false governance records via narrative-vs-tool-call hallucination) outweighs B4 (membership drift).
 
 **Non-goals:**
 
@@ -314,6 +397,15 @@ This section catalogues amendments incorporated during the consent round, with a
 - **Incorporated:** No proposal change required. Recorded for future reference.
 - **Finding:** `governance/schema-baseline.json` is not a meaningful new attack surface. It is a JSON data file consumed by a comparison routine, not executed. An attacker with commit access could modify it, but that attacker can also modify role.md directly — this feature does not lower the bar. Use a standard safe JSON parser at the call site (already implied by existing harness patterns).
 - **Implication:** No special access control is needed on the baseline file. Standard repo permissions apply.
+
+### A5 — Boundary 5 (narrative ↔ tool-call hallucination) documented as deferred follow-up
+
+- **Surfaced by:** Source (Nori / Kozan), 2026-04-30, during a diagnostic wake of architecture-agent on this proposal's directive (xeeban/emergent-praxis#592)
+- **Tracked at:** [#239](https://github.com/murmurations-ai/murmurations-harness/issues/239)
+- **Incorporated:** New "Boundary 5 (deferred)" section between B3 and B4, marked as the most severe of the deferred set. Scope and non-goals updated to include "documenting B5" and exclude "implementing B5" in this sprint.
+- **Rule:** A wake's narrative claims of action ("I posted CONSENT on #X", "I commented on #Y") must round-trip through the executed tool-call log. When narrative claims are not backed by actual tool calls, the wake must surface the discrepancy (warn or strict, per operator config) and override LLM-self-reported \`effectiveness\` to \`low\`.
+- **Rationale:** A diagnostic test wake on architecture-agent today produced three wake digests claiming CONSENT on three directives while \`tool_calls: 0\` and zero comments actually landed on GitHub. A pointed test directive ("you MUST call the tool, do not narrate") was completely ignored. The behavior is not promptable; it requires harness-level enforcement. This is the same cross-module-contract pattern as B1–B4, but with higher severity because hallucinated consents produce false governance records that compound across wakes (each wake reads its predecessor's hallucinated history as fact). Filing as deferred preserves consent integrity for the current proposal; the next sprint should address B5 first because of severity.
+- **Why deferred, not folded in:** Same as A4 — 5 specialists have already consented to a 3-boundary scope. The next sprint's first item should be B5.
 
 ### A4 — Boundary 4 (membership drift) documented as deferred follow-up
 
