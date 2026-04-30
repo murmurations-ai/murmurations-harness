@@ -146,6 +146,76 @@ describe("runDirective — existing create path stays intact", () => {
   });
 });
 
+describe("runDirective — flag parsing and body sources", () => {
+  it("rejects unrecognized flags rather than silently ignoring them", async () => {
+    // Regression: previously `--body-file <path>` was accepted silently and
+    // its value (the path) was treated as a positional. Real bodies were
+    // dropped. Now unknown flags throw a helpful error.
+    await expect(
+      runDirective(
+        ["--group", "engineering", "--body-file", "/tmp/x.md", "--tier", "consent"],
+        root,
+      ),
+    ).rejects.toThrow(/unrecognized flag/);
+  });
+
+  it("does not treat a flag value as a positional body candidate", async () => {
+    // Regression: `--group engineering "real body"` previously worked, but
+    // `--group engineering --deadline 2026-05-07` produced a directive whose
+    // body was "2026-05-07" because the flag-value-tracking was naive. After
+    // the fix, --deadline is rejected as unknown rather than its value
+    // becoming the body.
+    await expect(runDirective(["--group", "x", "--deadline", "2026-05-07"], root)).rejects.toThrow(
+      /unrecognized flag/,
+    );
+  });
+
+  it("requires a body via positional or --body-file", async () => {
+    await expect(runDirective(["--all"], root)).rejects.toThrow(/provide a message body/);
+  });
+
+  it("reads body from --body-file when provided", async () => {
+    const bodyPath = join(root, "directive-body.md");
+    writeFileSync(bodyPath, "## Investigate hypothesis 1\n\nLong multi-line body content.", "utf8");
+    await runDirective(["--group", "engineering", "--body-file", bodyPath], root);
+
+    const files = readdirSync(join(root, ".murmuration", "items"));
+    const created = files.find((f) => f.endsWith(".json"));
+    expect(created).toBeDefined();
+    const item = JSON.parse(
+      readFileSync(join(root, ".murmuration", "items", created ?? ""), "utf8"),
+    ) as { title: string; body: string; labels: string[] };
+    // Title is the first non-empty line (no embedded newlines).
+    expect(item.title).toBe("[DIRECTIVE] ## Investigate hypothesis 1");
+    // Body contains the full file content.
+    expect(item.body).toContain("Long multi-line body content");
+    expect(item.labels).toContain("scope:group:engineering");
+  });
+
+  it("--body-file fails loudly when the path does not exist", async () => {
+    await expect(
+      runDirective(["--all", "--body-file", join(root, "missing.md")], root),
+    ).rejects.toThrow(/failed to read --body-file/);
+  });
+
+  it("--body-file requires a path argument", async () => {
+    await expect(runDirective(["--all", "--body-file"], root)).rejects.toThrow(
+      /--body-file requires a path/,
+    );
+  });
+
+  it("title from a multi-line positional body uses the first non-empty line", async () => {
+    await runDirective(["--all", "First line\n\nSecond paragraph here."], root);
+    const files = readdirSync(join(root, ".murmuration", "items"));
+    const created = files.find((f) => f.endsWith(".json"));
+    const item = JSON.parse(
+      readFileSync(join(root, ".murmuration", "items", created ?? ""), "utf8"),
+    ) as { title: string; body: string };
+    expect(item.title).toBe("[DIRECTIVE] First line");
+    expect(item.body).toContain("Second paragraph here");
+  });
+});
+
 // Silence the console output the create path emits.
 const noop = (): void => {
   /* swallow log output during tests */

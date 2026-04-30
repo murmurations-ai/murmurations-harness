@@ -11,6 +11,7 @@
  *   murmuration directive --root ../my-murmuration --agent 01-research "Validate this topic"
  *   murmuration directive --root ../my-murmuration --group content "Should this group hold meetings?"
  *   murmuration directive --root ../my-murmuration --all "Propose your ideal wake cadence"
+ *   murmuration directive --root ../my-murmuration --group content --body-file ./directive.md
  *   murmuration directive --root ../my-murmuration --list
  *   murmuration directive --root ../my-murmuration close <id>
  *   murmuration directive --root ../my-murmuration delete <id>   # local provider only
@@ -18,12 +19,32 @@
  */
 
 import { existsSync } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { buildCollaborationProvider, CollaborationBuildError } from "./collaboration-factory.js";
 
 const MANAGE_SUBCOMMANDS = new Set(["close", "delete", "edit"]);
+
+/**
+ * Flags that consume the next argv token as their value. Used by the
+ * positional-extraction logic so `--group engineering` doesn't treat
+ * `engineering` as a candidate for the body. Adding a new value-flag here
+ * is required for it to work — there is no implicit detection.
+ */
+const VALUE_FLAGS: ReadonlySet<string> = new Set([
+  "--root",
+  "--name",
+  "--agent",
+  "--group",
+  "--body-file",
+]);
+
+/**
+ * Boolean flags (no value). Combined with VALUE_FLAGS to form the full set
+ * of recognized flags. Anything else starting with `--` is rejected.
+ */
+const BOOLEAN_FLAGS: ReadonlySet<string> = new Set(["--all", "--list"]);
 
 /** Compute the local-provider path for a directive item by id. Local
  *  items live as YAML frontmatter markdown files under
@@ -101,6 +122,32 @@ export const runDirective = async (args: readonly string[], rootDir: string): Pr
   }
 
   // -------------------------------------------------------------------
+  // Reject unknown flags before doing anything else. Unknown flags used
+  // to be silently ignored, which caused `--body-file <path>` to drop
+  // through to the positional-body extractor and post a directive whose
+  // body was the value of whichever flag happened to come last (e.g. a
+  // deadline date). Failing fast here is cheap and avoids posting
+  // malformed directives that agents then file TENSIONs about.
+  // -------------------------------------------------------------------
+  const unknownFlags: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg?.startsWith("--")) continue;
+    if (VALUE_FLAGS.has(arg)) {
+      i++; // consume value
+      continue;
+    }
+    if (BOOLEAN_FLAGS.has(arg)) continue;
+    unknownFlags.push(arg);
+  }
+  if (unknownFlags.length > 0) {
+    throw new Error(
+      `murmuration directive: unrecognized flag(s): ${unknownFlags.join(", ")}. ` +
+        `Supported flags: ${[...VALUE_FLAGS, ...BOOLEAN_FLAGS].sort().join(", ")}.`,
+    );
+  }
+
+  // -------------------------------------------------------------------
   // Scope determination for create / list
   // -------------------------------------------------------------------
   const agentIdx = args.indexOf("--agent");
@@ -164,10 +211,48 @@ export const runDirective = async (args: readonly string[], rootDir: string): Pr
     return;
   }
 
-  // Body is the last positional argument
-  const body = args.filter((a) => !a.startsWith("--")).pop();
-  if (!body || body.startsWith("--")) {
-    throw new Error("murmuration directive: provide a message body as the last argument");
+  // Body source: --body-file <path> (preferred for multi-line content)
+  // OR the last true positional argument. The previous implementation
+  // built positionals as `args.filter(a => !a.startsWith("--"))`, which
+  // mistakenly treated value-of-flag tokens (e.g. the `engineering` after
+  // `--group`) as candidates and led to silent data loss when callers
+  // passed unrecognized flags carrying their real body content.
+  const bodyFileIdx = args.indexOf("--body-file");
+  let body: string | undefined;
+  if (bodyFileIdx >= 0) {
+    const bodyFilePath = args[bodyFileIdx + 1];
+    if (!bodyFilePath || bodyFilePath.startsWith("--")) {
+      throw new Error("murmuration directive: --body-file requires a path argument");
+    }
+    try {
+      body = (await readFile(bodyFilePath, "utf-8")).trim();
+    } catch (err) {
+      throw new Error(
+        `murmuration directive: failed to read --body-file ${bodyFilePath}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        { cause: err },
+      );
+    }
+  } else {
+    // Walk argv, skipping flags and their values; collect true positionals.
+    const positionals: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      if (arg === undefined) continue;
+      if (arg.startsWith("--")) {
+        if (VALUE_FLAGS.has(arg)) i++; // skip value
+        continue;
+      }
+      positionals.push(arg);
+    }
+    body = positionals.pop();
+  }
+  if (body === undefined || body.length === 0) {
+    throw new Error(
+      "murmuration directive: provide a message body via positional argument " +
+        "or --body-file <path>",
+    );
   }
 
   const directiveBody = [
@@ -181,8 +266,12 @@ export const runDirective = async (args: readonly string[], rootDir: string): Pr
     `_Created by \`murmuration directive\`. Agents will respond on their next wake._`,
   ].join("\n");
 
+  // Title: first non-empty line of the body, capped at 80 chars. Multi-line
+  // bodies (typical with --body-file) would otherwise produce a title with
+  // embedded newlines from a naive slice.
+  const titleSource = body.split("\n").find((line) => line.trim().length > 0) ?? body;
   const createResult = await provider.createItem({
-    title: `[DIRECTIVE] ${body.slice(0, 80)}`,
+    title: `[DIRECTIVE] ${titleSource.trim().slice(0, 80)}`,
     body: directiveBody,
     labels: ["source-directive", scopeLabel],
   });
