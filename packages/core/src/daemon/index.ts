@@ -38,6 +38,7 @@ import {
   type ResolvedModel,
   type SignalBundle,
   validateWake,
+  amendWakeSummaryWithValidation,
 } from "../execution/index.js";
 import type { LoadedAgentIdentity } from "../identity/index.js";
 import {
@@ -743,14 +744,48 @@ export class Daemon {
 
       // Post-wake validation — "Did Work" tracking
       const validation = isCompleted(result)
-        ? validateWake({ actionItems: context.signals.actionItems }, result, actionReceipts)
+        ? validateWake(
+            {
+              actionItems: context.signals.actionItems,
+              signals: context.signals.signals,
+            },
+            result,
+            actionReceipts,
+          )
         : {
             productive: false,
             artifactCount: 0,
             actionItemsAddressed: 0,
             actionItemsAssigned: 0,
+            directivesUnaddressed: [],
             reason: "wake did not complete",
           };
+
+      // Boundary 5 Phase 1: surface unaddressed directives.
+      //
+      // Posture is "operator-visible only" in v0.5.2:
+      //   - The wake's `outcome` stays "completed" — circuit-breaker and
+      //     idle-wake counters are computed from `outcome` and from
+      //     `validation.artifactCount` (governance events count as
+      //     artifacts), not from `validation.directivesUnaddressed`.
+      //   - A dedicated `daemon.wake.directives.unaddressed` warn log
+      //     fires so operators can detect the hallucination pattern.
+      //   - The digest is amended at the `record()` call below.
+      //
+      // No automatic remediation (no failed-outcome, no circuit-breaker
+      // increment) — that lands with Phase 2 (#239) when the validator
+      // gains structured `directiveRefs` and is hard-to-bypass enough
+      // to drive enforcement. v0.5.2 is detection without enforcement.
+      if (isCompleted(result) && validation.directivesUnaddressed.length > 0) {
+        this.#logger.warn("daemon.wake.directives.unaddressed", {
+          agentId: agent.agentId,
+          wakeId: event.wakeId.value,
+          unaddressed: validation.directivesUnaddressed.map((d) => ({
+            issueNumber: d.issueNumber,
+            reason: d.reason,
+          })),
+        });
+      }
 
       if (!validation.productive && isCompleted(result)) {
         this.#logger.info("daemon.wake.idle", {
@@ -759,6 +794,7 @@ export class Daemon {
           reason: validation.reason,
           actionItemsAssigned: validation.actionItemsAssigned,
           actionItemsAddressed: validation.actionItemsAddressed,
+          directivesUnaddressedCount: validation.directivesUnaddressed.length,
         });
       } else if (isCompleted(result)) {
         this.#logger.info("daemon.wake.validated", {
@@ -786,7 +822,17 @@ export class Daemon {
 
       this.#logResult(result);
       if (this.#runArtifactWriter) {
-        await this.#runArtifactWriter.record(result, result.costRecord, this.#logger);
+        // Boundary 5 Phase 1: when the validator found unaddressed directives,
+        // amend the digest's wake summary so the discrepancy is visible to
+        // operators reading the run record (not just daemon logs).
+        const recordedResult: AgentResult =
+          isCompleted(result) && validation.directivesUnaddressed.length > 0
+            ? {
+                ...result,
+                wakeSummary: amendWakeSummaryWithValidation(result.wakeSummary, validation),
+              }
+            : result;
+        await this.#runArtifactWriter.record(recordedResult, result.costRecord, this.#logger);
       }
 
       // Governance event routing — hand emitted events to the plugin,
