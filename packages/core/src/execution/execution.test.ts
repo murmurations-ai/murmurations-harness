@@ -6,6 +6,7 @@ import {
   parseSelfReflection,
   renderSignalForPrompt,
   validateWake,
+  amendWakeSummaryWithValidation,
   isKilled,
   isTimedOut,
   makeAgentId,
@@ -210,111 +211,6 @@ describe("parseWakeActions", () => {
     expect(actions).toHaveLength(1);
     expect(actions[0]?.kind).toBe("label-issue");
   });
-});
-
-// ---------------------------------------------------------------------------
-// validateWake
-// ---------------------------------------------------------------------------
-
-describe("validateWake", () => {
-  const emptyResult = { actions: [], outputs: [], governanceEvents: [], wakeSummary: "" };
-
-  it("marks wake as idle when no artifacts produced and no action items", () => {
-    const v = validateWake({ actionItems: [] }, emptyResult, []);
-    expect(v.productive).toBe(false);
-    expect(v.artifactCount).toBe(0);
-    expect(v.reason).toContain("no artifacts");
-  });
-
-  it("marks wake as productive when actions succeed", () => {
-    const receipts = [
-      { action: { kind: "label-issue" as const, issueNumber: 1, label: "x" }, success: true },
-    ];
-    const v = validateWake({ actionItems: [] }, emptyResult, receipts);
-    expect(v.productive).toBe(true);
-    expect(v.artifactCount).toBe(1);
-  });
-
-  it("counts action items addressed by issue number in wake summary", () => {
-    const actionItems = [
-      {
-        kind: "github-issue" as const,
-        id: "github-issue:x/y#259",
-        trust: "trusted" as const,
-        fetchedAt: new Date(),
-        number: 259,
-        title: "Action item",
-        url: "https://x",
-        labels: ["action-item", "assigned:02-content-production"],
-        excerpt: "",
-      },
-    ];
-    const result = { ...emptyResult, wakeSummary: "Addressed #259 — coordinated with team." };
-    const v = validateWake({ actionItems }, result, []);
-    expect(v.actionItemsAssigned).toBe(1);
-    expect(v.actionItemsAddressed).toBe(1);
-    expect(v.productive).toBe(true);
-  });
-
-  it("flags unaddressed action items", () => {
-    const actionItems = [
-      {
-        kind: "github-issue" as const,
-        id: "github-issue:x/y#100",
-        trust: "trusted" as const,
-        fetchedAt: new Date(),
-        number: 100,
-        title: "Do something",
-        url: "https://x",
-        labels: ["action-item", "assigned:test"],
-        excerpt: "",
-      },
-    ];
-    const v = validateWake({ actionItems }, emptyResult, []);
-    expect(v.productive).toBe(false);
-    expect(v.actionItemsAssigned).toBe(1);
-    expect(v.actionItemsAddressed).toBe(0);
-    expect(v.reason).toContain("none addressed");
-  });
-
-  it("counts governance events as artifacts", () => {
-    const result = { ...emptyResult, governanceEvents: [{ kind: "tension", payload: {} }] };
-    const v = validateWake({ actionItems: [] }, result, []);
-    expect(v.productive).toBe(true);
-    expect(v.artifactCount).toBe(1);
-  });
-
-  it("handles mixed addressed and unaddressed action items", () => {
-    const actionItems = [
-      {
-        kind: "github-issue" as const,
-        id: "a",
-        trust: "trusted" as const,
-        fetchedAt: new Date(),
-        number: 10,
-        title: "A",
-        url: "x",
-        labels: ["action-item", "assigned:x"],
-        excerpt: "",
-      },
-      {
-        kind: "github-issue" as const,
-        id: "b",
-        trust: "trusted" as const,
-        fetchedAt: new Date(),
-        number: 20,
-        title: "B",
-        url: "x",
-        labels: ["action-item", "assigned:x"],
-        excerpt: "",
-      },
-    ];
-    const result = { ...emptyResult, wakeSummary: "Addressed #10 but not the other." };
-    const v = validateWake({ actionItems }, result, []);
-    expect(v.actionItemsAssigned).toBe(2);
-    expect(v.actionItemsAddressed).toBe(1);
-    expect(v.productive).toBe(true);
-  });
 
   it("commit-file without fileContent is invalid", () => {
     const text = '```actions\n[{"kind": "commit-file", "filePath": "a.md"}]\n```';
@@ -324,6 +220,520 @@ describe("validateWake", () => {
   it("commit-file without filePath is invalid", () => {
     const text = '```actions\n[{"kind": "commit-file", "fileContent": "hello"}]\n```';
     expect(parseWakeActions(text)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateWake
+// ---------------------------------------------------------------------------
+
+describe("validateWake", () => {
+  const emptyResult = { actions: [], outputs: [], governanceEvents: [], wakeSummary: "" };
+  const emptyContext = { actionItems: [], signals: [] };
+
+  const makeIssueSignal = (
+    number: number,
+    extraLabels: readonly string[] = ["action-item", "assigned:test"],
+  ) => ({
+    kind: "github-issue" as const,
+    id: `github-issue:x/y#${String(number)}`,
+    trust: "trusted" as const,
+    fetchedAt: new Date(),
+    number,
+    title: `Issue ${String(number)}`,
+    url: `https://x/${String(number)}`,
+    labels: extraLabels,
+    excerpt: "",
+  });
+
+  it("marks wake as idle when no artifacts produced and no action items", () => {
+    const v = validateWake(emptyContext, emptyResult, []);
+    expect(v.productive).toBe(false);
+    expect(v.artifactCount).toBe(0);
+    expect(v.directivesUnaddressed).toEqual([]);
+    expect(v.reason).toContain("no artifacts");
+  });
+
+  it("marks wake as productive when actions succeed", () => {
+    const receipts = [
+      { action: { kind: "label-issue" as const, issueNumber: 1, label: "x" }, success: true },
+    ];
+    const v = validateWake(emptyContext, emptyResult, receipts);
+    expect(v.productive).toBe(true);
+    expect(v.artifactCount).toBe(1);
+  });
+
+  it("counts action items addressed by structured action receipt (Boundary 5: not by wakeSummary mention)", () => {
+    const actionItems = [makeIssueSignal(259, ["action-item", "assigned:02-content-production"])];
+    const result = { ...emptyResult, wakeSummary: "Addressed #259 — coordinated with team." };
+    const receipts = [
+      {
+        action: { kind: "comment-issue" as const, issueNumber: 259, body: "done" },
+        success: true,
+      },
+    ];
+    const v = validateWake({ actionItems, signals: [] }, result, receipts);
+    expect(v.actionItemsAssigned).toBe(1);
+    expect(v.actionItemsAddressed).toBe(1);
+    expect(v.productive).toBe(true);
+  });
+
+  it("does NOT count an action item as addressed when only mentioned in wakeSummary (Boundary 5)", () => {
+    const actionItems = [makeIssueSignal(259, ["action-item", "assigned:test"])];
+    const result = {
+      ...emptyResult,
+      wakeSummary: "I have addressed #259 — review complete.",
+    };
+    const v = validateWake({ actionItems, signals: [] }, result, []);
+    expect(v.actionItemsAssigned).toBe(1);
+    expect(v.actionItemsAddressed).toBe(0);
+    expect(v.productive).toBe(false);
+    expect(v.reason).toContain("none addressed");
+  });
+
+  it("does NOT count an action item as addressed when its receipt failed (Boundary 5)", () => {
+    // Same anti-pattern as a wakeSummary-only mention: the agent emitted
+    // an action but it never landed (write-scope violation, GitHub error,
+    // dry-run). Treat as not addressed.
+    const actionItems = [makeIssueSignal(100, ["action-item", "assigned:test"])];
+    const result = {
+      ...emptyResult,
+      actions: [{ kind: "comment-issue" as const, issueNumber: 100, body: "done" }],
+    };
+    const receipts = [
+      {
+        action: { kind: "comment-issue" as const, issueNumber: 100, body: "done" },
+        success: false,
+        error: "scope-violation",
+      },
+    ];
+    const v = validateWake({ actionItems, signals: [] }, result, receipts);
+    expect(v.actionItemsAssigned).toBe(1);
+    expect(v.actionItemsAddressed).toBe(0);
+    expect(v.productive).toBe(false);
+  });
+
+  it("does NOT count an action item as addressed when an action was returned but never executed (no receipt)", () => {
+    // Intent without execution is the same Boundary 5 anti-pattern.
+    const actionItems = [makeIssueSignal(101, ["action-item", "assigned:test"])];
+    const result = {
+      ...emptyResult,
+      actions: [{ kind: "comment-issue" as const, issueNumber: 101, body: "done" }],
+    };
+    const v = validateWake({ actionItems, signals: [] }, result, []);
+    expect(v.actionItemsAssigned).toBe(1);
+    expect(v.actionItemsAddressed).toBe(0);
+    expect(v.productive).toBe(false);
+  });
+
+  it("flags unaddressed action items", () => {
+    const actionItems = [makeIssueSignal(100, ["action-item", "assigned:test"])];
+    const v = validateWake({ actionItems, signals: [] }, emptyResult, []);
+    expect(v.productive).toBe(false);
+    expect(v.actionItemsAssigned).toBe(1);
+    expect(v.actionItemsAddressed).toBe(0);
+    expect(v.reason).toContain("none addressed");
+  });
+
+  it("counts governance events as artifacts", () => {
+    const result = { ...emptyResult, governanceEvents: [{ kind: "tension", payload: {} }] };
+    const v = validateWake(emptyContext, result, []);
+    expect(v.productive).toBe(true);
+    expect(v.artifactCount).toBe(1);
+  });
+
+  it("handles mixed addressed and unaddressed action items via structured actions only", () => {
+    const actionItems = [
+      makeIssueSignal(10, ["action-item", "assigned:x"]),
+      makeIssueSignal(20, ["action-item", "assigned:x"]),
+    ];
+    const receipts = [
+      { action: { kind: "label-issue" as const, issueNumber: 10, label: "ok" }, success: true },
+    ];
+    const v = validateWake(
+      { actionItems, signals: [] },
+      { ...emptyResult, wakeSummary: "Addressed #10 but mentioned #20." },
+      receipts,
+    );
+    expect(v.actionItemsAssigned).toBe(2);
+    expect(v.actionItemsAddressed).toBe(1); // #20 mention does NOT count
+    expect(v.productive).toBe(true); // #10 is addressed
+  });
+
+  // Boundary 5 Phase 1 — directive validation
+
+  it("counts a directive as addressed when a successful comment-issue receipt targets it", () => {
+    const directive = makeIssueSignal(592, [
+      "source-directive",
+      "tier: consent",
+      "assigned:architecture-agent",
+    ]);
+    const receipts = [
+      {
+        action: { kind: "comment-issue" as const, issueNumber: 592, body: "CONSENT" },
+        success: true,
+      },
+    ];
+    const v = validateWake({ actionItems: [], signals: [directive] }, emptyResult, receipts);
+    expect(v.directivesUnaddressed).toEqual([]);
+    expect(v.productive).toBe(true);
+  });
+
+  it("flags a directive as unaddressed (narrative-only-claim) when wakeSummary mentions it but no action exists", () => {
+    const directive = makeIssueSignal(592, ["source-directive", "assigned:architecture-agent"]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "I have posted my CONSENT to the proposal on issue #592.",
+    };
+    const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
+    expect(v.directivesUnaddressed).toEqual([{ issueNumber: 592, reason: "narrative-only-claim" }]);
+    expect(v.productive).toBe(false);
+    expect(v.reason).toContain("not addressed by structured evidence");
+  });
+
+  it("flags a directive as no-structured-action when the wake produced nothing referring to it", () => {
+    const directive = makeIssueSignal(571, ["source-directive", "assigned:architecture-agent"]);
+    const v = validateWake({ actionItems: [], signals: [directive] }, emptyResult, []);
+    expect(v.directivesUnaddressed).toEqual([{ issueNumber: 571, reason: "no-structured-action" }]);
+    expect(v.productive).toBe(false);
+  });
+
+  it("flags a directive as no-successful-receipt when an action targeted it but the receipt failed", () => {
+    const directive = makeIssueSignal(554, ["source-directive", "assigned:architecture-agent"]);
+    const receipts = [
+      {
+        action: { kind: "comment-issue" as const, issueNumber: 554, body: "CONSENT" },
+        success: false,
+        error: "scope-violation",
+      },
+    ];
+    const v = validateWake({ actionItems: [], signals: [directive] }, emptyResult, receipts);
+    expect(v.directivesUnaddressed).toEqual([
+      { issueNumber: 554, reason: "no-successful-receipt" },
+    ]);
+    expect(v.productive).toBe(false);
+  });
+
+  it("counts a directive as addressed when a governance event references the issue number (legitimate 'I cannot act' path)", () => {
+    const directive = makeIssueSignal(592, ["source-directive", "assigned:test"]);
+    const result = {
+      ...emptyResult,
+      governanceEvents: [
+        {
+          kind: "agent-governance-event" as const,
+          payload: {
+            topic: "TENSION: I cannot act on directive #592 because the github MCP is unavailable",
+            observation: "tooling gap",
+            effectiveness: "low" as const,
+            agentId: makeAgentId("test-agent"),
+            filedAt: "2026-04-30",
+          },
+          sourceAgentId: makeAgentId("test-agent"),
+        },
+      ],
+    };
+    const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
+    expect(v.directivesUnaddressed).toEqual([]);
+    expect(v.productive).toBe(true);
+  });
+
+  it("dedupes a directive that appears in both signals and actionItems", () => {
+    const directive = makeIssueSignal(592, ["source-directive", "assigned:test"]);
+    const v = validateWake({ actionItems: [directive], signals: [directive] }, emptyResult, []);
+    expect(v.directivesUnaddressed).toHaveLength(1);
+    expect(v.directivesUnaddressed[0]?.issueNumber).toBe(592);
+  });
+
+  it("does not flag non-directive issues as unaddressed directives", () => {
+    const actionItem = makeIssueSignal(100, ["action-item", "assigned:test"]);
+    const v = validateWake({ actionItems: [actionItem], signals: [] }, emptyResult, []);
+    expect(v.directivesUnaddressed).toEqual([]);
+  });
+
+  // Word-boundary regex: directive #5 must NOT be addressed by a governance
+  // event mentioning #50, #54, or #592 (Kieran review finding).
+  it("uses word-boundary matching: directive #5 is NOT satisfied by a governance event mentioning only #50", () => {
+    const directive = makeIssueSignal(5, ["source-directive", "assigned:test"]);
+    const result = {
+      ...emptyResult,
+      governanceEvents: [
+        {
+          kind: "agent-governance-event" as const,
+          payload: {
+            topic: "TENSION: review of #50 is blocked by tooling gap",
+            observation: "noted",
+            effectiveness: "low" as const,
+            agentId: makeAgentId("test-agent"),
+            filedAt: "2026-04-30",
+          },
+          sourceAgentId: makeAgentId("test-agent"),
+        },
+      ],
+    };
+    const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
+    expect(v.directivesUnaddressed).toEqual([{ issueNumber: 5, reason: "no-structured-action" }]);
+  });
+
+  it("uses word-boundary matching for narrative-only-claim: directive #5 + wakeSummary mentioning only #592 classifies as no-structured-action, not narrative-only-claim", () => {
+    // Without word-boundary matching, plain `wakeSummary.includes("#5")`
+    // would false-positive on `#592` and misclassify the reason.
+    const directive = makeIssueSignal(5, ["source-directive", "assigned:test"]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "I have posted CONSENT on #592",
+    };
+    const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
+    expect(v.directivesUnaddressed).toEqual([{ issueNumber: 5, reason: "no-structured-action" }]);
+  });
+
+  it("uses word-boundary matching: directive #59 is NOT satisfied by a governance event mentioning only #592", () => {
+    const directive = makeIssueSignal(59, ["source-directive", "assigned:test"]);
+    const result = {
+      ...emptyResult,
+      governanceEvents: [
+        {
+          kind: "agent-governance-event" as const,
+          payload: {
+            topic: "TENSION on issue 592 about MCP gap",
+            observation: "noted",
+            effectiveness: "low" as const,
+            agentId: makeAgentId("test-agent"),
+            filedAt: "2026-04-30",
+          },
+          sourceAgentId: makeAgentId("test-agent"),
+        },
+      ],
+    };
+    const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
+    expect(v.directivesUnaddressed).toEqual([{ issueNumber: 59, reason: "no-structured-action" }]);
+  });
+
+  // Security review finding: a single multi-reference governance event must
+  // satisfy at most one directive. An agent that lists 5 directive numbers
+  // in one tension cannot silence validation for all 5.
+  it("requires 1:1 directive-to-event matching: one multi-reference event satisfies at most one directive", () => {
+    const dir1 = makeIssueSignal(592, ["source-directive", "assigned:test"]);
+    const dir2 = makeIssueSignal(571, ["source-directive", "assigned:test"]);
+    const dir3 = makeIssueSignal(554, ["source-directive", "assigned:test"]);
+    const result = {
+      ...emptyResult,
+      governanceEvents: [
+        {
+          kind: "agent-governance-event" as const,
+          payload: {
+            topic:
+              "TENSION: I cannot act on directives #592, #571, #554 because the github MCP is unavailable",
+            observation: "tooling gap",
+            effectiveness: "low" as const,
+            agentId: makeAgentId("test-agent"),
+            filedAt: "2026-04-30",
+          },
+          sourceAgentId: makeAgentId("test-agent"),
+        },
+      ],
+    };
+    const v = validateWake({ actionItems: [], signals: [dir1, dir2, dir3] }, result, []);
+    // First directive (592) is claimed by the multi-reference event;
+    // the other two are not claimed.
+    expect(v.directivesUnaddressed).toHaveLength(2);
+    expect(v.directivesUnaddressed.map((d) => d.issueNumber).sort((a, b) => a - b)).toEqual([
+      554, 571,
+    ]);
+  });
+
+  it("matches one event per directive: three separate per-directive tensions satisfy three directives", () => {
+    const dir1 = makeIssueSignal(592, ["source-directive", "assigned:test"]);
+    const dir2 = makeIssueSignal(571, ["source-directive", "assigned:test"]);
+    const result = {
+      ...emptyResult,
+      governanceEvents: [
+        {
+          kind: "agent-governance-event" as const,
+          payload: {
+            topic: "TENSION: cannot act on directive #592 — tooling gap",
+            observation: "noted",
+            effectiveness: "low" as const,
+            agentId: makeAgentId("test-agent"),
+            filedAt: "2026-04-30",
+          },
+          sourceAgentId: makeAgentId("test-agent"),
+        },
+        {
+          kind: "agent-governance-event" as const,
+          payload: {
+            topic: "TENSION: cannot act on directive #571 — same root cause",
+            observation: "noted",
+            effectiveness: "low" as const,
+            agentId: makeAgentId("test-agent"),
+            filedAt: "2026-04-30",
+          },
+          sourceAgentId: makeAgentId("test-agent"),
+        },
+      ],
+    };
+    const v = validateWake({ actionItems: [], signals: [dir1, dir2] }, result, []);
+    expect(v.directivesUnaddressed).toEqual([]);
+  });
+
+  it("does not crash when a governance event payload is non-serializable (circular)", () => {
+    const directive = makeIssueSignal(592, ["source-directive", "assigned:test"]);
+    type CircularPayload = { readonly self?: CircularPayload; readonly note: string };
+    const circular: { self?: CircularPayload; note: string } = { note: "x" };
+    circular.self = circular as CircularPayload;
+    const result = {
+      ...emptyResult,
+      governanceEvents: [
+        {
+          kind: "agent-governance-event" as const,
+          payload: circular as unknown as Record<string, unknown>,
+          sourceAgentId: makeAgentId("test-agent"),
+        },
+      ],
+    };
+    expect(() => validateWake({ actionItems: [], signals: [directive] }, result, [])).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// amendWakeSummaryWithValidation (Boundary 5 Phase 1)
+// ---------------------------------------------------------------------------
+
+describe("amendWakeSummaryWithValidation", () => {
+  const baseSummary = `[architecture-agent] wake abc12345
+  model: gemini-2.5-pro
+  input_tokens: 25953
+  output_tokens: 2623
+  steps: 1 / 256
+  tool_calls: 0
+  signal_count: 8
+  effectiveness: high
+  governance_event: REPORT: completed all assigned items.`;
+
+  it("returns the summary unchanged when there are no unaddressed directives", () => {
+    const v = {
+      productive: true,
+      artifactCount: 1,
+      actionItemsAddressed: 0,
+      actionItemsAssigned: 0,
+      directivesUnaddressed: [],
+    };
+    expect(amendWakeSummaryWithValidation(baseSummary, v)).toBe(baseSummary);
+  });
+
+  it("inserts a directives_unaddressed line after signal_count", () => {
+    const v = {
+      productive: false,
+      artifactCount: 0,
+      actionItemsAddressed: 0,
+      actionItemsAssigned: 0,
+      directivesUnaddressed: [
+        { issueNumber: 592, reason: "narrative-only-claim" as const },
+        { issueNumber: 571, reason: "no-structured-action" as const },
+      ],
+    };
+    const amended = amendWakeSummaryWithValidation(baseSummary, v);
+    expect(amended).toContain(
+      "directives_unaddressed: 2 (#592 narrative-only-claim, #571 no-structured-action)",
+    );
+    // It should appear AFTER the signal_count line and BEFORE effectiveness
+    const signalIdx = amended.indexOf("signal_count:");
+    const directivesIdx = amended.indexOf("directives_unaddressed:");
+    const effIdx = amended.indexOf("effectiveness:");
+    expect(signalIdx).toBeLessThan(directivesIdx);
+    expect(directivesIdx).toBeLessThan(effIdx);
+  });
+
+  it("downgrades 'effectiveness: high' to 'low' with attribution when directives are unaddressed", () => {
+    const v = {
+      productive: false,
+      artifactCount: 0,
+      actionItemsAddressed: 0,
+      actionItemsAssigned: 0,
+      directivesUnaddressed: [{ issueNumber: 592, reason: "narrative-only-claim" as const }],
+    };
+    const amended = amendWakeSummaryWithValidation(baseSummary, v);
+    expect(amended).toMatch(
+      /effectiveness:\s+low \(downgraded from agent-reported 'high' due to 1 unaddressed directive\)/,
+    );
+    expect(amended).not.toMatch(/^\s+effectiveness:\s+high\s*$/m);
+  });
+
+  it("uses singular 'directive' for one and plural 'directives' for many in the downgrade attribution", () => {
+    const v1 = {
+      productive: false,
+      artifactCount: 0,
+      actionItemsAddressed: 0,
+      actionItemsAssigned: 0,
+      directivesUnaddressed: [{ issueNumber: 1, reason: "no-structured-action" as const }],
+    };
+    expect(amendWakeSummaryWithValidation(baseSummary, v1)).toContain("1 unaddressed directive)");
+
+    const v2 = {
+      ...v1,
+      directivesUnaddressed: [
+        { issueNumber: 1, reason: "no-structured-action" as const },
+        { issueNumber: 2, reason: "narrative-only-claim" as const },
+      ],
+    };
+    expect(amendWakeSummaryWithValidation(baseSummary, v2)).toContain("2 unaddressed directives)");
+  });
+
+  it("does not modify the effectiveness line when it is not 'high'", () => {
+    const lowSummary = baseSummary.replace("effectiveness: high", "effectiveness: low");
+    const v = {
+      productive: false,
+      artifactCount: 0,
+      actionItemsAddressed: 0,
+      actionItemsAssigned: 0,
+      directivesUnaddressed: [{ issueNumber: 1, reason: "narrative-only-claim" as const }],
+    };
+    const amended = amendWakeSummaryWithValidation(lowSummary, v);
+    expect(amended).toContain("effectiveness: low");
+    expect(amended).not.toContain("downgraded");
+  });
+
+  it("appends directives_unaddressed line at the end when no signal_count line exists", () => {
+    const minimalSummary = "[agent] wake xyz\n  model: test\n";
+    const v = {
+      productive: false,
+      artifactCount: 0,
+      actionItemsAddressed: 0,
+      actionItemsAssigned: 0,
+      directivesUnaddressed: [{ issueNumber: 1, reason: "no-structured-action" as const }],
+    };
+    const amended = amendWakeSummaryWithValidation(minimalSummary, v);
+    expect(amended).toContain("directives_unaddressed: 1 (#1 no-structured-action)");
+  });
+
+  it("does not rewrite a body line that quotes 'effectiveness: high' from a prior digest", () => {
+    // Header reports 'medium', body quotes a prior wake's `effectiveness: high`.
+    // The downgrade attribution must touch only the header line; otherwise we
+    // corrupt the persisted body and produce a lying attribution
+    // ("downgraded from agent-reported 'high'" — agent reported 'medium').
+    const summaryWithBody = `[agent] wake xyz
+  model: test
+  signal_count: 5
+  effectiveness: medium
+  governance_event: REPORT done
+
+---
+
+Last wake produced:
+  signal_count: 8
+  effectiveness: high
+  governance_event: REPORT done
+`;
+    const v = {
+      productive: false,
+      artifactCount: 0,
+      actionItemsAddressed: 0,
+      actionItemsAssigned: 0,
+      directivesUnaddressed: [{ issueNumber: 1, reason: "narrative-only-claim" as const }],
+    };
+    const amended = amendWakeSummaryWithValidation(summaryWithBody, v);
+    expect(amended).toContain("\n  effectiveness: high\n");
+    expect(amended).not.toContain("downgraded from agent-reported 'high'");
+    expect(amended).toContain("  effectiveness: medium");
   });
 });
 

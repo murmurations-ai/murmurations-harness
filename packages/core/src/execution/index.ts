@@ -537,6 +537,17 @@ export interface WakeActionReceipt {
  * post-wake validation hook. Feeds into AgentStateStore metrics
  * and retrospective data.
  */
+/**
+ * A directive from the wake's signal bundle that lacked structured
+ * evidence of action. Surfaced by `validateWake` so operators can
+ * detect narrative-only "I have posted CONSENT" hallucinations
+ * (Boundary 5 — see docs/plans/v0.5.2-boundary-5-phase-1-directive-validation.md).
+ */
+export interface UnaddressedDirective {
+  readonly issueNumber: number;
+  readonly reason: "no-structured-action" | "no-successful-receipt" | "narrative-only-claim";
+}
+
 export interface WakeValidationResult {
   /** Did the agent produce meaningful output? */
   readonly productive: boolean;
@@ -546,16 +557,59 @@ export interface WakeValidationResult {
   readonly actionItemsAddressed: number;
   /** Total action items that were assigned to the agent this wake. */
   readonly actionItemsAssigned: number;
+  /**
+   * Directives present in signals that were NOT addressed by structured
+   * evidence (action + successful receipt) or governance event referencing
+   * the issue. Empty when all directives addressed or none present.
+   * Narrative-only mention of a directive in `wakeSummary` does NOT count
+   * as addressing it (Boundary 5).
+   */
+  readonly directivesUnaddressed: readonly UnaddressedDirective[];
   /** If not productive, why. */
   readonly reason?: string;
 }
 
+const SOURCE_DIRECTIVE_LABEL = "source-directive";
+
+type GithubIssueSignal = Extract<Signal, { kind: "github-issue" }>;
+
 /**
- * Default validation: checks artifact count and action item coverage.
+ * Phase 1 narrows directive detection to GitHub-issue signals because EP
+ * (the only operator murmuration) files directives as labeled issues. If
+ * a future signal kind (e.g. `inbox-message`) starts carrying directives,
+ * extend this with an exhaustive switch so the new case forces a deliberate
+ * decision.
+ *
+ * Returns a type predicate so callers can read `sig.number` and `sig.labels`
+ * without further narrowing.
+ */
+const isSourceDirective = (signal: Signal): signal is GithubIssueSignal => {
+  if (signal.kind !== "github-issue") return false;
+  return signal.labels.includes(SOURCE_DIRECTIVE_LABEL);
+};
+
+/**
+ * Word-boundary regex matchers for resolving "does this governance event
+ * reference issue #N" — required because plain substring matching causes
+ * false positives (e.g. `#5` matches `#592`, `#54`). Built once per
+ * issue number; cheap.
+ */
+const buildIssueReferenceMatchers = (issueNum: number): readonly RegExp[] => {
+  const n = String(issueNum);
+  return [
+    new RegExp(`#${n}(?!\\d)`),
+    new RegExp(`"issueNumber":\\s*${n}(?!\\d)`),
+    new RegExp(`\\bissue ${n}(?!\\d)`, "i"),
+  ];
+};
+
+/**
+ * Default validation: checks artifact count, action item coverage, and
+ * structured-evidence backing for any source-directive items in signals.
  * Used when no custom validator is configured.
  */
 export const validateWake = (
-  context: { actionItems: readonly Signal[] },
+  context: { actionItems: readonly Signal[]; signals: readonly Signal[] },
   result: {
     actions: readonly WakeAction[];
     outputs: readonly AgentOutputArtifact[];
@@ -573,30 +627,181 @@ export const validateWake = (
   let actionItemsAddressed = 0;
 
   if (actionItemsAssigned > 0) {
-    // Check which action items were addressed — either by structured action
-    // referencing the issue number, or by mention in the wake summary
+    // Check which action items were addressed by a *successful* action
+    // receipt referencing the issue number. Intent without a successful
+    // receipt (i.e. an action returned in result.actions but never executed,
+    // or executed and failed) is the same Boundary 5 anti-pattern: narration
+    // of "I will/did" without structured evidence the action landed.
     for (const item of context.actionItems) {
       if (item.kind !== "github-issue") continue;
-      const issueNum = (item as unknown as { number: number }).number;
-      const referenced =
-        result.actions.some((a) => a.issueNumber === issueNum) ||
-        actionReceipts.some((r) => r.action.issueNumber === issueNum) ||
-        result.wakeSummary.includes(`#${String(issueNum)}`);
+      const issueNum = item.number;
+      const referenced = actionReceipts.some((r) => r.action.issueNumber === issueNum && r.success);
       if (referenced) actionItemsAddressed++;
     }
   }
 
-  const productive = artifactCount > 0 || actionItemsAddressed > 0;
+  // Directive validation (Boundary 5 Phase 1):
+  // every source-directive in the bundle (signals + actionItems) must
+  // be backed by a successful receipt OR a governance event whose
+  // payload-as-string references the issue number with a word boundary.
+  // The word boundary blocks `#5` from matching `#50` / `#592`. We also
+  // serialize each governance event once (outside the per-directive loop)
+  // and require a 1:1 directive→event match (one event satisfies at most
+  // one directive) so a single multi-reference event cannot silence many.
+  const directivesUnaddressed: UnaddressedDirective[] = [];
+  const seen = new Set<number>();
+
+  const govEventStrings: string[] = [];
+  for (const g of result.governanceEvents) {
+    try {
+      govEventStrings.push(JSON.stringify(g));
+    } catch {
+      // Circular or non-serializable payload — treat as no reference rather
+      // than crashing the validator on agent-controlled content.
+      govEventStrings.push("");
+    }
+  }
+  const claimedGovEventIdx = new Set<number>();
+
+  const allBundle: readonly Signal[] = [...context.signals, ...context.actionItems];
+  for (const sig of allBundle) {
+    if (!isSourceDirective(sig)) continue;
+    const issueNum = sig.number;
+    if (seen.has(issueNum)) continue;
+    seen.add(issueNum);
+
+    const hasSuccessfulReceipt = actionReceipts.some(
+      (r) => r.action.issueNumber === issueNum && r.success,
+    );
+    if (hasSuccessfulReceipt) continue;
+
+    const matchers = buildIssueReferenceMatchers(issueNum);
+    let claimedIdx = -1;
+    for (let i = 0; i < govEventStrings.length; i++) {
+      if (claimedGovEventIdx.has(i)) continue;
+      const s = govEventStrings[i];
+      if (s !== undefined && s !== "" && matchers.some((re) => re.test(s))) {
+        claimedIdx = i;
+        break;
+      }
+    }
+    if (claimedIdx >= 0) {
+      claimedGovEventIdx.add(claimedIdx);
+      continue;
+    }
+
+    const hasFailedReceipt = actionReceipts.some(
+      (r) => r.action.issueNumber === issueNum && !r.success,
+    );
+    if (hasFailedReceipt) {
+      directivesUnaddressed.push({ issueNumber: issueNum, reason: "no-successful-receipt" });
+      continue;
+    }
+
+    const hasUnexecutedAction = result.actions.some((a) => a.issueNumber === issueNum);
+    if (hasUnexecutedAction) {
+      directivesUnaddressed.push({ issueNumber: issueNum, reason: "no-successful-receipt" });
+      continue;
+    }
+
+    if (matchers.some((re) => re.test(result.wakeSummary))) {
+      directivesUnaddressed.push({ issueNumber: issueNum, reason: "narrative-only-claim" });
+      continue;
+    }
+
+    directivesUnaddressed.push({ issueNumber: issueNum, reason: "no-structured-action" });
+  }
+
+  const productive =
+    directivesUnaddressed.length === 0 && (artifactCount > 0 || actionItemsAddressed > 0);
+
   const reason = productive
     ? undefined
-    : actionItemsAssigned > 0
-      ? `${String(actionItemsAssigned)} action items assigned but none addressed`
-      : "wake completed but produced no artifacts";
+    : directivesUnaddressed.length > 0
+      ? `${String(directivesUnaddressed.length)} directive(s) in signals not addressed by structured evidence`
+      : actionItemsAssigned > 0
+        ? `${String(actionItemsAssigned)} action items assigned but none addressed`
+        : "wake completed but produced no artifacts";
 
   if (reason !== undefined) {
-    return { productive, artifactCount, actionItemsAddressed, actionItemsAssigned, reason };
+    return {
+      productive,
+      artifactCount,
+      actionItemsAddressed,
+      actionItemsAssigned,
+      directivesUnaddressed,
+      reason,
+    };
   }
-  return { productive, artifactCount, actionItemsAddressed, actionItemsAssigned };
+  return {
+    productive,
+    artifactCount,
+    actionItemsAddressed,
+    actionItemsAssigned,
+    directivesUnaddressed,
+  };
+};
+
+/**
+ * Amend a wake summary string with the validation findings:
+ * - inserts a `directives_unaddressed:` line after `signal_count:`
+ * - downgrades the header `effectiveness:` line from `high` to `low` with
+ *   an attribution noting the runtime override
+ *
+ * Returns the original summary unchanged when there are no unaddressed
+ * directives. The agent's self-reflection block at the end of the digest
+ * is not modified — operators see the discrepancy between the header
+ * (runtime-overridden) and the agent's self-claim.
+ *
+ * Coupling note: the regexes target the exact line format produced by
+ * the wake summary builder in `packages/core/src/runner/index.ts` (the
+ * `[agent] wake <id>\n  model: ...\n  signal_count: ...\n  effectiveness: ...`
+ * shape). If that format changes, the amendment silently no-ops on the
+ * affected line — the directives_unaddressed line still appends at the
+ * end as a fallback, but the effectiveness downgrade is lost. Tests in
+ * `execution.test.ts` lock the current format.
+ *
+ * Boundary 5 Phase 1.
+ */
+export const amendWakeSummaryWithValidation = (
+  summary: string,
+  validation: WakeValidationResult,
+): string => {
+  if (validation.directivesUnaddressed.length === 0) return summary;
+
+  const summaryFragment = validation.directivesUnaddressed
+    .map((d) => `#${String(d.issueNumber)} ${d.reason}`)
+    .join(", ");
+  const directivesLine = `  directives_unaddressed: ${String(validation.directivesUnaddressed.length)} (${summaryFragment})`;
+
+  const plural = validation.directivesUnaddressed.length === 1 ? "directive" : "directives";
+  const downgradeAttribution = `low (downgraded from agent-reported 'high' due to ${String(validation.directivesUnaddressed.length)} unaddressed ${plural})`;
+
+  // Apply amendments only to the header section of the digest (the
+  // structured pre-`---` block built by the runner). Splitting on the
+  // first `\n---\n` keeps body content (which may quote prior digests'
+  // `effectiveness: high` lines verbatim) untouched, and prevents the
+  // downgrade attribution from rewriting an unrelated body line.
+  const sep = "\n---\n";
+  const sepIdx = summary.indexOf(sep);
+  const header = sepIdx >= 0 ? summary.slice(0, sepIdx) : summary;
+  const rest = sepIdx >= 0 ? summary.slice(sepIdx) : "";
+
+  let amendedHeader = header;
+
+  const signalCountRegex = /^(\s+signal_count:.*)$/m;
+  if (signalCountRegex.test(amendedHeader)) {
+    amendedHeader = amendedHeader.replace(signalCountRegex, `$1\n${directivesLine}`);
+  } else {
+    amendedHeader = `${amendedHeader}\n${directivesLine}`;
+  }
+
+  amendedHeader = amendedHeader.replace(
+    /^(\s+effectiveness:)\s+high\b.*$/m,
+    `$1 ${downgradeAttribution}`,
+  );
+
+  return amendedHeader + rest;
 };
 
 // ---------------------------------------------------------------------------

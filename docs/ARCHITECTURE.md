@@ -636,6 +636,13 @@ Everything else inherits, cascades, or has a sensible built-in:
 
 This principle is what makes `murmuration init` → `murmuration convene` a 4-command experience instead of a 40-minute tour of every YAML field.
 
+### 12. Narrative claims do not count as evidence of action
+
+When an LLM agent's wake summary asserts "I have posted X" or "I have commented on #Y", that text is freeform LLM output. It is not evidence that the action was executed. Validation must require structured evidence: a `WakeAction` matched by a successful `WakeActionReceipt`, or a governance event explicitly referencing the issue (the legitimate "I cannot act, here's why" path). Substring-matching the wake summary for an issue number is a category error — it conflates narration with action and produces false governance records when the LLM hallucinates completion.
+
+**Anti-pattern:** `validateWake` counts an action item as addressed when `wakeSummary.includes("#592")` — the agent narrating "I have posted CONSENT on #592" is enough to flip the wake to "productive."
+**Fix (Boundary 5 Phase 1):** structured-evidence-only matching. Wake-summary mention of an issue number does not address it. See `docs/plans/v0.5.2-boundary-5-phase-1-directive-validation.md` and harness #239.
+
 ---
 
 ## What We Don't Build
