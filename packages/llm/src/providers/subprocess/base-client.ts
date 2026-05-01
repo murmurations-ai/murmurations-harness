@@ -21,6 +21,7 @@ import type { LLMClientError } from "../../errors.js";
 import {
   LLMInternalError,
   LLMParseError,
+  LLMRateLimitError,
   LLMTransportError,
   LLMUnauthorizedError,
 } from "../../errors.js";
@@ -239,9 +240,28 @@ export class SubprocessAdapter implements LLMAdapter {
         }
 
         if (code !== 0) {
-          // Heuristic auth detection on stderr (D9: typed errors). Each adapter
-          // can refine this via its own authCheck() probe; this catches the
-          // case where a wake fires against an unauthenticated CLI.
+          // Heuristic detection on stderr (D9: typed errors). Each adapter
+          // can refine these via its own authCheck() probe; this catches
+          // the wake-time cases where the CLI is unauthenticated or the
+          // operator's subscription has hit a rate limit.
+          //
+          // Order matters: rate-limit messages sometimes contain the
+          // word "limit" which would also match auth heuristics. Check
+          // rate-limit first so a throttled session doesn't get flagged
+          // as an auth failure.
+          const rl = looksLikeRateLimit(stderr);
+          if (rl !== null) {
+            settle({
+              ok: false,
+              error: {
+                kind: "rate-limit-error",
+                message: stderr.trim() || `CLI exited ${String(code)} (rate limit suspected)`,
+                retryAfterSeconds: rl.retryAfterSeconds,
+                ...(typeof code === "number" ? { exitCode: code } : {}),
+              },
+            });
+            return;
+          }
           if (looksLikeAuthFailure(stderr)) {
             settle({
               ok: false,
@@ -297,6 +317,16 @@ export class SubprocessAdapter implements LLMAdapter {
         );
       case "auth-error":
         return new LLMUnauthorizedError(this.providerId, err.message, opts);
+      case "rate-limit-error":
+        return new LLMRateLimitError(this.providerId, err.message, {
+          ...opts,
+          status: 429,
+          retryAfterSeconds: err.retryAfterSeconds,
+          // Subscription rate limits are session/quota-based; the standard
+          // tpm/tpd/rpm/rpd taxonomy doesn't quite fit. Use "unknown" to
+          // signal "vendor didn't tell us which scope".
+          limitScope: "unknown",
+        });
       case "parse-error":
         return new LLMParseError(this.providerId, err.message, opts);
       case "spawn-error":
@@ -339,4 +369,69 @@ const AUTH_FAILURE_NEEDLES = [
 const looksLikeAuthFailure = (stderr: string): boolean => {
   const lower = stderr.toLowerCase();
   return AUTH_FAILURE_NEEDLES.some((needle) => lower.includes(needle));
+};
+
+/**
+ * Heuristic stderr scan for subscription rate-limit / quota messages.
+ * Returns null when no signal matches, otherwise an object with the
+ * vendor's retry hint (in seconds) if surfaced.
+ *
+ * Examples we want to catch (gathered from the three CLIs' actual
+ * throttling messages and from vendor docs):
+ *   - "rate limit reached" / "rate-limit reached"
+ *   - "you've reached your usage limit"
+ *   - "quota exceeded"
+ *   - "too many requests"
+ *   - "5-hour limit reached" / "weekly limit reached"
+ *   - "approaching your limit" (warning, not failure — we don't catch this)
+ *   - HTTP-style "retry-after: 3600" or "retry after 1h"
+ */
+const RATE_LIMIT_NEEDLES = [
+  "rate limit",
+  "rate-limit",
+  "usage limit",
+  "quota exceeded",
+  "too many requests",
+  "5-hour limit",
+  "weekly limit",
+  "monthly limit",
+  "session limit",
+  "throttle",
+];
+
+/**
+ * @internal Exported for unit testing. Production callers should rely
+ * on the SubprocessAdapter's stderr scan, not call this directly.
+ */
+export const looksLikeRateLimit = (stderr: string): { retryAfterSeconds: number | null } | null => {
+  const lower = stderr.toLowerCase();
+  if (!RATE_LIMIT_NEEDLES.some((needle) => lower.includes(needle))) {
+    return null;
+  }
+  return { retryAfterSeconds: parseRetryAfter(lower) };
+};
+
+/**
+ * Best-effort parse of a vendor's retry hint from stderr. Looks for:
+ *   - "retry-after: <N>"  (seconds, HTTP-style)
+ *   - "retry in <N>s|m|h" (relative duration)
+ *   - "try again in <N>s|m|h"
+ *   - "resets in <N>s|m|h"
+ * Returns seconds, or null if no hint is present.
+ */
+const parseRetryAfter = (lower: string): number | null => {
+  const httpMatch = /retry-after:\s*(\d+)/i.exec(lower);
+  if (httpMatch?.[1]) return Number(httpMatch[1]);
+
+  const phraseMatch = /(?:retry in|try again in|resets in|retry after)\s+(\d+)\s*(s|m|h)/i.exec(
+    lower,
+  );
+  if (phraseMatch?.[1] && phraseMatch[2]) {
+    const n = Number(phraseMatch[1]);
+    const unit = phraseMatch[2];
+    if (unit === "s") return n;
+    if (unit === "m") return n * 60;
+    if (unit === "h") return n * 3600;
+  }
+  return null;
 };

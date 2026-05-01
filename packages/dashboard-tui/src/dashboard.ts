@@ -190,7 +190,32 @@ const renderCostSummary = (cost: CostSummary): string => {
 
   lines.push(`  Wakes/day: ${cyan(spark)}   ${dim(dayLabels.join(" "))}`);
   lines.push(`             ${counts}`);
+
+  // Subscription-CLI usage rollup. Vendors don't expose remaining
+  // quota, so we show "tokens consumed today / 7d" per (provider, model).
+  // Operators compare against their plan's published allowance to gauge
+  // headroom before refresh. Skip the section entirely on API-only
+  // deployments to avoid noise.
+  if (cost.subscriptionUsage.length > 0) {
+    lines.push(``);
+    lines.push(`  ${dim("Subscription usage  (no remaining-quota API; compare to your plan)")}`);
+    for (const u of cost.subscriptionUsage) {
+      const today = formatTokens(u.todayInputTokens + u.todayOutputTokens);
+      const week = formatTokens(u.weekInputTokens + u.weekOutputTokens);
+      const label = `${u.provider}/${u.model}`.padEnd(34);
+      lines.push(
+        `  ${label} today: ${bold(today.padStart(7))} (${String(u.todayWakes).padStart(2)}w)  ${dim("|")}  7d: ${week.padStart(7)} (${String(u.weekWakes).padStart(2)}w)`,
+      );
+    }
+  }
+
   return lines.join("\n");
+};
+
+const formatTokens = (n: number): string => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+  return String(n);
 };
 
 // ---------------------------------------------------------------------------

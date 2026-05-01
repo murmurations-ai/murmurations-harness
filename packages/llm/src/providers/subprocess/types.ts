@@ -46,7 +46,25 @@ export interface TimeoutError {
   readonly timeoutMs: number;
 }
 
-export type SubprocessError = SpawnError | ParseError | AuthError | TimeoutError;
+/**
+ * Subscription rate limit reached on the operator's account (Pro/Max,
+ * ChatGPT, Google subscription). Distinct from auth-error: the CLI is
+ * authenticated, but the vendor is throttling the session.
+ *
+ * Vendors don't expose remaining quota or refresh time in any
+ * consistent format, so retryAfterSeconds is best-effort: parsed from
+ * stderr when present, null otherwise. The daemon agent state machine
+ * treats this as a transient failure with operator-configurable retry.
+ */
+export interface RateLimitError {
+  readonly kind: "rate-limit-error";
+  readonly message: string;
+  readonly exitCode?: number;
+  /** Vendor's hint, in seconds, if surfaced in stderr. Otherwise null. */
+  readonly retryAfterSeconds: number | null;
+}
+
+export type SubprocessError = SpawnError | ParseError | AuthError | TimeoutError | RateLimitError;
 
 // ---------------------------------------------------------------------------
 // Auth status — three-state model (ADR-0034 D2).

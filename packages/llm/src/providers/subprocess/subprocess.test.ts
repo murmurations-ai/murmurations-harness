@@ -13,6 +13,7 @@ import type { LLMRequest } from "../../types.js";
 import { ClaudeCliAdapter } from "./adapters/claude.js";
 import { CodexCliAdapter } from "./adapters/codex.js";
 import { GeminiCliAdapter } from "./adapters/gemini.js";
+import { looksLikeRateLimit } from "./base-client.js";
 import { createSubscriptionCliClient } from "./index.js";
 import type { SubprocessLLMAdapter } from "./types.js";
 
@@ -480,5 +481,56 @@ describe("createSubscriptionCliClient — factory", () => {
       model: "gpt-4o",
     });
     expect(observedModel).toBe("gpt-4o");
+  });
+});
+
+describe("looksLikeRateLimit (subscription rate-limit detection)", () => {
+  it("returns null when stderr has no rate-limit signal", () => {
+    expect(looksLikeRateLimit("")).toBeNull();
+    expect(looksLikeRateLimit("normal log output")).toBeNull();
+    expect(looksLikeRateLimit("Error: file not found")).toBeNull();
+  });
+
+  it("matches common rate-limit phrasings (case-insensitive)", () => {
+    const samples = [
+      "Rate limit reached for your account",
+      "RATE-LIMIT exceeded",
+      "Usage limit reached. Try again later.",
+      "Quota exceeded for this model",
+      "429 Too Many Requests",
+      "5-hour limit reached",
+      "Weekly limit exceeded for Claude Pro",
+      "Session limit reached",
+      "Request was throttled",
+    ];
+    for (const stderr of samples) {
+      const result = looksLikeRateLimit(stderr);
+      expect(result, `should match: ${stderr}`).not.toBeNull();
+    }
+  });
+
+  it("parses HTTP-style retry-after header in seconds", () => {
+    const result = looksLikeRateLimit("rate limit reached. retry-after: 3600");
+    expect(result).toEqual({ retryAfterSeconds: 3600 });
+  });
+
+  it("parses 'try again in <N>m' phrase", () => {
+    const result = looksLikeRateLimit("rate limit reached. try again in 5m");
+    expect(result).toEqual({ retryAfterSeconds: 300 });
+  });
+
+  it("parses 'resets in <N>h' phrase", () => {
+    const result = looksLikeRateLimit("usage limit reached. resets in 1h");
+    expect(result).toEqual({ retryAfterSeconds: 3600 });
+  });
+
+  it("parses 'retry in <N>s' phrase", () => {
+    const result = looksLikeRateLimit("Throttled. Retry in 60s.");
+    expect(result).toEqual({ retryAfterSeconds: 60 });
+  });
+
+  it("returns null retry hint when no time is parseable", () => {
+    const result = looksLikeRateLimit("rate limit reached, please wait");
+    expect(result).toEqual({ retryAfterSeconds: null });
   });
 });
