@@ -59,7 +59,7 @@ pnpm workspace with 7 packages. Build order matters (project references).
 
 ```
 @murmurations-ai/core       — daemon, executor, scheduler, identity, governance, groups, agents, cost, secrets
-@murmurations-ai/llm        — 4-provider LLM client (Gemini, Anthropic, OpenAI, Ollama) + pricing
+@murmurations-ai/llm        — LLM client: 4 API providers (Gemini, Anthropic, OpenAI, Ollama) via Vercel AI SDK + 3 subscription-CLI providers (claude-cli, codex-cli, gemini-cli) via subprocess (ADR-0034) + pricing catalog with shadow API cost
 @murmurations-ai/github     — GitHub REST/GraphQL client with write-scope enforcement (ADR-0017)
 @murmurations-ai/signals    — signal aggregator (GitHub issues, private notes, inbox messages)
 @murmurations-ai/secrets-dotenv — .env secrets provider
