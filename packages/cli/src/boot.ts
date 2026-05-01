@@ -75,6 +75,7 @@ import { McpToolLoader } from "@murmurations-ai/mcp";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
+import { buildGithubReadToolsForAgent } from "./github-tools/index.js";
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 import { registerRunningSocket, unregisterRunningSocket } from "./running-sessions.js";
@@ -393,24 +394,36 @@ const buildAgentClients = ({
       }
     : undefined;
 
-  if (hasAnyWriteScope(agent)) {
-    if (dryRun) {
-      if (provider?.has(GITHUB_TOKEN) === true) {
+  // Construct a GithubClient when GITHUB_TOKEN is present, regardless
+  // of whether the agent has declared write scopes. Agents without
+  // write scopes get a read-only client (any write attempt fails with
+  // "no write scopes configured" — see github/src/client.ts §scope check).
+  // This is what powers the github read tools (formerly harness#256):
+  // agents need GitHub-aware tools at all, not bundled bodies.
+  if (provider?.has(GITHUB_TOKEN) === true) {
+    if (hasAnyWriteScope(agent)) {
+      if (dryRun) {
         result.github = createGithubClient({
           token: provider.get(GITHUB_TOKEN),
           ...(githubCostHook ? { defaultCostHook: githubCostHook } : {}),
         });
+      } else {
+        result.github = createGithubClient({
+          token: provider.get(GITHUB_TOKEN),
+          writeScopes: toClientWriteScopes(agent),
+          ...(githubCostHook ? { defaultCostHook: githubCostHook } : {}),
+        });
       }
-      // dry-run never sets githubSkipReason; the caller logs the dryRun event.
-    } else if (provider?.has(GITHUB_TOKEN) === true) {
+    } else {
+      // Read-only agent: omit writeScopes entirely so any accidental
+      // write attempt fails-closed with a clear error.
       result.github = createGithubClient({
         token: provider.get(GITHUB_TOKEN),
-        writeScopes: toClientWriteScopes(agent),
         ...(githubCostHook ? { defaultCostHook: githubCostHook } : {}),
       });
-    } else {
-      result.githubSkipReason = "GITHUB_TOKEN absent; write-scoped client not constructed";
     }
+  } else if (hasAnyWriteScope(agent)) {
+    result.githubSkipReason = "GITHUB_TOKEN absent; write-scoped client not constructed";
   }
 
   return result;
@@ -1021,10 +1034,25 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         agentDir,
       }) as readonly (typeof extensionTools)[number][];
 
+    // GitHub read tools (replacement for harness#256). Construct a
+    // boot-time client when GITHUB_TOKEN is available; the agent's
+    // declared write_scopes (if any) gate write paths separately
+    // through the WakeAction pipeline. Read calls don't yet land in
+    // a per-wake cost builder — that's a known v1 limitation; total
+    // call counts still surface via the daemon-level token's
+    // GitHub-side rate-limit headers.
+    const buildAgentBoundGithub = (): readonly (typeof extensionTools)[number][] => {
+      if (provider?.has(GITHUB_TOKEN) !== true) return [];
+      const client = createGithubClient({
+        token: provider.get(GITHUB_TOKEN),
+      });
+      return buildGithubReadToolsForAgent(client) as readonly (typeof extensionTools)[number][];
+    };
+
     if (agent.plugins.length === 0) {
       // Backward compat: agents with no explicit declaration see all
-      // shared extension tools + per-agent memory tools.
-      return [...extensionTools, ...buildAgentBoundMemory()];
+      // shared extension tools + per-agent memory + github tools.
+      return [...extensionTools, ...buildAgentBoundMemory(), ...buildAgentBoundGithub()];
     }
 
     const declared = new Set<string>();
@@ -1042,14 +1070,19 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     declared.add("@murmurations-ai/files");
     declared.add("memory");
     declared.add("@murmurations-ai/memory");
+    // Auto-include github read tools when GITHUB_TOKEN is present.
+    // Operators can opt out by removing the token from .env. If we
+    // ever add a true read-scope mechanism this auto-include should
+    // gate on declaration instead.
+    declared.add("github");
+    declared.add("@murmurations-ai/github");
 
     const sharedTools = loadedExtensions
       .filter((ext) => declared.has(ext.id))
       .flatMap((ext) => ext.tools);
 
-    // Attach per-agent memory tools — memory is auto-included above
-    // for all agents, so this branch always fires.
-    return [...sharedTools, ...buildAgentBoundMemory()];
+    // Attach per-agent memory + github tools.
+    return [...sharedTools, ...buildAgentBoundMemory(), ...buildAgentBoundGithub()];
   };
 
   // -------------------------------------------------------------------

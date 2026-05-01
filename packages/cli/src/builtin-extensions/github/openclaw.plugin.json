@@ -1,0 +1,13 @@
+{
+  "id": "github",
+  "providerAuthEnvVars": {},
+  "contracts": {
+    "tools": [
+      "read_issue",
+      "list_issues",
+      "list_issue_comments",
+      "list_issue_labels",
+      "get_branch_head"
+    ]
+  }
+}
