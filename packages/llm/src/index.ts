@@ -65,3 +65,24 @@ export {
 } from "./errors.js";
 export type { LLMClientErrorCode, RateLimitScope } from "./errors.js";
 export { formatLLMError } from "./errors.js";
+
+// Subscription-CLI provider family (ADR-0034)
+export {
+  ClaudeCliAdapter,
+  CodexCliAdapter,
+  GeminiCliAdapter,
+  SubprocessAdapter,
+  createSubscriptionCliClient,
+} from "./providers/subprocess/index.js";
+export type {
+  AuthError,
+  AuthStatus,
+  ParseError,
+  SpawnError,
+  SubprocessAdapterConfig,
+  SubprocessError,
+  SubprocessLLMAdapter,
+  SubscriptionCli,
+  SubscriptionCliClientConfig,
+  TimeoutError,
+} from "./providers/subprocess/index.js";

@@ -220,7 +220,9 @@ const identifierSchema = z.string().min(1).max(IDENTIFIER_MAX_LENGTH).regex(IDEN
  * LLM provider enum — kept in sync with `@murmurations-ai/llm`'s
  * `ProviderId`. Extended in ADR-0016 (Phase 2C role template).
  */
-const llmProviderSchema = z.enum(["gemini", "anthropic", "openai", "ollama"]);
+// ADR-0034 added "subscription-cli" — routes to the subprocess provider family
+// (claude -p / gemini -p / codex exec) instead of the registry's API providers.
+const llmProviderSchema = z.enum(["gemini", "anthropic", "openai", "ollama", "subscription-cli"]);
 
 /** LLM provider enum surface used by harness-level defaults. Kept in
  *  sync with `llmProviderSchema` above. */
@@ -271,6 +273,11 @@ const wakeScheduleSchema = z
 const llmSchema = z.object({
   provider: llmProviderSchema,
   model: z.string().min(1).optional(),
+  // ADR-0034: subscription-CLI provider family. Required when
+  // provider: "subscription-cli"; ignored otherwise. Schema admits
+  // the field as optional so other providers don't have to know about it.
+  cli: z.enum(["claude", "gemini", "codex"]).optional(),
+  timeoutMs: z.number().int().positive().optional(),
 });
 
 const githubFilterSchema = z

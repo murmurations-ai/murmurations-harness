@@ -108,8 +108,12 @@ export interface RegisteredAgent {
    * per-agent LLMClient.
    */
   readonly llm?: {
-    readonly provider: "gemini" | "anthropic" | "openai" | "ollama";
+    readonly provider: "gemini" | "anthropic" | "openai" | "ollama" | "subscription-cli";
     readonly model?: string;
+    /** ADR-0034: only used when provider is "subscription-cli". */
+    readonly cli?: "claude" | "gemini" | "codex";
+    /** ADR-0034: subprocess wall-clock timeout (subscription-cli only). */
+    readonly timeoutMs?: number;
   };
 
   /**

@@ -66,6 +66,7 @@ import {
 } from "@murmurations-ai/github";
 import {
   createLLMClient,
+  createSubscriptionCliClient,
   ProviderRegistry,
   type LLMClient,
   type LLMCostHook,
@@ -347,37 +348,54 @@ const buildAgentClients = ({
   } = {};
 
   if (agent.llm) {
-    const providerDef = providerRegistry.get(agent.llm.provider);
-    if (!providerDef) {
-      result.llmSkipReason = `provider "${agent.llm.provider}" is not registered`;
-    } else {
-      const resolvedModel =
-        agent.llm.model ?? providerRegistry.resolveModelForTier(agent.llm.provider, "balanced");
-      if (!resolvedModel) {
-        result.llmSkipReason = `no model for provider "${agent.llm.provider}" (pin role.md llm.model)`;
+    // ADR-0034: subscription-CLI provider family bypasses the registry
+    // because it spawns a subprocess, not a Vercel LanguageModel.
+    if (agent.llm.provider === "subscription-cli") {
+      const cli = agent.llm.cli;
+      if (cli !== "claude" && cli !== "gemini" && cli !== "codex") {
+        result.llmSkipReason = `provider "subscription-cli" requires llm.cli: claude | gemini | codex`;
       } else {
         const costHook = costBuilder ? makeDaemonHook(costBuilder, logger) : undefined;
-        if (providerDef.envKeyName === null) {
-          // Keyless provider (e.g. local Ollama).
-          result.llm = createLLMClient({
-            registry: providerRegistry,
-            provider: agent.llm.provider,
-            model: resolvedModel,
-            token: null,
-            ...(ollamaBaseUrl !== undefined ? { baseUrl: ollamaBaseUrl } : {}),
-            ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
-          });
-        } else if (provider?.has(makeSecretKey(providerDef.envKeyName)) === true) {
-          const token = provider.get(makeSecretKey(providerDef.envKeyName));
-          result.llm = createLLMClient({
-            registry: providerRegistry,
-            provider: agent.llm.provider,
-            model: resolvedModel,
-            token,
-            ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
-          });
+        result.llm = createSubscriptionCliClient({
+          cli,
+          model: agent.llm.model ?? "",
+          ...(agent.llm.timeoutMs !== undefined ? { timeoutMs: agent.llm.timeoutMs } : {}),
+          ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+        });
+      }
+    } else {
+      const providerDef = providerRegistry.get(agent.llm.provider);
+      if (!providerDef) {
+        result.llmSkipReason = `provider "${agent.llm.provider}" is not registered`;
+      } else {
+        const resolvedModel =
+          agent.llm.model ?? providerRegistry.resolveModelForTier(agent.llm.provider, "balanced");
+        if (!resolvedModel) {
+          result.llmSkipReason = `no model for provider "${agent.llm.provider}" (pin role.md llm.model)`;
         } else {
-          result.llmSkipReason = "provider api key missing from secrets";
+          const costHook = costBuilder ? makeDaemonHook(costBuilder, logger) : undefined;
+          if (providerDef.envKeyName === null) {
+            // Keyless provider (e.g. local Ollama).
+            result.llm = createLLMClient({
+              registry: providerRegistry,
+              provider: agent.llm.provider,
+              model: resolvedModel,
+              token: null,
+              ...(ollamaBaseUrl !== undefined ? { baseUrl: ollamaBaseUrl } : {}),
+              ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+            });
+          } else if (provider?.has(makeSecretKey(providerDef.envKeyName)) === true) {
+            const token = provider.get(makeSecretKey(providerDef.envKeyName));
+            result.llm = createLLMClient({
+              registry: providerRegistry,
+              provider: agent.llm.provider,
+              model: resolvedModel,
+              token,
+              ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+            });
+          } else {
+            result.llmSkipReason = "provider api key missing from secrets";
+          }
         }
       }
     }
