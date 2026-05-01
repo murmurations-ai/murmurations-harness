@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { humanizeSlug } from "@murmurations-ai/core";
 
 import { buildBuiltinProviderRegistry } from "./builtin-providers/index.js";
+import { detectInstalledClis, formatDetectionSummary, type CliPresence } from "./cli-detect.js";
 import {
   captureSecret,
   GITHUB_TOKEN_SPEC,
@@ -251,13 +252,25 @@ interface AgentAnswers {
   readonly schedule: string;
 }
 
-const VALID_PROVIDERS = new Set(["gemini", "anthropic", "openai", "ollama"]);
+const VALID_PROVIDERS = new Set(["gemini", "anthropic", "openai", "ollama", "subscription-cli"]);
 
 const normalizeProvider = (input: string, fallback: string): string => {
   const v = input.trim().toLowerCase();
   if (!v) return fallback;
   return VALID_PROVIDERS.has(v) ? v : fallback;
 };
+
+/**
+ * The init flow's resolved LLM choice. For API providers (gemini /
+ * anthropic / openai / ollama), only `provider` matters — model is left
+ * to the cascade default. For `subscription-cli`, both `cli` and `model`
+ * are required so the harness.yaml + role.md emit a complete config.
+ */
+interface LlmChoice {
+  readonly provider: string;
+  readonly cli?: "claude" | "codex" | "gemini";
+  readonly model?: string;
+}
 
 const askAgentQuestions = async (
   isFirst: boolean,
@@ -269,9 +282,21 @@ const askAgentQuestions = async (
   const name = await ask(namePrompt);
   const dir = name.trim().toLowerCase().replace(/\s+/g, "-");
 
+  // When default is subscription-cli, agents inherit the cli + model
+  // from harness.yaml. Operators rarely override per-agent at init time
+  // (it's a downstream tuning task), so keep the prompt simple — just
+  // accept the harness default by pressing Enter.
+  const overrideOptions =
+    defaultProvider === "subscription-cli"
+      ? "subscription-cli / gemini / anthropic / openai / ollama"
+      : "gemini / anthropic / openai / ollama";
+  const overrideCompletions =
+    defaultProvider === "subscription-cli"
+      ? ["subscription-cli", "gemini", "anthropic", "openai", "ollama"]
+      : ["gemini", "anthropic", "openai", "ollama"];
   const providerInput = await ask(
-    `  LLM provider override (gemini / anthropic / openai / ollama) [${defaultProvider}]: `,
-    ["gemini", "anthropic", "openai", "ollama"],
+    `  LLM provider override (${overrideOptions}) [${defaultProvider}]: `,
+    overrideCompletions,
   );
   const provider = normalizeProvider(providerInput, defaultProvider);
 
@@ -289,6 +314,74 @@ const askAgentQuestions = async (
   const schedule = scheduleInput.trim().toLowerCase() || "daily";
 
   return { name: name.trim(), dir, provider, group, schedule };
+};
+
+/**
+ * Map raw provider input to a complete LLM choice. Handles three forms:
+ *
+ *   "subscription-cli" + recommended → use recommended CLI's defaults
+ *   "subscription-cli/<name>"        → use that CLI's defaults (claude/codex/gemini)
+ *   "<api-provider>"                 → API path, no cli/model
+ *
+ * Empty input falls through to the recommended default if subscription
+ * CLIs are present, otherwise to "gemini" for parity with prior behavior.
+ */
+const resolveLlmChoice = async (
+  rawInput: string,
+  recommended: CliPresence | null,
+  detected: readonly CliPresence[],
+): Promise<LlmChoice> => {
+  const input = rawInput.trim().toLowerCase();
+
+  // Empty + recommended subscription CLI present → take it.
+  if (input === "" && recommended) {
+    return {
+      provider: "subscription-cli",
+      cli: recommended.cli,
+      model: recommended.defaultModel,
+    };
+  }
+
+  // Slash form: subscription-cli/claude or subscription-cli/codex etc.
+  if (input.startsWith("subscription-cli/")) {
+    const cliName = input.slice("subscription-cli/".length);
+    const match = detected.find((c) => c.cli === cliName);
+    if (match) {
+      return { provider: "subscription-cli", cli: match.cli, model: match.defaultModel };
+    }
+    // Slash form named an unknown / unavailable CLI — fall through to ask.
+  }
+
+  // Plain "subscription-cli" → ask which CLI.
+  if (input === "subscription-cli") {
+    const available = detected.filter((c) => c.available);
+    if (available.length === 0) {
+      console.log(
+        "  No subscription CLIs detected. Install one of: claude, codex, gemini. Falling back to 'gemini' API.",
+      );
+      return { provider: "gemini" };
+    }
+    if (available.length === 1) {
+      const only = available[0];
+      if (only) {
+        return { provider: "subscription-cli", cli: only.cli, model: only.defaultModel };
+      }
+    }
+    const choices = available.map((c) => c.cli).join(" / ");
+    const cliInput = await ask(
+      `  Which subscription CLI? (${choices}) [${available[0]?.cli ?? "claude"}]: `,
+      available.map((c) => c.cli),
+    );
+    const cliName = cliInput.trim().toLowerCase() || (available[0]?.cli ?? "claude");
+    const match = detected.find((c) => c.cli === cliName) ?? available[0];
+    if (match) {
+      return { provider: "subscription-cli", cli: match.cli, model: match.defaultModel };
+    }
+  }
+
+  // API path. Empty input + no recommended CLI → "gemini" default.
+  const provider = normalizeProvider(input, recommended ? "gemini" : "gemini");
+  return { provider };
 };
 
 /**
@@ -551,25 +644,67 @@ export const runInit = async (optionsOrTargetArg?: RunInitOptions | string): Pro
 
   // 3. Default LLM provider (harness-level). Agents + the Spirit inherit this
   //    unless an agent's role.md or a spirit.md (Phase 2) overrides.
+  //
+  //    First: detect installed subscription CLIs (claude / codex / gemini).
+  //    If any are present, recommend that route — operators with a Pro/Max
+  //    subscription, ChatGPT, or Google subscription can run the murmuration
+  //    at $0 marginal cost, no API key required. New-operator unlock.
+  const detection = detectInstalledClis();
+  if (detection.anyAvailable) {
+    console.log(
+      `\nDetected subscription CLIs: ${formatDetectionSummary(detection)}` +
+        `\nA subscription CLI runs at $0 marginal cost (your existing Pro/Max/ChatGPT/Google subscription).`,
+    );
+  } else {
+    console.log(
+      `\nNo subscription CLI detected (claude/codex/gemini). You'll need an API key from one of the providers below.` +
+        `\nTip: install Claude Code, ChatGPT/Codex, or Gemini CLI to skip the API-key step entirely.`,
+    );
+  }
+
+  const defaultLabel = detection.recommended
+    ? `subscription-cli/${detection.recommended.cli}`
+    : "gemini";
+  const promptOptions = detection.anyAvailable
+    ? "subscription-cli / gemini / anthropic / openai / ollama"
+    : "gemini / anthropic / openai / ollama";
+  const completions = detection.anyAvailable
+    ? ["subscription-cli", "gemini", "anthropic", "openai", "ollama"]
+    : ["gemini", "anthropic", "openai", "ollama"];
   const defaultProviderInput = await ask(
-    "Default LLM provider (gemini / anthropic / openai / ollama) [gemini]: ",
-    ["gemini", "anthropic", "openai", "ollama"],
+    `Default LLM provider (${promptOptions}) [${defaultLabel}]: `,
+    completions,
   );
-  const defaultProvider = normalizeProvider(defaultProviderInput, "gemini");
+  const defaultLlmChoice = await resolveLlmChoice(
+    defaultProviderInput,
+    detection.recommended,
+    detection.clis,
+  );
+  const defaultProvider = defaultLlmChoice.provider;
 
   // 3a. Capture the LLM API key interactively (v0.5.0 Milestone 2).
   //     Writes to .env at the end; empty string = operator skipped and
-  //     will populate .env by hand.
+  //     will populate .env by hand. Subscription-CLI routes skip this
+  //     entirely — auth lives in the CLI's own state.
   const capturedSecrets = new Map<string, string>();
-  const llmSpec = getLLMKeySpec(defaultProvider);
-  if (llmSpec) {
+  if (defaultProvider === "subscription-cli") {
+    const cli = defaultLlmChoice.cli ?? "claude";
     console.log(
-      `\nLet's capture your ${llmSpec.displayName} API key. Input is masked; press ENTER to skip.`,
+      `\nUsing ${cli} subscription — no API key needed.` +
+        ` Verify auth with: ${cli} ${cli === "codex" ? "exec --help" : "--version"}` +
+        `\nDefault model: ${defaultLlmChoice.model ?? "(cli default)"}.`,
     );
-    const key = await captureSecretIsolated({ spec: llmSpec, askYN: ask });
-    if (key) capturedSecrets.set(llmSpec.envVar, key);
   } else {
-    console.log(`\nOllama is locally-hosted — no API key needed.`);
+    const llmSpec = getLLMKeySpec(defaultProvider);
+    if (llmSpec) {
+      console.log(
+        `\nLet's capture your ${llmSpec.displayName} API key. Input is masked; press ENTER to skip.`,
+      );
+      const key = await captureSecretIsolated({ spec: llmSpec, askYN: ask });
+      if (key) capturedSecrets.set(llmSpec.envVar, key);
+    } else {
+      console.log(`\nOllama is locally-hosted — no API key needed.`);
+    }
   }
 
   // 4. Collaboration & Products
@@ -738,6 +873,18 @@ _Edit to reflect this murmuration's specific priorities._
   const productBlock = productPath
     ? `\n\nproducts:\n  - name: "${productName}"\n    repo: "${productPath}"`
     : "";
+  // Subscription-cli emits cli + model so the daemon has a complete
+  // config without forcing the operator to hand-edit. API providers
+  // emit only `provider:` and inherit the model from the cascade default.
+  const llmYaml =
+    defaultLlmChoice.provider === "subscription-cli" && defaultLlmChoice.cli
+      ? `llm:
+  provider: "subscription-cli"
+  cli: "${defaultLlmChoice.cli}"
+  model: "${defaultLlmChoice.model ?? ""}"`
+      : `llm:
+  provider: "${defaultProvider}"`;
+
   await writeFile(
     join(targetDir, "murmuration", "harness.yaml"),
     `# Murmuration Harness configuration
@@ -745,8 +892,7 @@ _Edit to reflect this murmuration's specific priorities._
 
 # Default LLM for agents and the Spirit of the Murmuration.
 # Agents may override via their role.md 'llm:' frontmatter.
-llm:
-  provider: "${defaultProvider}"
+${llmYaml}
 
 ${governanceBlock}
 
