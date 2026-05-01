@@ -435,4 +435,50 @@ describe("createSubscriptionCliClient — factory", () => {
     });
     expect(client.capabilities().supportsToolUse).toBe(false);
   });
+
+  it("forwards bound model to buildFlags when request.model is unset", async () => {
+    // Regression: runner/index.ts deliberately does not set request.model
+    // (relies on bound model). Subprocess adapter must default it from
+    // its construction-time model, otherwise --model never reaches the CLI.
+    let observedModel: string | undefined;
+    const probeAdapter: SubprocessLLMAdapter = {
+      ...mockAdapter,
+      buildFlags: (req) => {
+        observedModel = req.model;
+        return [];
+      },
+    };
+    const client = createSubscriptionCliClient({
+      cli: "codex",
+      model: "gpt-5.5",
+      cliAdapter: probeAdapter,
+    });
+    await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+      maxOutputTokens: 100,
+    });
+    expect(observedModel).toBe("gpt-5.5");
+  });
+
+  it("preserves explicit request.model over bound model when both are set", async () => {
+    let observedModel: string | undefined;
+    const probeAdapter: SubprocessLLMAdapter = {
+      ...mockAdapter,
+      buildFlags: (req) => {
+        observedModel = req.model;
+        return [];
+      },
+    };
+    const client = createSubscriptionCliClient({
+      cli: "codex",
+      model: "gpt-5.5",
+      cliAdapter: probeAdapter,
+    });
+    await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+      maxOutputTokens: 100,
+      model: "gpt-4o",
+    });
+    expect(observedModel).toBe("gpt-4o");
+  });
 });

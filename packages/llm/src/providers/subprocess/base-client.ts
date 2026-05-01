@@ -119,7 +119,14 @@ export class SubprocessAdapter implements LLMAdapter {
     request: LLMRequest,
     abort: AbortSignal | undefined,
   ): Promise<Result<LLMResponse, SubprocessError>> {
-    const flags = [...this.#cli.buildFlags(request)];
+    // The runner does not set request.model — it relies on the client's
+    // bound model (single source of truth, see runner/index.ts comment about
+    // harness#252). Subprocess adapters need the model name to set --model
+    // on the CLI, so default it from this.modelUsed if not explicitly set.
+    const requestWithModel: LLMRequest = request.model
+      ? request
+      : { ...request, model: this.modelUsed };
+    const flags = [...this.#cli.buildFlags(requestWithModel)];
     const prompt = renderPrompt(request);
 
     return new Promise((resolve) => {
