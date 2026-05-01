@@ -184,6 +184,43 @@ export const formatCollaborationError = (err: CollaborationError): string => {
   return `${err.code}: ${msg}`;
 };
 
+/**
+ * GitHub issue body limit (REST API). Bodies longer than this fail
+ * `createItem` with `INVALID_INPUT`. harness#267.
+ */
+export const GITHUB_BODY_LIMIT = 65_536;
+
+/** Headroom reserved for the truncation marker block. */
+export const TRUNCATION_BUDGET = 1_500;
+
+/**
+ * Truncate a meeting minutes body to fit within {@link GITHUB_BODY_LIMIT},
+ * appending a marker that points operators at the locally-saved full record.
+ *
+ * Pure function — exported for unit tests. The caller is responsible for
+ * writing the full body to `fallbackPath` before calling `createItem` with
+ * the returned (possibly truncated) body, so the marker links to a file
+ * that already exists on disk.
+ */
+export const truncateMinutesForGithub = (
+  body: string,
+  fallbackPath: string,
+): { body: string; truncated: boolean } => {
+  if (body.length <= GITHUB_BODY_LIMIT) return { body, truncated: false };
+  const cap = GITHUB_BODY_LIMIT - TRUNCATION_BUDGET;
+  const head = body.slice(0, cap);
+  const marker = [
+    "",
+    "---",
+    "",
+    `_**Minutes truncated for GitHub issue body limit (${String(GITHUB_BODY_LIMIT)} chars).**_`,
+    `_Full minutes (${String(body.length)} chars) saved locally at:_`,
+    `_\`${fallbackPath}\`_`,
+    "",
+  ].join("\n");
+  return { body: `${head}${marker}`, truncated: true };
+};
+
 /** Fetch the group's open items backlog via the collaboration provider. */
 const fetchGroupBacklog = async (provider: CollaborationProvider): Promise<string> => {
   try {
@@ -761,34 +798,46 @@ export const runGroupWakeCommand = async (
 
   const meetingLabel = kind === "governance" ? "governance-meeting" : "group-meeting";
 
+  // harness#267: GitHub's issue body limit is GITHUB_BODY_LIMIT (65,536) chars.
+  // With Sonnet 4.6 + tool calls (PR #265), minutes routinely exceed 70k–110k
+  // chars and createItem fails INVALID_INPUT, silently falling back to local-
+  // only — breaking the governance audit trail. Strategy: always write the
+  // local fallback first (preserves the full record), then publish a truncated
+  // copy to GitHub with a marker pointing at the local file when truncated.
+  const fallbackFilename = `meeting-${randomUUID().slice(0, 8)}.md`;
+  const fallbackPath = join(root, "runs", `group-${groupId}`, dayUtc, fallbackFilename);
+
   const writeFallback = async (): Promise<void> => {
     const { writeFile: wf, mkdir } = await import("node:fs/promises");
-    const meetingDir = join(root, "runs", `group-${groupId}`, dayUtc);
-    await mkdir(meetingDir, { recursive: true });
-    await wf(
-      join(meetingDir, `meeting-${randomUUID().slice(0, 8)}.md`),
-      `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`,
-      "utf8",
-    );
+    await mkdir(join(root, "runs", `group-${groupId}`, dayUtc), { recursive: true });
+    await wf(fallbackPath, `# ${config.name} — ${kind} meeting — ${dayUtc}\n\n${minutes}`, "utf8");
   };
 
   if (collaboration) {
+    // Write the local fallback FIRST so the truncation marker can reference
+    // a file that already exists on disk.
+    await writeFallback();
+    const { body: githubBody, truncated } = truncateMinutesForGithub(minutes, fallbackPath);
     const itemResult = await collaboration.createItem({
       title: `[${kind.toUpperCase()} MEETING] ${config.name} — ${dayUtc}`,
       labels: [meetingLabel, `group:${groupId}`],
-      body: minutes,
+      body: githubBody,
     });
     if (itemResult.ok) {
       meetingMinutesUrl = itemResult.value.url ?? itemResult.value.id;
-      console.log(`\nMeeting minutes: ${meetingMinutesUrl}`);
+      const note = truncated ? ` (truncated; full minutes at ${fallbackPath})` : "";
+      console.log(`\nMeeting minutes: ${meetingMinutesUrl}${note}`);
     } else {
-      console.log(`\nFailed to create meeting item: ${itemResult.error.code}`);
-      await writeFallback();
-      console.log(`  (saved locally as fallback)`);
+      // createItem still failed despite truncation — surface the underlying
+      // message (not just the code) so operators can diagnose. Local fallback
+      // is already on disk from above.
+      console.log(`\nFailed to create meeting item: ${formatCollaborationError(itemResult.error)}`);
+      console.log(`  (saved locally at: ${fallbackPath})`);
     }
   } else {
     await writeFallback();
     console.log(`\nMeeting minutes saved locally (no collaboration provider).`);
+    console.log(`  Path: ${fallbackPath}`);
   }
 
   return {
