@@ -103,3 +103,5 @@ per the Engineering Lead #22 gate review ([issue #6](https://github.com/murmurat
 | [ADR-0033](./0033-github-actions-for-ci.md)                               | GitHub Actions for Continuous Integration (retroactive)                                                  | Accepted |
 | [ADR-0034](./0034-subscription-cli-provider-family.md)                    | Subscription-CLI provider family (claude/gemini/codex subprocess providers)                              | Accepted |
 | [ADR-0035](./0035-reference-architecture-mapping.md)                      | Reference architecture mapping (9-layer Agentic AI System)                                               | Accepted |
+| [ADR-0036](./0036-subscription-cli-permission-mode.md)                    | Subscription-CLI permission mode + Source approval (tension-for-permission)                              | Proposed |
+| [ADR-0037](./0037-subscription-cli-binary-integrity.md)                   | Subscription-CLI binary integrity (record + pin + hash-pin)                                              | Proposed |
