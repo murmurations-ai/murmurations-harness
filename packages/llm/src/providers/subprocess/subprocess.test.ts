@@ -26,9 +26,14 @@ const minimalRequest = (overrides: Partial<LLMRequest> = {}): LLMRequest => ({
 describe("ClaudeCliAdapter.buildFlags", () => {
   const adapter = new ClaudeCliAdapter();
 
-  it("emits -p --output-format json --dangerously-skip-permissions", () => {
+  it("defaults to restricted mode and omits --dangerously-skip-permissions", () => {
     const flags = adapter.buildFlags(minimalRequest());
-    expect(flags).toEqual(["-p", "--output-format", "json", "--dangerously-skip-permissions"]);
+    expect(flags).toEqual(["-p", "--output-format", "json"]);
+  });
+
+  it("emits --dangerously-skip-permissions only in trusted mode", () => {
+    const flags = new ClaudeCliAdapter({ permissionMode: "trusted" }).buildFlags(minimalRequest());
+    expect(flags).toContain("--dangerously-skip-permissions");
   });
 
   it("appends --model when set", () => {
@@ -171,15 +176,20 @@ ${JSON.stringify({ type: "result", result: "ok", usage: { input_tokens: 1, outpu
 describe("CodexCliAdapter.buildFlags", () => {
   const adapter = new CodexCliAdapter();
 
-  it("emits exec --json with sandbox bypass and stdin marker", () => {
+  it("emits exec --json with stdin marker and no sandbox bypass by default", () => {
     const flags = adapter.buildFlags(minimalRequest());
     expect(flags[0]).toBe("exec");
     expect(flags).toContain("--json");
     expect(flags).toContain("--skip-git-repo-check");
     expect(flags).toContain("--ephemeral");
-    expect(flags).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(flags).not.toContain("--dangerously-bypass-approvals-and-sandbox");
     // Trailing `-` tells codex exec to read prompt from stdin (D1).
     expect(flags[flags.length - 1]).toBe("-");
+  });
+
+  it("emits sandbox bypass only in trusted mode", () => {
+    const flags = new CodexCliAdapter({ permissionMode: "trusted" }).buildFlags(minimalRequest());
+    expect(flags).toContain("--dangerously-bypass-approvals-and-sandbox");
   });
 
   it("appends --model when set", () => {
@@ -278,13 +288,18 @@ describe("CodexCliAdapter.parseOutput", () => {
 describe("GeminiCliAdapter.buildFlags", () => {
   const adapter = new GeminiCliAdapter();
 
-  it("emits --output-format json --yolo and reads from stdin", () => {
+  it("emits --output-format json and omits --yolo by default", () => {
     const flags = adapter.buildFlags(minimalRequest());
     expect(flags).toContain("--output-format");
     expect(flags).toContain("json");
-    expect(flags).toContain("--yolo");
+    expect(flags).not.toContain("--yolo");
     // No -p flag — gemini reads from stdin when no positional arg given (D1).
     expect(flags).not.toContain("-p");
+  });
+
+  it("emits --yolo only in trusted mode", () => {
+    const flags = new GeminiCliAdapter({ permissionMode: "trusted" }).buildFlags(minimalRequest());
+    expect(flags).toContain("--yolo");
   });
 
   it("appends --model when set", () => {

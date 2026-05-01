@@ -18,7 +18,13 @@ import { spawnSync } from "node:child_process";
 
 import type { LLMRequest, LLMResponse, Result } from "../../../types.js";
 
-import type { AuthError, AuthStatus, ParseError, SubprocessLLMAdapter } from "../types.js";
+import type {
+  AuthError,
+  AuthStatus,
+  ParseError,
+  SubscriptionCliPermissionMode,
+  SubprocessLLMAdapter,
+} from "../types.js";
 
 interface CodexUsage {
   readonly input_tokens?: number;
@@ -53,19 +59,21 @@ export class CodexCliAdapter implements SubprocessLLMAdapter {
   public readonly command = "codex";
   public readonly providerId = "codex-cli";
 
+  readonly #permissionMode: SubscriptionCliPermissionMode;
+
+  public constructor(config: { readonly permissionMode?: SubscriptionCliPermissionMode } = {}) {
+    this.#permissionMode = config.permissionMode ?? "restricted";
+  }
+
   public buildFlags(req: LLMRequest): readonly string[] {
     // ADR-0034 D1: prompt content goes via stdin, never argv.
     // --skip-git-repo-check: let agents run regardless of cwd.
     // --ephemeral: don't persist session files (operator may run many wakes).
-    // --dangerously-bypass-approvals-and-sandbox: tool surface is controlled
-    //   by the daemon, not Codex's internal sandbox prompts.
-    const flags: string[] = [
-      "exec",
-      "--json",
-      "--skip-git-repo-check",
-      "--ephemeral",
-      "--dangerously-bypass-approvals-and-sandbox",
-    ];
+    // ADR-0036: only explicit `trusted` mode emits Codex's sandbox bypass.
+    const flags: string[] = ["exec", "--json", "--skip-git-repo-check", "--ephemeral"];
+    if (this.#permissionMode === "trusted") {
+      flags.push("--dangerously-bypass-approvals-and-sandbox");
+    }
     if (req.model) flags.push("--model", req.model);
     // Trailing `-` tells codex exec to read prompt from stdin.
     flags.push("-");

@@ -14,7 +14,13 @@ import { promisify } from "node:util";
 
 import type { LLMRequest, LLMResponse, Result } from "../../../types.js";
 
-import type { AuthError, AuthStatus, ParseError, SubprocessLLMAdapter } from "../types.js";
+import type {
+  AuthError,
+  AuthStatus,
+  ParseError,
+  SubscriptionCliPermissionMode,
+  SubprocessLLMAdapter,
+} from "../types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -88,6 +94,8 @@ export interface ClaudeCliAdapterConfig {
    * packages/cli/src/spirit/mcp-server.ts.
    */
   readonly mcpConfigPath?: string;
+  /** ADR-0036: only `trusted` emits Claude's native auto-approve flag. */
+  readonly permissionMode?: SubscriptionCliPermissionMode;
 }
 
 export class ClaudeCliAdapter implements SubprocessLLMAdapter {
@@ -95,9 +103,11 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
   public readonly providerId = "claude-cli";
 
   readonly #mcpConfigPath: string | undefined;
+  readonly #permissionMode: SubscriptionCliPermissionMode;
 
   public constructor(config: ClaudeCliAdapterConfig = {}) {
     this.#mcpConfigPath = config.mcpConfigPath;
+    this.#permissionMode = config.permissionMode ?? "restricted";
   }
 
   /**
@@ -105,7 +115,10 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
    * ADR-0034 D1: never includes prompt content; prompt is delivered via stdin.
    */
   public buildFlags(req: LLMRequest): readonly string[] {
-    const flags: string[] = ["-p", "--output-format", "json", "--dangerously-skip-permissions"];
+    const flags: string[] = ["-p", "--output-format", "json"];
+    if (this.#permissionMode === "trusted") {
+      flags.push("--dangerously-skip-permissions");
+    }
     if (req.model) {
       flags.push("--model", req.model);
     }

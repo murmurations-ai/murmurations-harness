@@ -222,9 +222,14 @@ const runSchemaChecks = async (ctx: CheckContext): Promise<void> => {
   const loader = new IdentityLoader({
     rootDir,
     roleDefaults: {
-      llm: harness.llm.model
-        ? { provider: harness.llm.provider, model: harness.llm.model }
-        : { provider: harness.llm.provider },
+      llm: {
+        provider: harness.llm.provider,
+        ...(harness.llm.model !== undefined ? { model: harness.llm.model } : {}),
+        ...(harness.llm.cli !== undefined ? { cli: harness.llm.cli } : {}),
+        ...(harness.llm.permissionMode !== undefined
+          ? { permissionMode: harness.llm.permissionMode }
+          : {}),
+      },
     },
   });
 

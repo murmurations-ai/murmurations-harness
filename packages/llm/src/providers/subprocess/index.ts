@@ -22,6 +22,7 @@ export type {
   SpawnError,
   SubprocessError,
   SubprocessLLMAdapter,
+  SubscriptionCliPermissionMode,
   TimeoutError,
 } from "./types.js";
 
@@ -41,7 +42,7 @@ import { SubprocessAdapter } from "./base-client.js";
 import { ClaudeCliAdapter } from "./adapters/claude.js";
 import { CodexCliAdapter } from "./adapters/codex.js";
 import { GeminiCliAdapter } from "./adapters/gemini.js";
-import type { SubprocessLLMAdapter } from "./types.js";
+import type { SubprocessLLMAdapter, SubscriptionCliPermissionMode } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Factory — bypasses the ProviderRegistry path because subscription-CLI
@@ -79,6 +80,12 @@ export interface SubscriptionCliClientConfig {
    * support is a follow-up.
    */
   readonly mcpConfigPath?: string;
+  /**
+   * ADR-0036: native vendor CLI execution authority. Defaults to
+   * `restricted`, which omits dangerous/yolo/bypass flags. `trusted`
+   * must be selected explicitly for dogfooding environments.
+   */
+  readonly permissionMode?: SubscriptionCliPermissionMode;
 }
 
 const buildAdapter = (
@@ -89,11 +96,16 @@ const buildAdapter = (
     case "claude":
       return new ClaudeCliAdapter({
         ...(config.mcpConfigPath !== undefined ? { mcpConfigPath: config.mcpConfigPath } : {}),
+        ...(config.permissionMode !== undefined ? { permissionMode: config.permissionMode } : {}),
       });
     case "gemini":
-      return new GeminiCliAdapter();
+      return new GeminiCliAdapter({
+        ...(config.permissionMode !== undefined ? { permissionMode: config.permissionMode } : {}),
+      });
     case "codex":
-      return new CodexCliAdapter();
+      return new CodexCliAdapter({
+        ...(config.permissionMode !== undefined ? { permissionMode: config.permissionMode } : {}),
+      });
   }
 };
 

@@ -114,6 +114,8 @@ export interface RegisteredAgent {
     readonly cli?: "claude" | "gemini" | "codex";
     /** ADR-0034: subprocess wall-clock timeout (subscription-cli only). */
     readonly timeoutMs?: number;
+    /** ADR-0036: native vendor CLI tool authority. */
+    readonly permissionMode?: "restricted" | "operator-approved" | "trusted";
   };
 
   /**
@@ -227,6 +229,9 @@ export const registeredAgentFromLoadedIdentity = (
         ...(frontmatter.llm.cli !== undefined ? { cli: frontmatter.llm.cli } : {}),
         ...(frontmatter.llm.timeoutMs !== undefined
           ? { timeoutMs: frontmatter.llm.timeoutMs }
+          : {}),
+        ...(frontmatter.llm.permissionMode !== undefined
+          ? { permissionMode: frontmatter.llm.permissionMode }
           : {}),
       }
     : undefined;

@@ -393,6 +393,9 @@ const buildAgentClients = ({
           cli,
           model: agent.llm.model ?? "",
           ...(agent.llm.timeoutMs !== undefined ? { timeoutMs: agent.llm.timeoutMs } : {}),
+          ...(agent.llm.permissionMode !== undefined
+            ? { permissionMode: agent.llm.permissionMode }
+            : {}),
           ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
         });
       }
@@ -744,9 +747,14 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     // Engineering Standard #11: cascade harness.yaml `llm:` into each
     // agent's role.md when the agent omits it.
     roleDefaults: {
-      llm: config.llm.model
-        ? { provider: config.llm.provider, model: config.llm.model }
-        : { provider: config.llm.provider },
+      llm: {
+        provider: config.llm.provider,
+        ...(config.llm.model !== undefined ? { model: config.llm.model } : {}),
+        ...(config.llm.cli !== undefined ? { cli: config.llm.cli } : {}),
+        ...(config.llm.permissionMode !== undefined
+          ? { permissionMode: config.llm.permissionMode }
+          : {}),
+      },
     },
   });
 

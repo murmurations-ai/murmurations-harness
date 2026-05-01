@@ -31,6 +31,7 @@ import {
   loadHarnessConfig,
   type HarnessLLMConfig,
   type LLMProvider,
+  type SubscriptionCliPermissionMode,
   type SubscriptionCli,
 } from "../harness-config.js";
 import { buildSpiritSystemPrompt } from "./system-prompt.js";
@@ -94,6 +95,8 @@ const DEFAULT_CLI_MODEL: Record<SubscriptionCli, string> = {
   codex: "gpt-4o",
   gemini: "gemini-2.5-pro",
 };
+
+const DEFAULT_SUBSCRIPTION_CLI_PERMISSION_MODE: SubscriptionCliPermissionMode = "restricted";
 
 /** Rough per-provider pricing ($ per million tokens, input / output). Used
  *  only for the REPL cost annotation — not authoritative. Subscription-cli
@@ -215,6 +218,7 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     client = createSubscriptionCliClient({
       cli,
       model,
+      permissionMode: harness.llm.permissionMode ?? DEFAULT_SUBSCRIPTION_CLI_PERMISSION_MODE,
       ...(mcpConfigPath !== undefined ? { mcpConfigPath } : {}),
     });
     // The CLI runs its own tool loop (via MCP for claude). We MUST NOT pass

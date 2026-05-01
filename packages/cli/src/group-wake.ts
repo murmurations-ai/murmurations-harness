@@ -63,6 +63,8 @@ type ResolveLLMResult =
         readonly cli?: "claude" | "codex" | "gemini";
         /** Subprocess timeout in ms; only honored for subscription-cli. */
         readonly timeoutMs?: number;
+        /** ADR-0036: native vendor CLI tool authority. */
+        readonly permissionMode?: "restricted" | "operator-approved" | "trusted";
       };
     }
   | { readonly ok: false; readonly reason: "no-llm-block"; readonly rolePath: string }
@@ -93,9 +95,14 @@ export const resolveLLMConfig = async (
     const loader = new IdentityLoader({
       rootDir,
       roleDefaults: {
-        llm: harness.llm.model
-          ? { provider: harness.llm.provider, model: harness.llm.model }
-          : { provider: harness.llm.provider },
+        llm: {
+          provider: harness.llm.provider,
+          ...(harness.llm.model !== undefined ? { model: harness.llm.model } : {}),
+          ...(harness.llm.cli !== undefined ? { cli: harness.llm.cli } : {}),
+          ...(harness.llm.permissionMode !== undefined
+            ? { permissionMode: harness.llm.permissionMode }
+            : {}),
+        },
       },
     });
     const identity = await loader.load(facilitatorId);
@@ -108,6 +115,7 @@ export const resolveLLMConfig = async (
           model: llm.model ?? getDefaultModel(llm.provider),
           ...(llm.cli !== undefined ? { cli: llm.cli } : {}),
           ...(llm.timeoutMs !== undefined ? { timeoutMs: llm.timeoutMs } : {}),
+          ...(llm.permissionMode !== undefined ? { permissionMode: llm.permissionMode } : {}),
         },
       };
     }
@@ -473,6 +481,9 @@ export const runGroupWakeCommand = async (
       cli: llmConfig.cli,
       model: llmConfig.model,
       ...(llmConfig.timeoutMs !== undefined ? { timeoutMs: llmConfig.timeoutMs } : {}),
+      ...(llmConfig.permissionMode !== undefined
+        ? { permissionMode: llmConfig.permissionMode }
+        : {}),
     });
   } else {
     const envKeyName = providerRegistry.envKeyName(llmConfig.provider);

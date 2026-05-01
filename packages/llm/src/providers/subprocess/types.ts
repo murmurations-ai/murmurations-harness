@@ -13,6 +13,21 @@
 import type { LLMRequest, LLMResponse, Result } from "../../types.js";
 
 // ---------------------------------------------------------------------------
+// Execution policy — native vendor CLI tool authority (ADR-0036).
+// ---------------------------------------------------------------------------
+
+/**
+ * Controls whether the adapter emits vendor-native "approve all tools" flags.
+ *
+ * `restricted` is the safe default: the CLI runs with its ordinary prompts /
+ * sandbox behavior. `trusted` preserves the original dogfooding behavior and
+ * must be selected explicitly by the caller. `operator-approved` is reserved
+ * for the future GitHub issue grant flow in ADR-0036; until the grant store
+ * exists, it behaves like `restricted`.
+ */
+export type SubscriptionCliPermissionMode = "restricted" | "operator-approved" | "trusted";
+
+// ---------------------------------------------------------------------------
 // Internal error taxonomy — adapter-level. The public LLMAdapter contract
 // surfaces these as LLMClientError (mapped at the adapter boundary in
 // subprocess-adapter.ts).

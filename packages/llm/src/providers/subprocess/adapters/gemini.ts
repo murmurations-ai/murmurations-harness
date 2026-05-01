@@ -30,7 +30,13 @@ import { spawnSync } from "node:child_process";
 
 import type { LLMRequest, LLMResponse, Result } from "../../../types.js";
 
-import type { AuthError, AuthStatus, ParseError, SubprocessLLMAdapter } from "../types.js";
+import type {
+  AuthError,
+  AuthStatus,
+  ParseError,
+  SubscriptionCliPermissionMode,
+  SubprocessLLMAdapter,
+} from "../types.js";
 
 interface GeminiModelStats {
   readonly tokens?: {
@@ -57,11 +63,20 @@ export class GeminiCliAdapter implements SubprocessLLMAdapter {
   public readonly command = "gemini";
   public readonly providerId = "gemini-cli";
 
+  readonly #permissionMode: SubscriptionCliPermissionMode;
+
+  public constructor(config: { readonly permissionMode?: SubscriptionCliPermissionMode } = {}) {
+    this.#permissionMode = config.permissionMode ?? "restricted";
+  }
+
   public buildFlags(req: LLMRequest): readonly string[] {
     // ADR-0034 D1: prompt content goes via stdin, never argv.
     // Gemini reads from stdin when no positional prompt is provided.
-    // --yolo: auto-approve all tools (daemon controls the tool surface).
-    const flags: string[] = ["--output-format", "json", "--yolo"];
+    // ADR-0036: only explicit `trusted` mode emits Gemini's auto-approve flag.
+    const flags: string[] = ["--output-format", "json"];
+    if (this.#permissionMode === "trusted") {
+      flags.push("--yolo");
+    }
     if (req.model) flags.push("--model", req.model);
     return flags;
   }

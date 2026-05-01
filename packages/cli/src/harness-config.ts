@@ -20,6 +20,8 @@ export type LLMProvider = "gemini" | "anthropic" | "openai" | "ollama" | "subscr
 
 export type SubscriptionCli = "claude" | "codex" | "gemini";
 
+export type SubscriptionCliPermissionMode = "restricted" | "operator-approved" | "trusted";
+
 /** Harness-level default LLM config (ADR-0024). Individual agents may
  *  override via their `role.md` `llm:` frontmatter. The Spirit of the
  *  Murmuration inherits this default unless a Phase 2 `spirit.md` file
@@ -29,6 +31,8 @@ export interface HarnessLLMConfig {
   readonly model: string | undefined;
   /** Set when provider === "subscription-cli". */
   readonly cli?: SubscriptionCli;
+  /** ADR-0036: vendor-native CLI tool authority. Defaults to restricted. */
+  readonly permissionMode?: SubscriptionCliPermissionMode;
 }
 
 export interface HarnessConfig {
@@ -89,6 +93,9 @@ const isLLMProvider = (v: unknown): v is LLMProvider =>
 const isSubscriptionCli = (v: unknown): v is SubscriptionCli =>
   v === "claude" || v === "codex" || v === "gemini";
 
+const isSubscriptionCliPermissionMode = (v: unknown): v is SubscriptionCliPermissionMode =>
+  v === "restricted" || v === "operator-approved" || v === "trusted";
+
 // ---------------------------------------------------------------------------
 // Loader
 // ---------------------------------------------------------------------------
@@ -141,6 +148,9 @@ export async function loadHarnessConfig(rootDir: string): Promise<HarnessConfig>
       provider: isLLMProvider(llm?.provider) ? llm.provider : DEFAULTS.llm.provider,
       model: typeof llm?.model === "string" ? llm.model : undefined,
       ...(isSubscriptionCli(llm?.cli) ? { cli: llm.cli } : {}),
+      ...(isSubscriptionCliPermissionMode(llm?.permissionMode)
+        ? { permissionMode: llm.permissionMode }
+        : {}),
     },
     governance: {
       plugin: typeof gov?.plugin === "string" ? gov.plugin : undefined,
