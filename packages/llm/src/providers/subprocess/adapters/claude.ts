@@ -79,9 +79,26 @@ const truncateForError = (raw: string): string =>
 // Adapter
 // ---------------------------------------------------------------------------
 
+export interface ClaudeCliAdapterConfig {
+  /**
+   * Path to an MCP config JSON file (`{ "mcpServers": {...} }`). When set,
+   * passed to claude as `--mcp-config <path>` so the CLI loads the listed
+   * MCP servers in addition to its own. Used by Spirit's subscription-cli
+   * route to expose harness-internal tools to claude via MCP — see
+   * packages/cli/src/spirit/mcp-server.ts.
+   */
+  readonly mcpConfigPath?: string;
+}
+
 export class ClaudeCliAdapter implements SubprocessLLMAdapter {
   public readonly command = "claude";
   public readonly providerId = "claude-cli";
+
+  readonly #mcpConfigPath: string | undefined;
+
+  public constructor(config: ClaudeCliAdapterConfig = {}) {
+    this.#mcpConfigPath = config.mcpConfigPath;
+  }
 
   /**
    * Build CLI argv for `claude -p --output-format json …`.
@@ -91,6 +108,9 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
     const flags: string[] = ["-p", "--output-format", "json", "--dangerously-skip-permissions"];
     if (req.model) {
       flags.push("--model", req.model);
+    }
+    if (this.#mcpConfigPath) {
+      flags.push("--mcp-config", this.#mcpConfigPath);
     }
     return flags;
   }

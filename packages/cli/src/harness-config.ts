@@ -16,7 +16,9 @@ import { parse as parseYaml } from "yaml";
 // Config shape
 // ---------------------------------------------------------------------------
 
-export type LLMProvider = "gemini" | "anthropic" | "openai" | "ollama";
+export type LLMProvider = "gemini" | "anthropic" | "openai" | "ollama" | "subscription-cli";
+
+export type SubscriptionCli = "claude" | "codex" | "gemini";
 
 /** Harness-level default LLM config (ADR-0024). Individual agents may
  *  override via their `role.md` `llm:` frontmatter. The Spirit of the
@@ -25,6 +27,8 @@ export type LLMProvider = "gemini" | "anthropic" | "openai" | "ollama";
 export interface HarnessLLMConfig {
   readonly provider: LLMProvider;
   readonly model: string | undefined;
+  /** Set when provider === "subscription-cli". */
+  readonly cli?: SubscriptionCli;
 }
 
 export interface HarnessConfig {
@@ -76,7 +80,14 @@ const DEFAULTS: HarnessConfig = {
 };
 
 const isLLMProvider = (v: unknown): v is LLMProvider =>
-  v === "gemini" || v === "anthropic" || v === "openai" || v === "ollama";
+  v === "gemini" ||
+  v === "anthropic" ||
+  v === "openai" ||
+  v === "ollama" ||
+  v === "subscription-cli";
+
+const isSubscriptionCli = (v: unknown): v is SubscriptionCli =>
+  v === "claude" || v === "codex" || v === "gemini";
 
 // ---------------------------------------------------------------------------
 // Loader
@@ -129,6 +140,7 @@ export async function loadHarnessConfig(rootDir: string): Promise<HarnessConfig>
     llm: {
       provider: isLLMProvider(llm?.provider) ? llm.provider : DEFAULTS.llm.provider,
       model: typeof llm?.model === "string" ? llm.model : undefined,
+      ...(isSubscriptionCli(llm?.cli) ? { cli: llm.cli } : {}),
     },
     governance: {
       plugin: typeof gov?.plugin === "string" ? gov.plugin : undefined,

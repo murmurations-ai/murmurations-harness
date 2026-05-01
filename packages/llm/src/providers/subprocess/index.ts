@@ -69,12 +69,27 @@ export interface SubscriptionCliClientConfig {
   readonly cliAdapter?: SubprocessLLMAdapter;
   /** Override capabilities (for tests). */
   readonly capabilities?: LLMClientCapabilities;
+  /**
+   * Path to an MCP config JSON to pass to the underlying CLI so it
+   * loads additional MCP servers. Used by Spirit's subscription-cli
+   * route to expose harness-internal tools (status, agents, wake,
+   * directive, etc.) to the CLI's tool loop — see
+   * packages/cli/src/spirit/mcp-server.ts. Currently only honored by
+   * the claude adapter (passes `--mcp-config <path>`); codex + gemini
+   * support is a follow-up.
+   */
+  readonly mcpConfigPath?: string;
 }
 
-const buildAdapter = (cli: SubscriptionCli): SubprocessLLMAdapter => {
+const buildAdapter = (
+  cli: SubscriptionCli,
+  config: SubscriptionCliClientConfig,
+): SubprocessLLMAdapter => {
   switch (cli) {
     case "claude":
-      return new ClaudeCliAdapter();
+      return new ClaudeCliAdapter({
+        ...(config.mcpConfigPath !== undefined ? { mcpConfigPath: config.mcpConfigPath } : {}),
+      });
     case "gemini":
       return new GeminiCliAdapter();
     case "codex":
@@ -90,7 +105,7 @@ const buildAdapter = (cli: SubscriptionCli): SubprocessLLMAdapter => {
  * the same interface; the daemon doesn't need to know which factory built it.
  */
 export const createSubscriptionCliClient = (config: SubscriptionCliClientConfig): LLMClient => {
-  const cliAdapter = config.cliAdapter ?? buildAdapter(config.cli);
+  const cliAdapter = config.cliAdapter ?? buildAdapter(config.cli, config);
   const adapter = new SubprocessAdapter(config.model, {
     cliAdapter,
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),

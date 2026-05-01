@@ -10,12 +10,14 @@
  * detach drops it.
  */
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { makeSecretKey, makeSecretValue, type SecretValue } from "@murmurations-ai/core";
 import {
   createLLMClient,
+  createSubscriptionCliClient,
   formatLLMError,
   ProviderRegistry,
   type LLMClient,
@@ -25,7 +27,12 @@ import {
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
 import { buildBuiltinProviderRegistry } from "../builtin-providers/index.js";
-import { loadHarnessConfig, type HarnessLLMConfig, type LLMProvider } from "../harness-config.js";
+import {
+  loadHarnessConfig,
+  type HarnessLLMConfig,
+  type LLMProvider,
+  type SubscriptionCli,
+} from "../harness-config.js";
 import { buildSpiritSystemPrompt } from "./system-prompt.js";
 import { buildSpiritTools } from "./tools.js";
 
@@ -70,21 +77,64 @@ export class SpiritUnavailableError extends Error {
 }
 
 /** Balanced-tier models per provider when the harness config does not pin a
- *  specific model. Matches `@murmurations-ai/llm` tiers table. */
+ *  specific model. Matches `@murmurations-ai/llm` tiers table. The
+ *  `subscription-cli` entry is a placeholder — the cli-specific default in
+ *  {@link DEFAULT_CLI_MODEL} is used instead when provider is subscription-cli. */
 const DEFAULT_MODEL: Record<LLMProvider, string> = {
   anthropic: "claude-sonnet-4-5-20250929",
   gemini: "gemini-2.5-pro",
   openai: "gpt-4o",
   ollama: "llama3.2",
+  "subscription-cli": "claude-sonnet-4-6",
+};
+
+/** Default model per subscription CLI when harness.yaml does not pin one. */
+const DEFAULT_CLI_MODEL: Record<SubscriptionCli, string> = {
+  claude: "claude-sonnet-4-6",
+  codex: "gpt-4o",
+  gemini: "gemini-2.5-pro",
 };
 
 /** Rough per-provider pricing ($ per million tokens, input / output). Used
- *  only for the REPL cost annotation — not authoritative. */
+ *  only for the REPL cost annotation — not authoritative. Subscription-cli
+ *  is $0 marginal cost (paid via the operator's subscription). */
 const PRICING: Record<LLMProvider, { readonly input: number; readonly output: number }> = {
   anthropic: { input: 3.0, output: 15.0 },
   gemini: { input: 1.25, output: 5.0 },
   openai: { input: 2.5, output: 10.0 },
   ollama: { input: 0, output: 0 },
+  "subscription-cli": { input: 0, output: 0 },
+};
+
+/**
+ * Write Spirit's MCP config so the subscription CLI exposes harness-internal
+ * tools (status, agents, wake, directive, etc.) to its tool loop. The CLI
+ * spawns `node <mcp-bin.js>` with `MURMURATION_ROOT` set to the murmuration
+ * root; the spawned process attaches to the daemon socket and serves Spirit's
+ * tools over MCP stdio.
+ *
+ * Returns the absolute path to the written config so the caller can pass it
+ * via `--mcp-config <path>` (claude). Codex/gemini support is a follow-up.
+ */
+const writeSpiritMcpConfig = (rootDir: string): string => {
+  const configDir = join(rootDir, ".murmuration");
+  mkdirSync(configDir, { recursive: true });
+  const configPath = join(configDir, "spirit-mcp.json");
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const mcpBinPath = join(here, "mcp-bin.js");
+
+  const config = {
+    mcpServers: {
+      "murmuration-spirit": {
+        command: "node",
+        args: [mcpBinPath],
+        env: { MURMURATION_ROOT: rootDir },
+      },
+    },
+  };
+  writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+  return configPath;
 };
 
 /** Resolve the API key for a provider. Reads `<rootDir>/.env` first,
@@ -147,31 +197,57 @@ const buildLLMConfig = (
 export const initSpiritSession = async (opts: SpiritInitOptions): Promise<SpiritSession> => {
   const { rootDir, send } = opts;
 
-  const registry = buildBuiltinProviderRegistry();
   const harness = await loadHarnessConfig(rootDir);
-  const providerDef = registry.get(harness.llm.provider);
-  if (!providerDef) {
-    throw new SpiritUnavailableError(
-      `Spirit needs provider "${harness.llm.provider}" — not registered (check harness.yaml llm.provider).`,
-    );
-  }
-  const model =
-    harness.llm.model ??
-    registry.resolveModelForTier(harness.llm.provider, "balanced") ??
-    DEFAULT_MODEL[harness.llm.provider];
 
-  const token = await resolveProviderToken(registry, harness.llm.provider, rootDir);
-  if (token === undefined) {
-    const keyName = providerDef.envKeyName ?? "an LLM API key";
-    throw new SpiritUnavailableError(
-      `Spirit needs ${keyName} for provider "${harness.llm.provider}" — set it in .env or the environment.`,
-    );
-  }
+  let client: LLMClient;
+  let model: string;
+  let useApiTools: boolean;
 
-  const client: LLMClient = createLLMClient(buildLLMConfig(registry, harness.llm, token, model));
+  if (harness.llm.provider === "subscription-cli") {
+    const cli: SubscriptionCli = harness.llm.cli ?? "claude";
+    model = harness.llm.model ?? DEFAULT_CLI_MODEL[cli];
+
+    // Claude is the only CLI with `--mcp-config` support today (ADR-0038).
+    // Codex/gemini fall through without an MCP bridge — they can converse
+    // but cannot invoke harness-internal tools yet.
+    const mcpConfigPath = cli === "claude" ? writeSpiritMcpConfig(rootDir) : undefined;
+
+    client = createSubscriptionCliClient({
+      cli,
+      model,
+      ...(mcpConfigPath !== undefined ? { mcpConfigPath } : {}),
+    });
+    // The CLI runs its own tool loop (via MCP for claude). We MUST NOT pass
+    // Vercel-style tool definitions to the subprocess adapter — they would
+    // be silently dropped, and worse, double-counted against `maxSteps`.
+    useApiTools = false;
+  } else {
+    const registry = buildBuiltinProviderRegistry();
+    const providerDef = registry.get(harness.llm.provider);
+    if (!providerDef) {
+      throw new SpiritUnavailableError(
+        `Spirit needs provider "${harness.llm.provider}" — not registered (check harness.yaml llm.provider).`,
+      );
+    }
+    model =
+      harness.llm.model ??
+      registry.resolveModelForTier(harness.llm.provider, "balanced") ??
+      DEFAULT_MODEL[harness.llm.provider];
+
+    const token = await resolveProviderToken(registry, harness.llm.provider, rootDir);
+    if (token === undefined) {
+      const keyName = providerDef.envKeyName ?? "an LLM API key";
+      throw new SpiritUnavailableError(
+        `Spirit needs ${keyName} for provider "${harness.llm.provider}" — set it in .env or the environment.`,
+      );
+    }
+
+    client = createLLMClient(buildLLMConfig(registry, harness.llm, token, model));
+    useApiTools = true;
+  }
 
   const systemPrompt = await buildSpiritSystemPrompt();
-  const tools = buildSpiritTools({ rootDir, send });
+  const tools = useApiTools ? buildSpiritTools({ rootDir, send }) : undefined;
 
   const history: LLMMessage[] = [];
   const pricing = PRICING[harness.llm.provider];
@@ -186,8 +262,7 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
       systemPromptOverride: systemPrompt,
       maxOutputTokens: 4096,
       temperature: 0.2,
-      tools,
-      maxSteps,
+      ...(tools ? { tools, maxSteps } : {}),
     });
 
     if (!result.ok) {
@@ -202,10 +277,11 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     const estimatedCostUsd =
       (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
     const toolCallCount = result.value.toolCalls?.length ?? 0;
-    // Vercel SDK reports finishReason="tool-calls" (→ "tool_use") when
-    // stepCountIs fires while the model was mid-tool-loop. Combined with
-    // empty text, that means the budget ran out before a final answer.
+    // Truncation detection only meaningful on the API path: Vercel SDK
+    // reports finishReason="tool-calls" (→ "tool_use") when stepCountIs
+    // fires mid-loop. Subscription-cli runs its own loop; we can't see it.
     const truncated =
+      tools !== undefined &&
       toolCallCount >= maxSteps &&
       result.value.stopReason === "tool_use" &&
       result.value.content.trim().length === 0;

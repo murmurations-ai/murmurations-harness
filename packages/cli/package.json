@@ -40,6 +40,7 @@
     "@ai-sdk/anthropic": "^3.0.69",
     "@ai-sdk/google": "^3.0.63",
     "@ai-sdk/openai": "^3.0.53",
+    "@modelcontextprotocol/sdk": "^1.13.1",
     "@murmurations-ai/core": "workspace:*",
     "@murmurations-ai/github": "workspace:*",
     "@murmurations-ai/llm": "workspace:*",
