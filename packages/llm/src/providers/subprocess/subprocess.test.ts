@@ -167,43 +167,203 @@ ${JSON.stringify({ type: "result", result: "ok", usage: { input_tokens: 1, outpu
   });
 });
 
-describe("Stub adapters (Gemini, Codex) — ADR-0034 BU-1/BU-2 unresolved", () => {
-  it("GeminiCliAdapter.parseOutput returns a stub ParseError", () => {
-    const out = new GeminiCliAdapter().parseOutput("anything");
-    expect(out.ok).toBe(false);
-    if (out.ok) return;
-    expect(out.error.message).toContain("stub");
-  });
+describe("CodexCliAdapter.buildFlags", () => {
+  const adapter = new CodexCliAdapter();
 
-  it("CodexCliAdapter.parseOutput returns a stub ParseError", () => {
-    const out = new CodexCliAdapter().parseOutput("anything");
-    expect(out.ok).toBe(false);
-    if (out.ok) return;
-    expect(out.error.message).toContain("stub");
-  });
-
-  it("GeminiCliAdapter.authCheck reports 'unavailable' until BU-1/BU-2 resolved", async () => {
-    const out = await new GeminiCliAdapter().authCheck();
-    expect(out.ok).toBe(true);
-    if (!out.ok) return;
-    expect(out.value.kind).toBe("unavailable");
-  });
-
-  it("CodexCliAdapter.authCheck reports 'unavailable' until BU-1/BU-2 resolved", async () => {
-    const out = await new CodexCliAdapter().authCheck();
-    expect(out.ok).toBe(true);
-    if (!out.ok) return;
-    expect(out.value.kind).toBe("unavailable");
-  });
-
-  it("GeminiCliAdapter buildFlags uses --yolo for auto-approve", () => {
-    expect(new GeminiCliAdapter().buildFlags(minimalRequest())).toContain("--yolo");
-  });
-
-  it("CodexCliAdapter buildFlags uses exec subcommand and --full-auto", () => {
-    const flags = new CodexCliAdapter().buildFlags(minimalRequest());
+  it("emits exec --json with sandbox bypass and stdin marker", () => {
+    const flags = adapter.buildFlags(minimalRequest());
     expect(flags[0]).toBe("exec");
-    expect(flags).toContain("--full-auto");
+    expect(flags).toContain("--json");
+    expect(flags).toContain("--skip-git-repo-check");
+    expect(flags).toContain("--ephemeral");
+    expect(flags).toContain("--dangerously-bypass-approvals-and-sandbox");
+    // Trailing `-` tells codex exec to read prompt from stdin (D1).
+    expect(flags[flags.length - 1]).toBe("-");
+  });
+
+  it("appends --model when set", () => {
+    const flags = adapter.buildFlags(minimalRequest({ model: "gpt-5" }));
+    expect(flags).toContain("--model");
+    expect(flags).toContain("gpt-5");
+  });
+
+  it("never includes prompt content (ADR-0034 D1)", () => {
+    const flags = adapter.buildFlags(
+      minimalRequest({
+        messages: [{ role: "user", content: "secret prompt material" }],
+      }),
+    );
+    expect(flags.join(" ")).not.toContain("secret prompt material");
+  });
+});
+
+describe("CodexCliAdapter.parseOutput", () => {
+  const adapter = new CodexCliAdapter();
+
+  const happyPath = [
+    JSON.stringify({ type: "thread.started", thread_id: "t1" }),
+    JSON.stringify({ type: "turn.started" }),
+    JSON.stringify({
+      type: "item.completed",
+      item: { id: "item_0", type: "agent_message", text: "pong" },
+    }),
+    JSON.stringify({
+      type: "turn.completed",
+      usage: {
+        input_tokens: 13304,
+        cached_input_tokens: 11648,
+        output_tokens: 5,
+        reasoning_output_tokens: 0,
+      },
+    }),
+  ].join("\n");
+
+  it("parses tokens, content, and cache from a happy stream", () => {
+    const out = adapter.parseOutput(happyPath);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.value.content).toBe("pong");
+    expect(out.value.inputTokens).toBe(13304);
+    expect(out.value.outputTokens).toBe(5);
+    expect(out.value.cacheReadTokens).toBe(11648);
+    expect(out.value.providerUsed).toBe("codex-cli");
+  });
+
+  it("returns ParseError on empty output", () => {
+    const out = adapter.parseOutput("");
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.error.message.toLowerCase()).toContain("empty");
+  });
+
+  it("returns ParseError when turn.completed is missing (ADR-0034 D3)", () => {
+    const noTurn = JSON.stringify({
+      type: "item.completed",
+      item: { type: "agent_message", text: "ok" },
+    });
+    const out = adapter.parseOutput(noTurn);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.error.message).toContain("turn.completed");
+  });
+
+  it("extracts function_call items as tool calls", () => {
+    const withTool = [
+      JSON.stringify({
+        type: "item.completed",
+        item: {
+          id: "fc_0",
+          type: "function_call",
+          name: "shell",
+          arguments: JSON.stringify({ cmd: "ls" }),
+        },
+      }),
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "done" },
+      }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    ].join("\n");
+    const out = adapter.parseOutput(withTool);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.value.toolCalls).toEqual([{ name: "shell", args: { cmd: "ls" }, result: null }]);
+  });
+});
+
+describe("GeminiCliAdapter.buildFlags", () => {
+  const adapter = new GeminiCliAdapter();
+
+  it("emits --output-format json --yolo and reads from stdin", () => {
+    const flags = adapter.buildFlags(minimalRequest());
+    expect(flags).toContain("--output-format");
+    expect(flags).toContain("json");
+    expect(flags).toContain("--yolo");
+    // No -p flag — gemini reads from stdin when no positional arg given (D1).
+    expect(flags).not.toContain("-p");
+  });
+
+  it("appends --model when set", () => {
+    const flags = adapter.buildFlags(minimalRequest({ model: "gemini-2.5-flash" }));
+    expect(flags).toContain("--model");
+    expect(flags).toContain("gemini-2.5-flash");
+  });
+
+  it("never includes prompt content (ADR-0034 D1)", () => {
+    const flags = adapter.buildFlags(
+      minimalRequest({
+        messages: [{ role: "user", content: "secret prompt material" }],
+      }),
+    );
+    expect(flags.join(" ")).not.toContain("secret prompt material");
+  });
+});
+
+describe("GeminiCliAdapter.parseOutput", () => {
+  const adapter = new GeminiCliAdapter();
+
+  const happyPath = JSON.stringify({
+    session_id: "abc",
+    response: "pong",
+    stats: {
+      models: {
+        "gemini-2.5-flash-lite": {
+          tokens: { prompt: 3511, candidates: 58, cached: 0, thoughts: 53 },
+        },
+        "gemini-2.5-flash": {
+          tokens: { prompt: 8289, candidates: 1, cached: 7972, thoughts: 27 },
+        },
+      },
+      tools: { totalCalls: 0 },
+    },
+  });
+
+  it("sums tokens across models and reports primary model by output volume", () => {
+    const out = adapter.parseOutput(happyPath);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.value.content).toBe("pong");
+    expect(out.value.inputTokens).toBe(3511 + 8289);
+    expect(out.value.outputTokens).toBe(58 + 1);
+    expect(out.value.cacheReadTokens).toBe(7972);
+    // flash-lite has more output tokens (58 vs 1), so it's the primary model.
+    expect(out.value.modelUsed).toBe("gemini-2.5-flash-lite");
+    expect(out.value.providerUsed).toBe("gemini-cli");
+  });
+
+  it("returns ParseError on empty output", () => {
+    const out = adapter.parseOutput("");
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.error.message.toLowerCase()).toContain("empty");
+  });
+
+  it("returns ParseError when stats.models is missing (ADR-0034 D3)", () => {
+    const noStats = JSON.stringify({ response: "ok" });
+    const out = adapter.parseOutput(noStats);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.error.message).toContain("stats.models");
+  });
+
+  it("returns ParseError when stats.models has zero usable tokens", () => {
+    const zeroTokens = JSON.stringify({
+      response: "ok",
+      stats: { models: { "gemini-2.5-flash": { tokens: {} } } },
+    });
+    const out = adapter.parseOutput(zeroTokens);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.error.message).toContain("token counts");
+  });
+
+  it("tolerates leading/trailing noise around the JSON object", () => {
+    const noisy = `Loaded cached credentials.\n${happyPath}\nbye`;
+    const out = adapter.parseOutput(noisy);
+    expect(out.ok).toBe(true);
   });
 });
 

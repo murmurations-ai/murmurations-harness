@@ -80,9 +80,9 @@ packages/llm/src/providers/subprocess/
   base-client.ts         — SubprocessAdapter (shared lifecycle)
   types.ts               — SubprocessLLMAdapter, AuthStatus, error union
   adapters/
-    claude.ts            — ClaudeCliAdapter (spike target — production-ready)
-    gemini.ts            — stub (BU-1/BU-2 pending)
-    codex.ts             — stub (BU-1/BU-2 pending)
+    claude.ts            — ClaudeCliAdapter (production)
+    gemini.ts            — GeminiCliAdapter (production)
+    codex.ts             — CodexCliAdapter (production)
   subprocess.test.ts
 ```
 
@@ -135,35 +135,37 @@ Low cost. Each CLI adapter is ~50–250 LoC and self-contained. The base client 
 
 ## Open items (deferred to spike + follow-up ADRs)
 
-### BU-1: Tool-use blocks in CLI JSON output
+### BU-1: Tool-use blocks in CLI JSON output — RESOLVED
 
-**Question:** Do `claude -p --output-format json`, `gemini -p --output-format json`, and `codex exec --json` emit tool-use blocks compatibly with `runner/index.ts`? If yes, parsing is uniform across adapters. If no, each adapter needs CLI-specific tool-use handling, weakening the shared-base abstraction.
+**Question:** Do the three CLIs emit tool-use blocks compatibly?
 
-**Status:** Claude adapter handles them when present (verified via test fixtures). Whether they actually appear in production output is empirically open. Gemini and Codex adapters are stubs pending real `--help` and sample-output capture.
+**Resolution:** They do not, but each format is parseable to the common `toolCalls` shape:
 
-**Decides:** Whether `parseOutput` stays uniform or whether the adapter contract grows a `parseToolUse` method.
+- **Claude**: `tool_use` blocks inside `assistant.content[]` events with `name` + `input`
+- **Codex**: `item.completed` events with `item.type: "function_call"`, `name`, and `arguments` (string-encoded JSON)
+- **Gemini**: only aggregate counts (`stats.tools.totalCalls`, `stats.tools.byName`); per-call `args` are not emitted in `--output-format json`. We surface a placeholder entry per tool name so daemon accounting reflects activity, with empty `args`.
 
-### BU-2: Auth failure mode per CLI
+The shared-base abstraction holds: `parseOutput` returns `LLMResponse.toolCalls` uniformly. Gemini's lossy detail is a known limitation, not a contract violation.
 
-**Question:** What does each CLI do when not authenticated? Silent? Exit code? Prompt to stdin (deadlock risk)? Stderr message? Each path requires different `authCheck()` implementation.
+### BU-2: Auth failure mode per CLI — RESOLVED
 
-**Status:** Boot-time `authCheck` for Claude only confirms `claude --version` succeeds. Real auth state surfaces on the first wake via stderr scanning in `base-client.ts`. A real probe (spawn + minimal `-p`) would burn an LLM call at boot. Gemini and Codex authCheck behavior is unknown.
+**Question:** What does each CLI do when not authenticated?
 
-**Decides:** The `authCheck()` error taxonomy (single `AuthError` vs per-CLI variants) and whether boot-time validation is feasible without burning a wake.
+**Resolution:** All three return non-zero exit with stderr describing the auth state. The base client's `looksLikeAuthFailure` heuristic on stderr is sufficient; per-CLI specialization isn't needed at v0.1. `authCheck()` is a boot-time presence check (`<cli> --version`) for all three — a real probe would burn an LLM call. Subscription state surfaces at wake time via the stderr scan and produces `LLMUnauthorizedError`.
 
 ### Capability matrix
 
-| Feature                    | claude-cli                          | gemini-cli     | codex-cli        |
-| -------------------------- | ----------------------------------- | -------------- | ---------------- |
-| Non-interactive print mode | ✅ `claude -p`                      | ✅ `gemini -p` | ✅ `codex exec`  |
-| JSON structured output     | ✅ `--output-format json`           | TBD            | TBD              |
-| Auto-approve flag          | ✅ `--dangerously-skip-permissions` | ✅ `--yolo`    | ✅ `--full-auto` |
-| Model pinning              | ✅ `--model <id>`                   | TBD            | TBD              |
-| Tool definitions           | ✅ via `--allowedTools` + MCP       | TBD            | TBD              |
-| Token counts in output     | ✅ `usage` field                    | TBD            | TBD              |
-| Subscription auth file     | TBD                                 | TBD            | TBD              |
-
-TBD cells resolve as the gemini/codex adapters move from stub to implemented.
+| Feature                    | claude-cli                          | gemini-cli                              | codex-cli                                       |
+| -------------------------- | ----------------------------------- | --------------------------------------- | ----------------------------------------------- |
+| Non-interactive print mode | ✅ `claude -p`                      | ✅ `gemini` (stdin)                     | ✅ `codex exec`                                 |
+| JSON structured output     | ✅ `--output-format json` (JSONL)   | ✅ `--output-format json` (single JSON) | ✅ `--json` (JSONL)                             |
+| Auto-approve flag          | ✅ `--dangerously-skip-permissions` | ✅ `--yolo`                             | ✅ `--dangerously-bypass-approvals-and-sandbox` |
+| Model pinning              | ✅ `--model <id>`                   | ✅ `--model <id>`                       | ✅ `--model <id>`                               |
+| Tool call detail in output | ✅ name + args                      | ⚠️ aggregate counts only                | ✅ name + args                                  |
+| Token counts in output     | ✅ `usage`                          | ✅ `stats.models[*].tokens`             | ✅ `turn.completed.usage`                       |
+| Cache token reporting      | ✅ `cache_read_input_tokens` etc.   | ✅ `tokens.cached`                      | ✅ `cached_input_tokens`                        |
+| Multi-model routing        | n/a                                 | ✅ flash-lite + flash (summed)          | n/a                                             |
+| Auth failure detection     | stderr scan at wake                 | stderr scan at wake                     | stderr scan at wake                             |
 
 ## Related
 
