@@ -27,7 +27,17 @@ export type {
 export { compileGlob, compileWriteScopes } from "./write-scopes.js";
 export type { GithubWriteScopes, WriteScopeKind } from "./write-scopes.js";
 
-export type { GithubComment, GithubIssue, ListIssuesFilter, Result } from "./types.js";
+export type {
+  GithubComment,
+  GithubCommit,
+  GithubFileContent,
+  GithubIssue,
+  GithubPullRequest,
+  GithubPullRequestFile,
+  ListIssuesFilter,
+  ListPullRequestsFilter,
+  Result,
+} from "./types.js";
 
 export type { GithubCache, GithubCacheEntry } from "./cache.js";
 export { LruGithubCache } from "./cache.js";

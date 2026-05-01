@@ -7,7 +7,12 @@
       "list_issues",
       "list_issue_comments",
       "list_issue_labels",
-      "get_branch_head"
+      "get_branch_head",
+      "read_pull_request",
+      "list_pull_requests",
+      "list_pull_request_files",
+      "read_commit",
+      "read_file_at_ref"
     ]
   }
 }

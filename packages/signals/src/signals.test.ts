@@ -83,6 +83,11 @@ const makeFakeGithub = (issues: readonly GithubIssue[]): GithubClient => ({
     return { ok: true, value: [] };
   },
   getRef: notFound,
+  getPullRequest: notFound,
+  listPullRequests: notFound,
+  getPullRequestFiles: notFound,
+  getCommit: notFound,
+  getFileAtRef: notFound,
   createIssueComment: mutationDenied,
   createIssue: mutationDenied,
   createCommitOnBranch: mutationDenied,
@@ -109,6 +114,11 @@ const makeFailingGithub = (): GithubClient => ({
     return { ok: true, value: [] };
   },
   getRef: notFound,
+  getPullRequest: notFound,
+  listPullRequests: notFound,
+  getPullRequestFiles: notFound,
+  getCommit: notFound,
+  getFileAtRef: notFound,
   createIssueComment: mutationDenied,
   createIssue: mutationDenied,
   createCommitOnBranch: mutationDenied,
