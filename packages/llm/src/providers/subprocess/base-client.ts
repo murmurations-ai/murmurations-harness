@@ -98,13 +98,21 @@ export class SubprocessAdapter implements LLMAdapter {
     if (internal.ok) {
       // Surface token counts to the cost hook for parity with VercelAdapter.
       // costMicros is computed downstream (subscription path is $0 marginal,
-      // but the hook still wants tokens for telemetry).
+      // but the hook still wants tokens for telemetry). Cache tokens MUST
+      // be forwarded — without them, cache-heavy wakes (long context with
+      // 90%+ cache hits) under-report shadow cost by an order of magnitude.
       if (options.costHook) {
         options.costHook.onLlmCall({
           provider: this.providerId,
           model: this.modelUsed,
           inputTokens: internal.value.inputTokens,
           outputTokens: internal.value.outputTokens,
+          ...(internal.value.cacheReadTokens !== undefined
+            ? { cacheReadTokens: internal.value.cacheReadTokens }
+            : {}),
+          ...(internal.value.cacheWriteTokens !== undefined
+            ? { cacheWriteTokens: internal.value.cacheWriteTokens }
+            : {}),
         });
       }
       return internal;

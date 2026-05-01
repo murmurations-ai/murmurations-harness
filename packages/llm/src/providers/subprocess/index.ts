@@ -8,7 +8,7 @@
  *     provider: subscription-cli
  *     cli: claude | gemini | codex
  *     model: claude-sonnet-4-6   # optional
- *     timeoutMs: 90000            # optional
+ *     timeoutMs: 600000           # optional, default 10 min — see SubprocessAdapter
  *
  * Routing through the operator's local CLI uses subscription auth
  * (Claude Pro/Max, Google subscription, ChatGPT subscription) instead
@@ -58,7 +58,12 @@ export interface SubscriptionCliClientConfig {
   readonly model: string;
   /** Optional cost hook (token usage telemetry). $0 marginal cost path. */
   readonly defaultCostHook?: LLMCostHook;
-  /** Wall-clock subprocess timeout. Default: 90_000 ms. */
+  /**
+   * Wall-clock subprocess timeout in ms. Default: 600_000 (10 min) —
+   * sized for multi-step agent wakes, not single-turn prompts. Operators
+   * with strict wake budgets should pin a smaller value via
+   * `llm.timeoutMs` in role.md (must be < `agent.maxWallClockMs`).
+   */
   readonly timeoutMs?: number;
   /** Override the per-CLI adapter (for tests or custom CLIs). */
   readonly cliAdapter?: SubprocessLLMAdapter;
