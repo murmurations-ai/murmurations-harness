@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { CollaborationError } from "@murmurations-ai/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { formatCollaborationError, GroupWakeError, resolveLLMConfig } from "./group-wake.js";
+import {
+  formatCollaborationError,
+  GITHUB_BODY_LIMIT,
+  GroupWakeError,
+  resolveLLMConfig,
+  truncateMinutesForGithub,
+} from "./group-wake.js";
 
 describe("GroupWakeError", () => {
   it("has correct name property", () => {
@@ -58,6 +64,57 @@ describe("formatCollaborationError (v0.5.0 Milestone 1)", () => {
   it("trims whitespace from the message", () => {
     const err = new CollaborationError("github", "RATE_LIMITED", "  slow down please  ");
     expect(formatCollaborationError(err)).toBe("RATE_LIMITED: slow down please");
+  });
+});
+
+describe("truncateMinutesForGithub (harness#267)", () => {
+  const fallbackPath = "/tmp/runs/group-engineering/2026-05-01/meeting-abcd1234.md";
+
+  it("returns body unchanged when under the limit", () => {
+    const body = "x".repeat(GITHUB_BODY_LIMIT - 100);
+    const result = truncateMinutesForGithub(body, fallbackPath);
+    expect(result.truncated).toBe(false);
+    expect(result.body).toBe(body);
+  });
+
+  it("returns body unchanged when exactly at the limit", () => {
+    const body = "x".repeat(GITHUB_BODY_LIMIT);
+    const result = truncateMinutesForGithub(body, fallbackPath);
+    expect(result.truncated).toBe(false);
+    expect(result.body).toBe(body);
+  });
+
+  it("truncates and appends a marker when over the limit", () => {
+    const body = "x".repeat(GITHUB_BODY_LIMIT + 50_000);
+    const result = truncateMinutesForGithub(body, fallbackPath);
+    expect(result.truncated).toBe(true);
+    expect(result.body.length).toBeLessThanOrEqual(GITHUB_BODY_LIMIT);
+    expect(result.body).toContain("Minutes truncated for GitHub issue body limit");
+    expect(result.body).toContain(fallbackPath);
+    expect(result.body).toContain(String(body.length)); // original length surfaced
+  });
+
+  it("preserves the head of the body when truncating", () => {
+    const head = "## Important first decision\n\nSome content here.\n";
+    const body = head + "x".repeat(GITHUB_BODY_LIMIT);
+    const result = truncateMinutesForGithub(body, fallbackPath);
+    expect(result.truncated).toBe(true);
+    expect(result.body.startsWith(head)).toBe(true);
+  });
+
+  it("includes the fallback path so operators can find the full record", () => {
+    const body = "x".repeat(GITHUB_BODY_LIMIT + 1);
+    const result = truncateMinutesForGithub(body, fallbackPath);
+    expect(result.truncated).toBe(true);
+    expect(result.body).toContain(fallbackPath);
+  });
+
+  it("real-world case: 110k char minutes from a Sonnet-with-tools convene", () => {
+    // Reproduces today's failure: GITHUB_BODY_LIMIT=65536, body=113992
+    const body = "real-meeting-content-".repeat(5_500); // ~110k chars
+    const result = truncateMinutesForGithub(body, fallbackPath);
+    expect(result.truncated).toBe(true);
+    expect(result.body.length).toBeLessThanOrEqual(GITHUB_BODY_LIMIT);
   });
 });
 
