@@ -74,6 +74,7 @@ import { resolveLLMCost } from "@murmurations-ai/llm/pricing";
 import { McpToolLoader } from "@murmurations-ai/mcp";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
+import { McpToolLoader } from "@murmurations-ai/mcp";
 
 import { buildGithubReadToolsForAgent } from "./github-tools/index.js";
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
@@ -288,6 +289,7 @@ export interface InProcessRunnerClients {
   readonly github?: GithubClient;
   readonly targetRepo?: RepoCoordinate;
   readonly targetBranch?: string;
+  readonly mcpToolLoader?: McpToolLoader;
   /** Operator-defined extension fields. The harness passes these
    *  through without interpretation — runners cast them at the call
    *  site based on their own type knowledge. */
@@ -1279,6 +1281,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               ...(mcpToolLoader ? { mcpToolLoader } : {}),
               ...(targetRepo ? { targetRepo } : {}),
               targetBranch: "main",
+              mcpToolLoader: new McpToolLoader(),
             };
           },
         }),
