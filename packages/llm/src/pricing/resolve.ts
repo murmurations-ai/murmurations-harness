@@ -43,7 +43,27 @@ const KNOWN_PROVIDERS: ReadonlySet<ProviderId> = new Set([
   "anthropic",
   "openai",
   "ollama",
+  // Subscription-CLI providers route through the operator's local CLI auth
+  // (Claude Pro/Max, ChatGPT, Google subscription). Marginal cost is $0 by
+  // construction. The shadow API cost is available via resolveShadowApiCost.
+  "claude-cli",
+  "codex-cli",
+  "gemini-cli",
 ]);
+
+/**
+ * Map a subscription-CLI provider id to its canonical API provider for
+ * shadow-cost lookups. The model name is identical between the two
+ * (operators specify the same string in role.md regardless of route).
+ */
+const SUBSCRIPTION_CLI_TO_API_PROVIDER: Readonly<Record<string, ProviderId>> = {
+  "claude-cli": "anthropic",
+  "codex-cli": "openai",
+  "gemini-cli": "gemini",
+};
+
+export const isSubscriptionCliProvider = (provider: string): boolean =>
+  Object.hasOwn(SUBSCRIPTION_CLI_TO_API_PROVIDER, provider);
 
 /**
  * Find the catalog entry for a (provider, model) pair. v0.1 returns
@@ -105,6 +125,12 @@ export const resolveLLMCostWith = (
       },
     };
   }
+  // Subscription-CLI providers always resolve to $0 actual cost. The
+  // shadow API cost is a separate lookup via resolveShadowApiCost.
+  if (isSubscriptionCliProvider(input.provider)) {
+    return { ok: true, value: makeUSDMicros(0) };
+  }
+
   const rate = findRate(catalog, input.provider, input.model);
   if (rate === null) {
     return {
@@ -131,4 +157,33 @@ export const resolveLLMCostWith = (
     (inputMicros + outputMicros + cacheReadMicros + cacheWriteMicros) / 1_000_000,
   );
   return { ok: true, value: makeUSDMicros(total) };
+};
+
+/**
+ * Compute the cost a subscription-CLI wake *would* have on the API path,
+ * for shadow accounting. Subscription-CLI wakes are $0 marginal at the
+ * operator (paid via Pro/Max/ChatGPT subscription), but operators want to
+ * see "what would this have cost if I'd been on the API" — for fairness,
+ * for budgeting before scaling, and for the "you saved $X" headline.
+ *
+ * Returns `unknown-provider` if `input.provider` is not a subscription-CLI
+ * provider (callers should check `isSubscriptionCliProvider` first).
+ * Returns `unknown-model` if the model isn't in the API provider's catalog.
+ */
+export const resolveShadowApiCost = (
+  input: ResolveLLMCostInput,
+): Result<USDMicros, PricingCatalogError> => {
+  const apiProvider = SUBSCRIPTION_CLI_TO_API_PROVIDER[input.provider];
+  if (apiProvider === undefined) {
+    return {
+      ok: false,
+      error: {
+        kind: "pricing-catalog-error",
+        code: "unknown-provider",
+        message: `not a subscription-cli provider: ${input.provider}`,
+        provider: input.provider,
+      },
+    };
+  }
+  return resolveLLMCost({ ...input, provider: apiProvider });
 };

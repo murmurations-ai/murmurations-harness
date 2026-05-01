@@ -1132,6 +1132,12 @@ export class Daemon {
           ...costRecord.llm,
           costMicros: costRecord.llm.costMicros.value,
           costUsdFormatted: formatUSDMicros(costRecord.llm.costMicros),
+          ...(costRecord.llm.shadowCostMicros !== undefined
+            ? {
+                shadowCostMicros: costRecord.llm.shadowCostMicros.value,
+                shadowCostUsdFormatted: formatUSDMicros(costRecord.llm.shadowCostMicros),
+              }
+            : {}),
         },
         github: {
           ...costRecord.github,

@@ -71,7 +71,11 @@ import {
   type LLMClient,
   type LLMCostHook,
 } from "@murmurations-ai/llm";
-import { resolveLLMCost } from "@murmurations-ai/llm/pricing";
+import {
+  isSubscriptionCliProvider,
+  resolveLLMCost,
+  resolveShadowApiCost,
+} from "@murmurations-ai/llm/pricing";
 import { McpToolLoader } from "@murmurations-ai/mcp";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
@@ -110,14 +114,15 @@ export const makeDaemonHook = (
   const warned = new Set<string>();
   return {
     onLlmCall: (call) => {
-      const priced = resolveLLMCost({
+      const pricingInput = {
         provider: call.provider,
         model: call.model,
         inputTokens: call.inputTokens,
         outputTokens: call.outputTokens,
         ...(call.cacheReadTokens !== undefined ? { cacheReadTokens: call.cacheReadTokens } : {}),
         ...(call.cacheWriteTokens !== undefined ? { cacheWriteTokens: call.cacheWriteTokens } : {}),
-      });
+      };
+      const priced = resolveLLMCost(pricingInput);
       let costMicros: USDMicros;
       if (priced.ok) {
         costMicros = priced.value;
@@ -136,6 +141,33 @@ export const makeDaemonHook = (
           });
         }
       }
+
+      // Subscription-CLI wakes are $0 marginal at the operator (paid via
+      // Pro/Max/ChatGPT/Google subscription). Compute shadow API cost so
+      // operators see "what this would have cost on the API" — useful for
+      // budgeting before scaling and for the "you saved $X" headline.
+      let shadowCostMicros: USDMicros | undefined;
+      if (isSubscriptionCliProvider(call.provider)) {
+        const shadow = resolveShadowApiCost(pricingInput);
+        if (shadow.ok) {
+          shadowCostMicros = shadow.value;
+        } else {
+          shadowCostMicros = makeUSDMicros(0);
+          const shadowKey = `shadow:${call.provider}:${call.model}`;
+          if (logger && !warned.has(shadowKey)) {
+            warned.add(shadowKey);
+            logger.warn("daemon.cost.shadow.unknown", {
+              provider: call.provider,
+              model: call.model,
+              code: shadow.error.code,
+              message: shadow.error.message,
+              impact:
+                "shadow API cost reports as $0; add the model to the API provider's catalog entry",
+            });
+          }
+        }
+      }
+
       builder.addLlmTokens({
         inputTokens: call.inputTokens,
         outputTokens: call.outputTokens,
@@ -144,6 +176,7 @@ export const makeDaemonHook = (
         modelProvider: call.provider,
         modelName: call.model,
         costMicros,
+        ...(shadowCostMicros !== undefined ? { shadowCostMicros } : {}),
       });
     },
   };
