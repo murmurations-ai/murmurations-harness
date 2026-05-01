@@ -101,3 +101,5 @@ per the Engineering Lead #22 gate review ([issue #6](https://github.com/murmurat
 | [ADR-0031](./0031-dependency-direction-policy-and-no-cycles-guarantee.md) | Dependency direction policy and "no-cycles" guarantee                                                    | Proposed |
 | [ADR-0032](./0032-cross-package-type-management.md)                       | Cross-package type management (`@murmurations-ai/types` extraction)                                      | Proposed |
 | [ADR-0033](./0033-github-actions-for-ci.md)                               | GitHub Actions for Continuous Integration (retroactive)                                                  | Accepted |
+| [ADR-0034](./0034-subscription-cli-provider-family.md)                    | Subscription-CLI provider family (claude/gemini/codex subprocess providers)                              | Accepted |
+| [ADR-0035](./0035-reference-architecture-mapping.md)                      | Reference architecture mapping (9-layer Agentic AI System)                                               | Accepted |

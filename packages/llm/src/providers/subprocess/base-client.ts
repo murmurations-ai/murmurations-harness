@@ -41,7 +41,10 @@ import type { SubprocessError, SubprocessLLMAdapter } from "./types.js";
 
 export interface SubprocessAdapterConfig {
   readonly cliAdapter: SubprocessLLMAdapter;
-  /** Wall-clock timeout in ms. SIGTERM fires after this. Default: 90_000. */
+  /** Wall-clock timeout in ms. SIGTERM fires after this. Default: 600_000
+   * (10 min) — sized for multi-step agent wakes, not single-turn prompts.
+   * Operators with strict wake budgets should pin a smaller value via
+   * `llm.timeoutMs` in role.md. */
   readonly timeoutMs?: number;
   /** Grace period in ms between SIGTERM and SIGKILL. Default: 5_000. */
   readonly killGraceMs?: number;
@@ -49,7 +52,7 @@ export interface SubprocessAdapterConfig {
   readonly capabilities?: LLMClientCapabilities;
 }
 
-const DEFAULT_TIMEOUT_MS = 90_000;
+const DEFAULT_TIMEOUT_MS = 600_000;
 const DEFAULT_KILL_GRACE_MS = 5_000;
 
 const DEFAULT_CAPABILITIES: LLMClientCapabilities = {
