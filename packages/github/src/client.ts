@@ -29,8 +29,27 @@ import {
   type GithubRateLimitSnapshot,
   type GithubWriteScopeKind,
 } from "./errors.js";
-import { parseCommentArray, parseIssue, parseIssueArray } from "./parse.js";
-import type { GithubComment, GithubIssue, ListIssuesFilter, Result } from "./types.js";
+import {
+  parseCommentArray,
+  parseCommit,
+  parseFileContent,
+  parseIssue,
+  parseIssueArray,
+  parsePullRequest,
+  parsePullRequestArray,
+  parsePullRequestFiles,
+} from "./parse.js";
+import type {
+  GithubComment,
+  GithubCommit,
+  GithubFileContent,
+  GithubIssue,
+  GithubPullRequest,
+  GithubPullRequestFile,
+  ListIssuesFilter,
+  ListPullRequestsFilter,
+  Result,
+} from "./types.js";
 import {
   compileWriteScopes,
   matchesRepoPath,
@@ -209,6 +228,49 @@ export interface GithubClient {
     branch: string,
     options?: CallOptions,
   ): Promise<Result<GithubRefHead, GithubClientError>>;
+
+  // -- Pull-request reads (harness#262 follow-up) -------------------------
+
+  /** Fetch a single pull request by number. */
+  getPullRequest(
+    repo: RepoCoordinate,
+    number: IssueNumber,
+    options?: CallOptions,
+  ): Promise<Result<GithubPullRequest, GithubClientError>>;
+
+  /** List pull requests in a repo, optionally filtered. */
+  listPullRequests(
+    repo: RepoCoordinate,
+    filter?: ListPullRequestsFilter & { readonly costHook?: GithubCostHook },
+  ): Promise<Result<readonly GithubPullRequest[], GithubClientError>>;
+
+  /**
+   * Fetch the files changed in a pull request, with unified-diff
+   * patches for each (when GitHub returns one — files >3000 line
+   * changes have null patches).
+   */
+  getPullRequestFiles(
+    repo: RepoCoordinate,
+    number: IssueNumber,
+    options?: CallOptions,
+  ): Promise<Result<readonly GithubPullRequestFile[], GithubClientError>>;
+
+  // -- Commit / file reads -----------------------------------------------
+
+  /** Fetch a commit by SHA (or ref) including files changed + patches. */
+  getCommit(
+    repo: RepoCoordinate,
+    ref: string,
+    options?: CallOptions,
+  ): Promise<Result<GithubCommit, GithubClientError>>;
+
+  /** Fetch a file's contents at a specific ref (commit, branch, or tag). */
+  getFileAtRef(
+    repo: RepoCoordinate,
+    path: string,
+    ref: string,
+    options?: CallOptions,
+  ): Promise<Result<GithubFileContent, GithubClientError>>;
 
   // -- Mutations (ADR-0017) ------------------------------------------------
 
@@ -420,6 +482,105 @@ class GithubClientImpl implements GithubClient {
       ok: true,
       value: { repo, branch, oid: sha },
     };
+  }
+
+  // ---------------------------------------------------------------------
+  // Pull-request reads
+  // ---------------------------------------------------------------------
+
+  public async getPullRequest(
+    repo: RepoCoordinate,
+    number: IssueNumber,
+    options: CallOptions = {},
+  ): Promise<Result<GithubPullRequest, GithubClientError>> {
+    const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/pulls/${String(number.value)}`;
+    const raw = await this.#request(url, options);
+    if (!raw.ok) return raw;
+    return parsePullRequest(raw.value.body, repo);
+  }
+
+  public async listPullRequests(
+    repo: RepoCoordinate,
+    filter: ListPullRequestsFilter & { readonly costHook?: GithubCostHook } = {},
+  ): Promise<Result<readonly GithubPullRequest[], GithubClientError>> {
+    const params = new URLSearchParams();
+    if (filter.state) params.set("state", filter.state);
+    if (filter.base !== undefined) params.set("base", filter.base);
+    if (filter.head !== undefined) params.set("head", filter.head);
+    if (filter.perPage) params.set("per_page", String(filter.perPage));
+    const qs = params.toString();
+    const url =
+      `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/pulls` + (qs ? `?${qs}` : "");
+    const opts: CallOptions = {};
+    if (filter.bypassCache === true) {
+      (opts as { bypassCache: boolean }).bypassCache = true;
+    }
+    if (filter.costHook !== undefined) {
+      (opts as { costHook: GithubCostHook }).costHook = filter.costHook;
+    }
+    const raw = await this.#request(url, opts);
+    if (!raw.ok) return raw;
+    const parsed = parsePullRequestArray(raw.value.body, repo);
+    if (!parsed.ok) return parsed;
+    // GitHub's listPullRequests doesn't filter by labels server-side
+    // (the labels API on PRs is shared with issues); apply a client-side
+    // filter when the caller asked for one. Same approach as listIssues.
+    if (filter.labels && filter.labels.length > 0) {
+      const wanted = filter.labels;
+      const filtered = parsed.value.filter((pr) =>
+        wanted.every((label) => pr.labels.includes(label)),
+      );
+      return { ok: true, value: filtered };
+    }
+    return parsed;
+  }
+
+  public async getPullRequestFiles(
+    repo: RepoCoordinate,
+    number: IssueNumber,
+    options: CallOptions = {},
+  ): Promise<Result<readonly GithubPullRequestFile[], GithubClientError>> {
+    // The default per-page is 30; bump to 100 so a single call covers
+    // most PRs without forcing the agent to paginate. Larger PRs still
+    // require multi-call pagination — out of scope for v1.
+    const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/pulls/${String(number.value)}/files?per_page=100`;
+    const raw = await this.#request(url, options);
+    if (!raw.ok) return raw;
+    return parsePullRequestFiles(raw.value.body);
+  }
+
+  // ---------------------------------------------------------------------
+  // Commit / file reads
+  // ---------------------------------------------------------------------
+
+  public async getCommit(
+    repo: RepoCoordinate,
+    ref: string,
+    options: CallOptions = {},
+  ): Promise<Result<GithubCommit, GithubClientError>> {
+    const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/commits/${encodeURIComponent(ref)}`;
+    const raw = await this.#request(url, options);
+    if (!raw.ok) return raw;
+    return parseCommit(raw.value.body, repo);
+  }
+
+  public async getFileAtRef(
+    repo: RepoCoordinate,
+    path: string,
+    ref: string,
+    options: CallOptions = {},
+  ): Promise<Result<GithubFileContent, GithubClientError>> {
+    // GET /repos/{owner}/{repo}/contents/{path}?ref={ref}
+    // The path is URL-encoded segment-by-segment so directory separators
+    // remain unescaped; the ref goes in the query string.
+    const encodedPath = path
+      .split("/")
+      .map((seg) => encodeURIComponent(seg))
+      .join("/");
+    const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`;
+    const raw = await this.#request(url, options);
+    if (!raw.ok) return raw;
+    return parseFileContent(raw.value.body, repo, ref);
   }
 
   // ---------------------------------------------------------------------
