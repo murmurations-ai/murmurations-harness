@@ -39,6 +39,22 @@ We add a **subscription-CLI provider family** to `packages/llm` with:
 
 ### Locked interface (the load-bearing contract)
 
+The directive named the load-bearing adapter contract `CliAdapter`:
+
+```typescript
+interface CliAdapter {
+  readonly cliName: "claude" | "gemini" | "codex";
+  buildFlags(req: LLMRequest): string[];
+  parseOutput(raw: string): Result<LLMResponse, ParseError>;
+  authCheck(): Promise<Result<AuthStatus, AuthError>>;
+}
+```
+
+The implementation name is `SubprocessLLMAdapter` because the provider family lives under
+`packages/llm/src/providers/subprocess/` and the command/provider identifiers need to be
+separate for spawn + cost attribution. This is the same contract with two explicit metadata
+fields (`command`, `providerId`) instead of the single directive-level `cliName`.
+
 ```typescript
 export interface SubprocessLLMAdapter {
   readonly command: string; // "claude" | "gemini" | "codex"
@@ -74,6 +90,22 @@ This interface is **locked before adapter work began**. Subsequent adapters (gem
 
 ### Package layout
 
+Directive draft layout:
+
+```
+packages/llm/src/providers/subprocess/
+  index.ts
+  base-client.ts
+  adapters/claude.ts
+  adapters/gemini.ts  (stub)
+  adapters/codex.ts   (stub)
+  auth.ts
+  cost.ts
+  errors.ts
+```
+
+Implemented layout:
+
 ```
 packages/llm/src/providers/subprocess/
   index.ts               — createSubscriptionCliClient(), public exports
@@ -85,6 +117,10 @@ packages/llm/src/providers/subprocess/
     codex.ts             — CodexCliAdapter (production)
   subprocess.test.ts
 ```
+
+The implementation folded `auth.ts`, `cost.ts`, and `errors.ts` into `base-client.ts` and
+`types.ts`; no separate topology boundary emerged there. The gemini/codex files started as
+stubs and were filled in by the follow-up adapter buildout.
 
 ## Alternatives considered
 
