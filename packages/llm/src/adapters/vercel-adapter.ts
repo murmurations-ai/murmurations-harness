@@ -181,6 +181,11 @@ export class VercelAdapter implements LLMAdapter {
           )
         : undefined;
 
+      // Per-call step counter. Incremented in onStepFinish below so the
+      // debug log shows monotonic step numbers (1, 2, 3 ...) rather than
+      // having to count from raw event order.
+      let stepIndex = 0;
+
       const result = await generateText({
         model: this.#model,
         ...(systemPrompt ? { system: systemPrompt } : {}),
@@ -211,6 +216,7 @@ export class VercelAdapter implements LLMAdapter {
         },
         // Per-step cost tracking for multi-step tool loops
         onStepFinish: (step) => {
+          stepIndex += 1;
           if (options.costHook) {
             options.costHook.onLlmCall({
               provider: this.providerId,
@@ -218,6 +224,43 @@ export class VercelAdapter implements LLMAdapter {
               inputTokens: step.usage.inputTokens ?? 0,
               outputTokens: step.usage.outputTokens ?? 0,
             });
+          }
+          // Per-step debug logging — gated on MURMURATION_DEBUG_STEPS=1.
+          // Surfaces what an agent is doing inside a long tool-call loop
+          // so operators can see "agent on step 28/30, still reading
+          // files, hasn't written anything" instead of staring at a
+          // silent 10-minute wake. Writes structured JSONL to stderr;
+          // matches the daemon log format so it interleaves cleanly.
+          if (process.env.MURMURATION_DEBUG_STEPS === "1") {
+            const toolNames = step.toolCalls.map(
+              (c) => (c as unknown as { toolName?: string }).toolName ?? "unknown",
+            );
+            const finishReason = (step as unknown as { finishReason?: string }).finishReason;
+            const textLen =
+              typeof (step as unknown as { text?: string }).text === "string"
+                ? (step as unknown as { text: string }).text.length
+                : 0;
+            process.stderr.write(
+              `${JSON.stringify({
+                ts: new Date().toISOString(),
+                level: "debug",
+                event: "llm.step",
+                step: stepIndex,
+                provider: this.providerId,
+                model: this.modelUsed,
+                inputTokens: step.usage.inputTokens ?? 0,
+                outputTokens: step.usage.outputTokens ?? 0,
+                toolCalls: toolNames,
+                textLen,
+                finishReason,
+                ...(options.telemetryContext
+                  ? {
+                      agentId: options.telemetryContext.agentId,
+                      wakeId: options.telemetryContext.wakeId,
+                    }
+                  : {}),
+              })}\n`,
+            );
           }
         },
       });
