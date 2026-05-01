@@ -1,10 +1,42 @@
 # ADR-0038 — Spirit MCP Bridge for Subscription-CLI Tool Calls
 
-- **Status:** Proposed
+- **Status:** Accepted (with carry-forward conditions — see Acceptance below)
 - **Date:** 2026-05-01
-- **Decision-maker(s):** Source (Nori), Engineering Circle
+- **Decision-maker(s):** Source (Nori), Engineering Circle (consent round on EP #734, 2026-05-01)
 - **Driver:** Spirit must support `provider: subscription-cli` end-to-end (operator request, 2026-05-01) including its 9 harness-internal tools (status, agents, groups, events, read_file, list_dir, load_skill, wake, directive).
-- **Related:** ADR-0034 (subscription-cli provider family), ADR-0036 (permission mode), ADR-0037 (binary integrity).
+- **Related:** ADR-0034 (subscription-cli provider family), ADR-0036 (permission mode), ADR-0037 (binary integrity), ADR-0039 (local executable authority), ADR-0040 (wake event stream).
+
+## Acceptance
+
+Engineering circle consent round closed 2026-05-01 with unanimous consent (6/6 specialists positioned: engineering-lead #22, architecture #23, security #25, typescript-runtime #24, devops-release #26, performance-observability #27). Full positions: [EP #734](https://github.com/xeeban/emergent-praxis/issues/734).
+
+Carry-forward conditions split into merge-blockers and follow-ups.
+
+**Merge-blockers (must land in the subscription-cli merge PR):**
+
+- **CF-A** — `client.complete()` request as discriminated union by mode. Replace `tools?: ToolDefinition[]; maxSteps?: number` runtime-branched flags with `{ mode: "api-key" | "subscription-cli" }` discriminant so the wrong call doesn't compile (typescript-runtime #24).
+- **CF-C** — Spirit boot self-test that constructs both transports against `buildSpiritTools()` and refuses to attach if either fails. Pair with tightening `registerSpiritTool` over `z.ZodObject<T>` (CF-D) to turn R6 into a compile error.
+- **CF-D** — `registerSpiritTool` parameterized over `z.ZodObject<T>` rather than `z.ZodTypeAny` (typescript-runtime #24).
+
+**Follow-ups (filed as harness issues; do not block merge):**
+
+- **CF-B** — Spirit hard-crash → no orphan `mcp-bin.js` integration test. Devops-release #26 proposes a Spirit-side reaper as the implementation: boot-time scan for `mcp-bin.js` processes whose parent is PID 1 (init-reparented) and whose `MURMURATION_ROOT` matches the current rootDir, with `lstart` older than the daemon's own.
+- **CF-E** — Subtractive env policy for `mcp-bin.js`. Allowlist `MURMURATION_ROOT`, `PATH`, locale vars only. No provider API keys leak into the spawned MCP subprocess. Cross-confirmed by security #25 + typescript-runtime #24.
+- **CF-F** — Ephemeral temp MCP config. Write `.murmuration/spirit-mcp.json` per-attach with `mkstemp`-style randomness; delete on Spirit detach. Source: security #25.
+- **CI build-verify** — Build script must produce `dist/spirit/mcp-bin.js` next to `client.js`; CI assertion to prevent silent drift. Source: devops-release #26.
+- **Telemetry deltas** — Add `LLMResponse.equivalentApiCostUsd?`, `ParseError.code?`, and `llm.spawnMs` / `llm.timeoutMs` / `llm.cliPath` to the cost/log surfaces. Source: performance-observability #27.
+
+**Empirical validation (closes R1):** Performance-observability #27 measured CLI spawn p50/p95 over 5 runs:
+
+| CLI    | p50      | p95       |
+| ------ | -------- | --------- |
+| Claude | 59.5 ms  | 684.4 ms  |
+| Codex  | 77.2 ms  | 96.6 ms   |
+| Gemini | 928.0 ms | 1702.2 ms |
+
+R1's intuitive "50–150 ms" estimate was right at p50 for claude/codex; p95 for claude exceeds it materially. Gemini's startup cost alone (~1 s p50) is operator-noticeable and relevant when Phase B brings gemini MCP support.
+
+**Source's verdict:** Treat ADR-0038 as Accepted; track CF-A/CF-C/CF-D as merge-blockers; file CF-B/CF-E/CF-F + CI/telemetry as separate harness issues.
 
 ## Context
 

@@ -105,6 +105,6 @@ per the Engineering Lead #22 gate review ([issue #6](https://github.com/murmurat
 | [ADR-0035](./0035-reference-architecture-mapping.md)                      | Reference architecture mapping (9-layer Agentic AI System)                                               | Accepted |
 | [ADR-0036](./0036-subscription-cli-permission-mode.md)                    | Subscription-CLI permission mode + Source approval (tension-for-permission)                              | Proposed |
 | [ADR-0037](./0037-subscription-cli-binary-integrity.md)                   | Subscription-CLI binary integrity (record + pin + hash-pin)                                              | Proposed |
-| [ADR-0038](./0038-spirit-mcp-bridge.md)                                   | Spirit MCP bridge for subscription-CLI tool calls                                                        | Proposed |
+| [ADR-0038](./0038-spirit-mcp-bridge.md)                                   | Spirit MCP bridge for subscription-CLI tool calls                                                        | Accepted |
 | [ADR-0039](./0039-local-executable-authority.md)                          | Local executable authority for subscription-CLI providers                                                | Proposed |
 | [ADR-0040](./0040-wake-event-stream.md)                                   | Wake event stream for live agent observability                                                           | Proposed |
