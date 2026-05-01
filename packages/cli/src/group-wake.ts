@@ -30,6 +30,7 @@ import {
   type GovernanceTally,
   GovernanceStateStore,
 } from "@murmurations-ai/core";
+import { createGithubClient } from "@murmurations-ai/github";
 import { createLLMClient, formatLLMError, type LLMClient } from "@murmurations-ai/llm";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
@@ -39,6 +40,7 @@ import {
   CollaborationBuildError,
   findDefaultRepo,
 } from "./collaboration-factory.js";
+import { buildGithubReadToolsForAgent } from "./github-tools/index.js";
 
 /**
  * Discriminated result for resolving the facilitator's LLM config.
@@ -442,7 +444,14 @@ export const runGroupWakeCommand = async (
   const secretKeyName = typeof envKeyName === "string" ? envKeyName : undefined;
   if (existsSync(envPath)) {
     secretsProvider = new DotenvSecretsProvider({ envPath });
-    const optionalKeys = secretKeyName ? [makeSecretKey(secretKeyName)] : [];
+    // Load the LLM provider's token AND GITHUB_TOKEN. The latter is needed
+    // for harness#264: members and facilitator need GitHub read tools so
+    // they can verify issue/PR/commit references during the meeting,
+    // matching what solo wakes get via boot.ts:selectExtensionToolsFor.
+    const optionalKeys = [
+      ...(secretKeyName ? [makeSecretKey(secretKeyName)] : []),
+      makeSecretKey("GITHUB_TOKEN"),
+    ];
     await secretsProvider.load({ required: [], optional: optionalKeys });
     const tokenKey = secretKeyName ? makeSecretKey(secretKeyName) : null;
     if (envKeyName === null) {
@@ -614,10 +623,29 @@ export const runGroupWakeCommand = async (
   const { loadExtensions } = await import("@murmurations-ai/core");
   const extensionsDir = join(root, "extensions");
   const loadedExtensions = await loadExtensions(extensionsDir, root);
-  const extensionTools = loadedExtensions.flatMap((ext) => ext.tools);
+  const operatorExtensionTools = loadedExtensions.flatMap((ext) => ext.tools);
+
+  // harness#264: wire built-in GitHub read tools into convene the same way
+  // boot.ts wires them for solo wakes (selectExtensionToolsFor → buildAgentBoundGithub).
+  // Without this, members and facilitator can never verify issue/PR/commit
+  // references during a meeting — they're stuck with whatever leaked into the
+  // signal bundle. Reads are idempotent, so a single shared client across the
+  // meeting is safe; ADR-0017 write-scope enforcement still routes mutations
+  // through the WakeAction pipeline post-meeting.
+  const githubTokenKey = makeSecretKey("GITHUB_TOKEN");
+  const githubReadTools =
+    secretsProvider?.has(githubTokenKey) === true
+      ? buildGithubReadToolsForAgent(
+          createGithubClient({ token: secretsProvider.get(githubTokenKey) }),
+        )
+      : [];
+
+  const extensionTools = [...operatorExtensionTools, ...githubReadTools];
   if (extensionTools.length > 0) {
+    const githubMsg =
+      githubReadTools.length > 0 ? `, ${String(githubReadTools.length)} github` : "";
     console.log(
-      `  Extensions: ${String(loadedExtensions.length)} loaded (${String(extensionTools.length)} tools)`,
+      `  Extensions: ${String(loadedExtensions.length)} loaded (${String(operatorExtensionTools.length)} operator${githubMsg} tools)`,
     );
   }
 
