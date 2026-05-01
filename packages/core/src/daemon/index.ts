@@ -219,10 +219,15 @@ export const registeredAgentFromLoadedIdentity = (
   const { chain, frontmatter } = loaded;
 
   // ADR-0016: map snake_case YAML fields to camelCase runtime fields.
+  // ADR-0034: forward cli + timeoutMs for subscription-cli provider family.
   const llm = frontmatter.llm
     ? {
         provider: frontmatter.llm.provider,
         ...(frontmatter.llm.model !== undefined ? { model: frontmatter.llm.model } : {}),
+        ...(frontmatter.llm.cli !== undefined ? { cli: frontmatter.llm.cli } : {}),
+        ...(frontmatter.llm.timeoutMs !== undefined
+          ? { timeoutMs: frontmatter.llm.timeoutMs }
+          : {}),
       }
     : undefined;
 
