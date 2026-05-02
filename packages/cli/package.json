@@ -1,6 +1,6 @@
 {
   "name": "@murmurations-ai/cli",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Command-line interface for the Murmuration Harness daemon — start, stop, status.",
   "license": "MIT",
   "author": "Murmuration Harness Contributors",
@@ -40,6 +40,7 @@
     "@ai-sdk/anthropic": "^3.0.69",
     "@ai-sdk/google": "^3.0.63",
     "@ai-sdk/openai": "^3.0.53",
+    "@modelcontextprotocol/sdk": "^1.13.1",
     "@murmurations-ai/core": "workspace:*",
     "@murmurations-ai/github": "workspace:*",
     "@murmurations-ai/llm": "workspace:*",

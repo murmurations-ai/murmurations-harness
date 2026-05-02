@@ -20,6 +20,13 @@ export interface AgentStatus {
   readonly outcome: string | null;
   readonly costMicros: number;
   readonly costFormatted: string;
+  /**
+   * Shadow API cost — what this wake *would* have cost on the API path.
+   * Set when the wake routed through subscription-cli (claude-cli/codex-cli/
+   * gemini-cli); null otherwise. UI can show "Free (would be $X.XX)".
+   */
+  readonly shadowCostMicros: number | null;
+  readonly shadowCostFormatted: string | null;
   readonly stale: boolean; // stalled or no wake in > 48h
   readonly consecutiveFailures: number;
   readonly totalWakes: number;
@@ -105,6 +112,8 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         outcome: null,
         costMicros: 0,
         costFormatted: "$0.00",
+        shadowCostMicros: null,
+        shadowCostFormatted: null,
         stale: false,
         consecutiveFailures: a.consecutiveFailures,
         totalWakes: a.totalWakes,
@@ -185,6 +194,8 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
       // Get cost from index.jsonl (state store tracks outcomes, not costs per wake)
       let costMicros = 0;
       let costFormatted = "$0.0000";
+      let shadowCostMicros: number | null = null;
+      let shadowCostFormatted: string | null = null;
       try {
         const indexContent = await readFile(join(runsDir, agentId, "index.jsonl"), "utf8");
         const lines = indexContent
@@ -194,10 +205,20 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         const last = lines[lines.length - 1];
         if (last) {
           const entry = JSON.parse(last) as {
-            llm?: { costMicros?: number; costUsdFormatted?: string };
+            llm?: {
+              costMicros?: number;
+              costUsdFormatted?: string;
+              shadowCostMicros?: number | null;
+              shadowCostUsdFormatted?: string | null;
+            };
           };
           costMicros = entry.llm?.costMicros ?? 0;
           costFormatted = `$${entry.llm?.costUsdFormatted ?? "0.0000"}`;
+          shadowCostMicros = entry.llm?.shadowCostMicros ?? null;
+          shadowCostFormatted =
+            entry.llm?.shadowCostUsdFormatted != null
+              ? `$${entry.llm.shadowCostUsdFormatted}`
+              : null;
         }
       } catch {
         /* no cost data */
@@ -210,6 +231,8 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         outcome: agentState.lastOutcome,
         costMicros,
         costFormatted,
+        shadowCostMicros,
+        shadowCostFormatted,
         stale,
         consecutiveFailures: agentState.consecutiveFailures,
         totalWakes: agentState.totalWakes,
@@ -236,6 +259,8 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           outcome: null,
           costMicros: 0,
           costFormatted: "$0.0000",
+          shadowCostMicros: null,
+          shadowCostFormatted: null,
           stale: true,
           consecutiveFailures: 0,
           totalWakes: 0,
@@ -247,10 +272,16 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
       const entry = JSON.parse(lastLine) as {
         finishedAt?: string;
         outcome?: string;
-        llm?: { costMicros?: number; costUsdFormatted?: string };
+        llm?: {
+          costMicros?: number;
+          costUsdFormatted?: string;
+          shadowCostMicros?: number | null;
+          shadowCostUsdFormatted?: string | null;
+        };
       };
       const lastWake = entry.finishedAt ? new Date(entry.finishedAt) : null;
       const stale = lastWake ? Date.now() - lastWake.getTime() > 48 * 3600 * 1000 : true;
+      const fallbackShadow = entry.llm?.shadowCostUsdFormatted;
       results.push({
         agentId,
         state: "idle",
@@ -258,6 +289,9 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         outcome: entry.outcome ?? null,
         costMicros: entry.llm?.costMicros ?? 0,
         costFormatted: `$${entry.llm?.costUsdFormatted ?? "0.0000"}`,
+        shadowCostMicros: entry.llm?.shadowCostMicros ?? null,
+        shadowCostFormatted:
+          fallbackShadow !== undefined && fallbackShadow !== null ? `$${fallbackShadow}` : null,
         stale,
         consecutiveFailures: 0,
         totalWakes: 0,
@@ -272,6 +306,8 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         outcome: null,
         costMicros: 0,
         costFormatted: "$0.0000",
+        shadowCostMicros: null,
+        shadowCostFormatted: null,
         stale: true,
         consecutiveFailures: 0,
         totalWakes: 0,
@@ -477,11 +513,43 @@ export interface CostSummary {
   readonly weekWakes: number;
   readonly monthMicros: number;
   readonly monthWakes: number;
+  /**
+   * Shadow API totals — what wakes routed through subscription-CLI
+   * *would* have cost on the API. Always ≥ actual; ≈ actual when no
+   * subscription-CLI wakes are in the window.
+   */
+  readonly todayShadowMicros: number;
+  readonly weekShadowMicros: number;
+  readonly monthShadowMicros: number;
   /** Wake counts for the last 7 calendar days, oldest first. Index 6
    *  is today. Bucketed by `finishedAt` date (local time) — real data,
    *  not a uniform distribution. */
   readonly wakesPerDay7d: readonly number[];
-  readonly perAgent: readonly { agentId: string; totalMicros: number; wakes: number }[];
+  readonly perAgent: readonly {
+    readonly agentId: string;
+    readonly totalMicros: number;
+    readonly shadowMicros: number;
+    readonly wakes: number;
+  }[];
+  /**
+   * Per (provider, model) token usage over the day/week — only for
+   * subscription-CLI providers. Vendors don't expose remaining-quota,
+   * so this is "cumulative used" against the operator's known plan
+   * (operator compares against e.g. Claude Pro: ~200 messages/day or
+   * the published token allowance for their tier).
+   */
+  readonly subscriptionUsage: readonly SubscriptionUsage[];
+}
+
+export interface SubscriptionUsage {
+  readonly provider: string; // e.g. "claude-cli"
+  readonly model: string;
+  readonly todayInputTokens: number;
+  readonly todayOutputTokens: number;
+  readonly todayWakes: number;
+  readonly weekInputTokens: number;
+  readonly weekOutputTokens: number;
+  readonly weekWakes: number;
 }
 
 export const readCostSummary = async (rootDir: string): Promise<CostSummary> => {
@@ -500,8 +568,12 @@ export const readCostSummary = async (rootDir: string): Promise<CostSummary> => 
       weekWakes: 0,
       monthMicros: 0,
       monthWakes: 0,
+      todayShadowMicros: 0,
+      weekShadowMicros: 0,
+      monthShadowMicros: 0,
       wakesPerDay7d: [0, 0, 0, 0, 0, 0, 0],
       perAgent: [],
+      subscriptionUsage: [],
     };
   }
 
@@ -524,12 +596,35 @@ export const readCostSummary = async (rootDir: string): Promise<CostSummary> => 
     weekMicros = 0,
     weekWakes = 0,
     monthMicros = 0,
-    monthWakes = 0;
-  const perAgent: { agentId: string; totalMicros: number; wakes: number }[] = [];
+    monthWakes = 0,
+    todayShadowMicros = 0,
+    weekShadowMicros = 0,
+    monthShadowMicros = 0;
+  const perAgent: { agentId: string; totalMicros: number; shadowMicros: number; wakes: number }[] =
+    [];
+
+  // Subscription-CLI token usage by (provider, model). Keyed for O(1)
+  // accumulation; flattened to an array at the end. Only providers
+  // ending in "-cli" are tracked here — direct API providers report
+  // costs in the main aggregation above.
+  const subUsage = new Map<
+    string,
+    {
+      provider: string;
+      model: string;
+      todayInputTokens: number;
+      todayOutputTokens: number;
+      todayWakes: number;
+      weekInputTokens: number;
+      weekOutputTokens: number;
+      weekWakes: number;
+    }
+  >();
 
   for (const agentId of agentDirs.sort()) {
     const indexPath = join(runsDir, agentId, "index.jsonl");
     let agentTotal = 0;
+    let agentShadow = 0;
     let agentWakes = 0;
     try {
       const contents = await readFile(indexPath, "utf8");
@@ -539,29 +634,79 @@ export const readCostSummary = async (rootDir: string): Promise<CostSummary> => 
           const entry = JSON.parse(line) as {
             finishedAt?: string;
             totals?: { costMicros?: number };
+            llm?: {
+              provider?: string;
+              model?: string;
+              inputTokens?: number;
+              outputTokens?: number;
+              shadowCostMicros?: number | null;
+            };
           };
           const cost = entry.totals?.costMicros ?? 0;
+          // For shadow accounting: subscription-cli wakes report shadow
+          // cost; API wakes report null (their actual is the real cost).
+          // To compare apples-to-apples, treat null as "shadow == actual"
+          // so the totals are the would-be-API spend across the fleet.
+          const shadow = entry.llm?.shadowCostMicros ?? cost;
           const finishedAt = entry.finishedAt ? new Date(entry.finishedAt) : null;
           agentTotal += cost;
+          agentShadow += shadow;
           agentWakes++;
           if (finishedAt) {
             const dateKey = finishedAt.toISOString().slice(0, 10);
-            if (dateKey === todayStr) {
+            const isToday = dateKey === todayStr;
+            const inWeek = finishedAt >= weekAgo;
+            if (isToday) {
               todayMicros += cost;
+              todayShadowMicros += shadow;
               todayWakes++;
             }
-            if (finishedAt >= weekAgo) {
+            if (inWeek) {
               weekMicros += cost;
+              weekShadowMicros += shadow;
               weekWakes++;
             }
             if (finishedAt >= monthAgo) {
               monthMicros += cost;
+              monthShadowMicros += shadow;
               monthWakes++;
             }
             const idx = dayKeyIndex.get(dateKey);
             if (idx !== undefined) {
               const current = wakesPerDay[idx] ?? 0;
               wakesPerDay[idx] = current + 1;
+            }
+
+            // Subscription-CLI usage tracking: aggregate by (provider, model)
+            // for the *-cli providers. Direct API providers don't go in this
+            // bucket — their cost is the real spend, surfaced above.
+            const provider = entry.llm?.provider;
+            const model = entry.llm?.model;
+            if (provider && provider.endsWith("-cli") && model) {
+              const key = `${provider}|${model}`;
+              const existing = subUsage.get(key) ?? {
+                provider,
+                model,
+                todayInputTokens: 0,
+                todayOutputTokens: 0,
+                todayWakes: 0,
+                weekInputTokens: 0,
+                weekOutputTokens: 0,
+                weekWakes: 0,
+              };
+              const inTok = entry.llm?.inputTokens ?? 0;
+              const outTok = entry.llm?.outputTokens ?? 0;
+              if (isToday) {
+                existing.todayInputTokens += inTok;
+                existing.todayOutputTokens += outTok;
+                existing.todayWakes++;
+              }
+              if (inWeek) {
+                existing.weekInputTokens += inTok;
+                existing.weekOutputTokens += outTok;
+                existing.weekWakes++;
+              }
+              subUsage.set(key, existing);
             }
           }
         } catch {
@@ -571,7 +716,13 @@ export const readCostSummary = async (rootDir: string): Promise<CostSummary> => 
     } catch {
       /* no index */
     }
-    if (agentWakes > 0) perAgent.push({ agentId, totalMicros: agentTotal, wakes: agentWakes });
+    if (agentWakes > 0)
+      perAgent.push({
+        agentId,
+        totalMicros: agentTotal,
+        shadowMicros: agentShadow,
+        wakes: agentWakes,
+      });
   }
 
   return {
@@ -581,7 +732,15 @@ export const readCostSummary = async (rootDir: string): Promise<CostSummary> => 
     weekWakes,
     monthMicros,
     monthWakes,
+    todayShadowMicros,
+    weekShadowMicros,
+    monthShadowMicros,
     wakesPerDay7d: wakesPerDay,
     perAgent,
+    subscriptionUsage: [...subUsage.values()].sort((a, b) =>
+      a.provider === b.provider
+        ? a.model.localeCompare(b.model)
+        : a.provider.localeCompare(b.provider),
+    ),
   };
 };

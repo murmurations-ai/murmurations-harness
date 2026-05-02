@@ -66,16 +66,22 @@ import {
 } from "@murmurations-ai/github";
 import {
   createLLMClient,
+  createSubscriptionCliClient,
   ProviderRegistry,
   type LLMClient,
   type LLMCostHook,
 } from "@murmurations-ai/llm";
-import { resolveLLMCost } from "@murmurations-ai/llm/pricing";
+import {
+  isSubscriptionCliProvider,
+  resolveLLMCost,
+  resolveShadowApiCost,
+} from "@murmurations-ai/llm/pricing";
 import { McpToolLoader } from "@murmurations-ai/mcp";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
 import { buildGithubReadToolsForAgent } from "./github-tools/index.js";
+import type { HarnessLLMConfig } from "./harness-config.js";
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 import { registerRunningSocket, unregisterRunningSocket } from "./running-sessions.js";
@@ -109,14 +115,15 @@ export const makeDaemonHook = (
   const warned = new Set<string>();
   return {
     onLlmCall: (call) => {
-      const priced = resolveLLMCost({
+      const pricingInput = {
         provider: call.provider,
         model: call.model,
         inputTokens: call.inputTokens,
         outputTokens: call.outputTokens,
         ...(call.cacheReadTokens !== undefined ? { cacheReadTokens: call.cacheReadTokens } : {}),
         ...(call.cacheWriteTokens !== undefined ? { cacheWriteTokens: call.cacheWriteTokens } : {}),
-      });
+      };
+      const priced = resolveLLMCost(pricingInput);
       let costMicros: USDMicros;
       if (priced.ok) {
         costMicros = priced.value;
@@ -135,6 +142,33 @@ export const makeDaemonHook = (
           });
         }
       }
+
+      // Subscription-CLI wakes are $0 marginal at the operator (paid via
+      // Pro/Max/ChatGPT/Google subscription). Compute shadow API cost so
+      // operators see "what this would have cost on the API" — useful for
+      // budgeting before scaling and for the "you saved $X" headline.
+      let shadowCostMicros: USDMicros | undefined;
+      if (isSubscriptionCliProvider(call.provider)) {
+        const shadow = resolveShadowApiCost(pricingInput);
+        if (shadow.ok) {
+          shadowCostMicros = shadow.value;
+        } else {
+          shadowCostMicros = makeUSDMicros(0);
+          const shadowKey = `shadow:${call.provider}:${call.model}`;
+          if (logger && !warned.has(shadowKey)) {
+            warned.add(shadowKey);
+            logger.warn("daemon.cost.shadow.unknown", {
+              provider: call.provider,
+              model: call.model,
+              code: shadow.error.code,
+              message: shadow.error.message,
+              impact:
+                "shadow API cost reports as $0; add the model to the API provider's catalog entry",
+            });
+          }
+        }
+      }
+
       builder.addLlmTokens({
         inputTokens: call.inputTokens,
         outputTokens: call.outputTokens,
@@ -143,6 +177,7 @@ export const makeDaemonHook = (
         modelProvider: call.provider,
         modelName: call.model,
         costMicros,
+        ...(shadowCostMicros !== undefined ? { shadowCostMicros } : {}),
       });
     },
   };
@@ -311,6 +346,12 @@ interface BuildAgentClientsArgs {
   readonly costBuilder?: WakeCostBuilder;
   readonly dryRun: boolean;
   readonly ollamaBaseUrl: string | undefined;
+  /** Harness-level LLM defaults (harness.yaml `llm:`). Used as fallback
+   *  when an agent's role.md doesn't pin a value — e.g. the harness sets
+   *  `llm.cli: claude` and individual agents inherit unless they override.
+   *  Closes harness#271 (agent compose silently fell back to a placeholder
+   *  stub when `cli` was set only at harness.yaml level). */
+  readonly harnessLlm: HarnessLLMConfig;
   /** Optional logger so the cost hook can emit `daemon.cost.pricing.unknown`
    *  warns when a model isn't in the pricing catalog (harness#251). */
   readonly logger?: { warn: (event: string, fields?: Record<string, unknown>) => void };
@@ -337,6 +378,7 @@ const buildAgentClients = ({
   costBuilder,
   dryRun,
   ollamaBaseUrl,
+  harnessLlm,
   logger,
 }: BuildAgentClientsArgs): BuildAgentClientsResult => {
   const result: {
@@ -347,37 +389,64 @@ const buildAgentClients = ({
   } = {};
 
   if (agent.llm) {
-    const providerDef = providerRegistry.get(agent.llm.provider);
-    if (!providerDef) {
-      result.llmSkipReason = `provider "${agent.llm.provider}" is not registered`;
-    } else {
-      const resolvedModel =
-        agent.llm.model ?? providerRegistry.resolveModelForTier(agent.llm.provider, "balanced");
-      if (!resolvedModel) {
-        result.llmSkipReason = `no model for provider "${agent.llm.provider}" (pin role.md llm.model)`;
+    // ADR-0034: subscription-CLI provider family bypasses the registry
+    // because it spawns a subprocess, not a Vercel LanguageModel.
+    if (agent.llm.provider === "subscription-cli") {
+      // harness#271: agent's role.md cli takes precedence; fall back to
+      // harness.yaml's llm.cli when the agent doesn't pin one. Without
+      // this fallback, an operator who sets `llm.cli: claude` at the
+      // harness level and inherits it across all agents would see every
+      // agent silently downgrade to the placeholder stub.
+      const cli = agent.llm.cli ?? harnessLlm.cli;
+      if (cli !== "claude" && cli !== "gemini" && cli !== "codex") {
+        result.llmSkipReason = `provider "subscription-cli" requires llm.cli: claude | gemini | codex (set on agent role.md llm.cli, or fall back via harness.yaml llm.cli)`;
       } else {
         const costHook = costBuilder ? makeDaemonHook(costBuilder, logger) : undefined;
-        if (providerDef.envKeyName === null) {
-          // Keyless provider (e.g. local Ollama).
-          result.llm = createLLMClient({
-            registry: providerRegistry,
-            provider: agent.llm.provider,
-            model: resolvedModel,
-            token: null,
-            ...(ollamaBaseUrl !== undefined ? { baseUrl: ollamaBaseUrl } : {}),
-            ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
-          });
-        } else if (provider?.has(makeSecretKey(providerDef.envKeyName)) === true) {
-          const token = provider.get(makeSecretKey(providerDef.envKeyName));
-          result.llm = createLLMClient({
-            registry: providerRegistry,
-            provider: agent.llm.provider,
-            model: resolvedModel,
-            token,
-            ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
-          });
+        // Same fallback shape for model: agent override → harness default → empty
+        const model = agent.llm.model ?? harnessLlm.model ?? "";
+        result.llm = createSubscriptionCliClient({
+          cli,
+          model,
+          ...(agent.llm.timeoutMs !== undefined ? { timeoutMs: agent.llm.timeoutMs } : {}),
+          ...(agent.llm.permissionMode !== undefined
+            ? { permissionMode: agent.llm.permissionMode }
+            : {}),
+          ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+        });
+      }
+    } else {
+      const providerDef = providerRegistry.get(agent.llm.provider);
+      if (!providerDef) {
+        result.llmSkipReason = `provider "${agent.llm.provider}" is not registered`;
+      } else {
+        const resolvedModel =
+          agent.llm.model ?? providerRegistry.resolveModelForTier(agent.llm.provider, "balanced");
+        if (!resolvedModel) {
+          result.llmSkipReason = `no model for provider "${agent.llm.provider}" (pin role.md llm.model)`;
         } else {
-          result.llmSkipReason = "provider api key missing from secrets";
+          const costHook = costBuilder ? makeDaemonHook(costBuilder, logger) : undefined;
+          if (providerDef.envKeyName === null) {
+            // Keyless provider (e.g. local Ollama).
+            result.llm = createLLMClient({
+              registry: providerRegistry,
+              provider: agent.llm.provider,
+              model: resolvedModel,
+              token: null,
+              ...(ollamaBaseUrl !== undefined ? { baseUrl: ollamaBaseUrl } : {}),
+              ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+            });
+          } else if (provider?.has(makeSecretKey(providerDef.envKeyName)) === true) {
+            const token = provider.get(makeSecretKey(providerDef.envKeyName));
+            result.llm = createLLMClient({
+              registry: providerRegistry,
+              provider: agent.llm.provider,
+              model: resolvedModel,
+              token,
+              ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+            });
+          } else {
+            result.llmSkipReason = "provider api key missing from secrets";
+          }
         }
       }
     }
@@ -693,9 +762,14 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     // Engineering Standard #11: cascade harness.yaml `llm:` into each
     // agent's role.md when the agent omits it.
     roleDefaults: {
-      llm: config.llm.model
-        ? { provider: config.llm.provider, model: config.llm.model }
-        : { provider: config.llm.provider },
+      llm: {
+        provider: config.llm.provider,
+        ...(config.llm.model !== undefined ? { model: config.llm.model } : {}),
+        ...(config.llm.cli !== undefined ? { cli: config.llm.cli } : {}),
+        ...(config.llm.permissionMode !== undefined
+          ? { permissionMode: config.llm.permissionMode }
+          : {}),
+      },
     },
   });
 
@@ -1110,6 +1184,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       providerRegistry,
       dryRun,
       ollamaBaseUrl,
+      harnessLlm: config.llm,
     });
 
     if (agent.llm && validation.llmSkipReason) {
@@ -1263,6 +1338,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               costBuilder,
               dryRun,
               ollamaBaseUrl,
+              harnessLlm: config.llm,
               logger,
             });
             const firstBranchScope = capturedAgent.githubWriteScopes.branchCommits[0];

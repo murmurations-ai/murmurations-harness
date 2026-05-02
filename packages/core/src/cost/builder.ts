@@ -63,6 +63,7 @@ export class WakeCostBuilder {
   #llmCacheReadTokens = 0;
   #llmCacheWriteTokens = 0;
   #llmCostMicros: USDMicros = ZERO_USD_MICROS;
+  #llmShadowCostMicros: USDMicros | undefined = undefined;
   #llmProvider = "placeholder";
   #llmModel = "phase-1a-stub";
 
@@ -134,6 +135,13 @@ export class WakeCostBuilder {
     readonly modelProvider: string;
     readonly modelName: string;
     readonly costMicros: USDMicros;
+    /**
+     * Optional shadow API cost for subscription-CLI calls. When set, this
+     * call's actual cost is $0 (subscription) and shadowCostMicros records
+     * what it *would* have cost on the equivalent API path. Direct API
+     * calls leave this undefined.
+     */
+    readonly shadowCostMicros?: USDMicros;
   }): void {
     this.#assertNotFinalized();
     this.#llmInputTokens += usage.inputTokens;
@@ -141,6 +149,12 @@ export class WakeCostBuilder {
     this.#llmCacheReadTokens += usage.cacheReadTokens ?? 0;
     this.#llmCacheWriteTokens += usage.cacheWriteTokens ?? 0;
     this.#llmCostMicros = addUSDMicros(this.#llmCostMicros, usage.costMicros);
+    if (usage.shadowCostMicros !== undefined) {
+      this.#llmShadowCostMicros = addUSDMicros(
+        this.#llmShadowCostMicros ?? ZERO_USD_MICROS,
+        usage.shadowCostMicros,
+      );
+    }
     this.#llmProvider = usage.modelProvider;
     this.#llmModel = usage.modelName;
   }
@@ -208,6 +222,7 @@ export class WakeCostBuilder {
         modelProvider: this.#llmProvider,
         modelName: this.#llmModel,
         costMicros: this.#llmCostMicros,
+        shadowCostMicros: this.#llmShadowCostMicros,
       },
       github: {
         restCalls: this.#ghRest,

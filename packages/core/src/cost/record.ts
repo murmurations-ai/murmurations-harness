@@ -69,6 +69,15 @@ export interface WakeCostRecord {
     readonly modelProvider: string;
     readonly modelName: string;
     readonly costMicros: USDMicros;
+    /**
+     * Shadow API cost for subscription-CLI wakes — what this call *would*
+     * have cost on the equivalent API path. Always undefined for direct
+     * API providers (their `costMicros` is already the real cost).
+     * Operators on Claude Pro/Max + ChatGPT + Google subscription pay $0
+     * marginal at the operator level; this field surfaces the would-be
+     * API spend for fairness, budgeting, and the "you saved $X" headline.
+     */
+    readonly shadowCostMicros: USDMicros | undefined;
   };
 
   /** GitHub API accounting. Stubbed zero until Phase 1B-d (B2). */
@@ -132,6 +141,7 @@ export const wakeCostRecordSchema = z.object({
     modelProvider: z.string(),
     modelName: z.string(),
     costMicros: brandedValue("usd-micros", z.number().int().nonnegative()),
+    shadowCostMicros: brandedValue("usd-micros", z.number().int().nonnegative()).optional(),
   }),
   github: z.object({
     restCalls: z.number().int().nonnegative(),

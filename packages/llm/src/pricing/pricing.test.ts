@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveLLMCost, SEED_CATALOG } from "./index.js";
+import {
+  isSubscriptionCliProvider,
+  resolveLLMCost,
+  resolveShadowApiCost,
+  SEED_CATALOG,
+} from "./index.js";
 import type { ProviderRate } from "./index.js";
 
 describe("resolveLLMCost", () => {
@@ -192,6 +197,72 @@ describe("resolveLLMCost", () => {
   it.skip("resolves asOf parameter against historical entries (Phase 3 tripwire)", () => {
     // Enable when the second row per (provider, model) appears in SEED_CATALOG.
     // Until then, v0.1 always returns the first match.
+  });
+
+  it("returns $0 for subscription-cli providers without firing unknown-provider", () => {
+    for (const provider of ["claude-cli", "codex-cli", "gemini-cli"] as const) {
+      const result = resolveLLMCost({
+        provider,
+        model: "any-model",
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+      });
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.value.value).toBe(0);
+    }
+  });
+
+  it("isSubscriptionCliProvider returns true only for the three subscription CLIs", () => {
+    expect(isSubscriptionCliProvider("claude-cli")).toBe(true);
+    expect(isSubscriptionCliProvider("codex-cli")).toBe(true);
+    expect(isSubscriptionCliProvider("gemini-cli")).toBe(true);
+    expect(isSubscriptionCliProvider("anthropic")).toBe(false);
+    expect(isSubscriptionCliProvider("openai")).toBe(false);
+  });
+
+  it("resolveShadowApiCost maps claude-cli → anthropic for the same model", () => {
+    const shadow = resolveShadowApiCost({
+      provider: "claude-cli",
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    const direct = resolveLLMCost({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+    });
+    expect(shadow.ok).toBe(true);
+    expect(direct.ok).toBe(true);
+    if (shadow.ok && direct.ok) {
+      expect(shadow.value.value).toBe(direct.value.value);
+    }
+  });
+
+  it("resolveShadowApiCost maps codex-cli/gpt-5.5 → openai/gpt-5.5", () => {
+    const shadow = resolveShadowApiCost({
+      provider: "codex-cli",
+      model: "gpt-5.5",
+      inputTokens: 1_000_000,
+      outputTokens: 100_000,
+    });
+    expect(shadow.ok).toBe(true);
+    if (shadow.ok) {
+      // gpt-5.5: $5/M input + $30/M output → 5_000_000 + 3_000_000 = 8_000_000 micros
+      expect(shadow.value.value).toBe(8_000_000);
+    }
+  });
+
+  it("resolveShadowApiCost rejects non-subscription providers with unknown-provider", () => {
+    const result = resolveShadowApiCost({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe("unknown-provider");
   });
 
   it("TypeScript: ProviderRate type is exported", () => {

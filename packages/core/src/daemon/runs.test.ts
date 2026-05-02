@@ -57,6 +57,7 @@ const makeCostRecord = (): WakeCostRecord => ({
     modelProvider: "gemini",
     modelName: "gemini-2.5-pro",
     costMicros: makeUSDMicros(4500),
+    shadowCostMicros: undefined,
   },
   github: {
     restCalls: 2,

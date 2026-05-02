@@ -30,7 +30,12 @@ import {
   type GovernanceTally,
   GovernanceStateStore,
 } from "@murmurations-ai/core";
-import { createLLMClient, formatLLMError, type LLMClient } from "@murmurations-ai/llm";
+import {
+  createLLMClient,
+  createSubscriptionCliClient,
+  formatLLMError,
+  type LLMClient,
+} from "@murmurations-ai/llm";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 
 import { buildBuiltinProviderRegistry } from "./builtin-providers/index.js";
@@ -49,7 +54,19 @@ import {
  * LLM config" catch-all. (v0.5.0 Milestone 1 — error legibility.)
  */
 type ResolveLLMResult =
-  | { readonly ok: true; readonly config: { provider: string; model: string } }
+  | {
+      readonly ok: true;
+      readonly config: {
+        readonly provider: string;
+        readonly model: string;
+        /** Set when provider === "subscription-cli". */
+        readonly cli?: "claude" | "codex" | "gemini";
+        /** Subprocess timeout in ms; only honored for subscription-cli. */
+        readonly timeoutMs?: number;
+        /** ADR-0036: native vendor CLI tool authority. */
+        readonly permissionMode?: "restricted" | "operator-approved" | "trusted";
+      };
+    }
   | { readonly ok: false; readonly reason: "no-llm-block"; readonly rolePath: string }
   | { readonly ok: false; readonly reason: "file-not-found"; readonly path: string }
   | {
@@ -78,9 +95,14 @@ export const resolveLLMConfig = async (
     const loader = new IdentityLoader({
       rootDir,
       roleDefaults: {
-        llm: harness.llm.model
-          ? { provider: harness.llm.provider, model: harness.llm.model }
-          : { provider: harness.llm.provider },
+        llm: {
+          provider: harness.llm.provider,
+          ...(harness.llm.model !== undefined ? { model: harness.llm.model } : {}),
+          ...(harness.llm.cli !== undefined ? { cli: harness.llm.cli } : {}),
+          ...(harness.llm.permissionMode !== undefined
+            ? { permissionMode: harness.llm.permissionMode }
+            : {}),
+        },
       },
     });
     const identity = await loader.load(facilitatorId);
@@ -88,7 +110,13 @@ export const resolveLLMConfig = async (
     if (llm) {
       return {
         ok: true,
-        config: { provider: llm.provider, model: llm.model ?? getDefaultModel(llm.provider) },
+        config: {
+          provider: llm.provider,
+          model: llm.model ?? getDefaultModel(llm.provider),
+          ...(llm.cli !== undefined ? { cli: llm.cli } : {}),
+          ...(llm.timeoutMs !== undefined ? { timeoutMs: llm.timeoutMs } : {}),
+          ...(llm.permissionMode !== undefined ? { permissionMode: llm.permissionMode } : {}),
+        },
       };
     }
     return { ok: false, reason: "no-llm-block", rolePath };
@@ -369,6 +397,7 @@ export class GroupWakeError extends Error {
   public constructor(
     readonly code:
       | "GROUP_NOT_FOUND"
+      | "INVALID_LLM_CONFIG"
       | "LLM_CONFIG_FAILED"
       | "MISSING_GROUP_ID"
       | "MISSING_LLM_TOKEN",
@@ -438,36 +467,56 @@ export const runGroupWakeCommand = async (
   const envPath = join(root, ".env");
   let llmClient: LLMClient | undefined;
   let secretsProvider: DotenvSecretsProvider | undefined;
-  const envKeyName = providerRegistry.envKeyName(llmConfig.provider);
-  const secretKeyName = typeof envKeyName === "string" ? envKeyName : undefined;
-  if (existsSync(envPath)) {
-    secretsProvider = new DotenvSecretsProvider({ envPath });
-    const optionalKeys = secretKeyName ? [makeSecretKey(secretKeyName)] : [];
-    await secretsProvider.load({ required: [], optional: optionalKeys });
-    const tokenKey = secretKeyName ? makeSecretKey(secretKeyName) : null;
-    if (envKeyName === null) {
-      // Keyless provider (e.g. local Ollama).
-      llmClient = createLLMClient({
-        registry: providerRegistry,
-        provider: llmConfig.provider,
-        model: llmConfig.model,
-        token: null,
-      });
-    } else if (tokenKey && secretsProvider.has(tokenKey)) {
-      llmClient = createLLMClient({
-        registry: providerRegistry,
-        provider: llmConfig.provider,
-        model: llmConfig.model,
-        token: secretsProvider.get(tokenKey),
-      });
-    }
-  }
 
-  if (!llmClient) {
-    throw new GroupWakeError(
-      "MISSING_LLM_TOKEN",
-      `murmuration convene: ${secretKeyName ?? "LLM token"} not found in .env`,
-    );
+  // Subscription-CLI bypasses the registry and the .env entirely — auth
+  // lives in the operator's CLI state, not in our secrets file.
+  if (llmConfig.provider === "subscription-cli") {
+    if (llmConfig.cli !== "claude" && llmConfig.cli !== "codex" && llmConfig.cli !== "gemini") {
+      throw new GroupWakeError(
+        "INVALID_LLM_CONFIG",
+        `murmuration convene: facilitator "${config.facilitator}" has provider "subscription-cli" but llm.cli must be one of claude | codex | gemini`,
+      );
+    }
+    llmClient = createSubscriptionCliClient({
+      cli: llmConfig.cli,
+      model: llmConfig.model,
+      ...(llmConfig.timeoutMs !== undefined ? { timeoutMs: llmConfig.timeoutMs } : {}),
+      ...(llmConfig.permissionMode !== undefined
+        ? { permissionMode: llmConfig.permissionMode }
+        : {}),
+    });
+  } else {
+    const envKeyName = providerRegistry.envKeyName(llmConfig.provider);
+    const secretKeyName = typeof envKeyName === "string" ? envKeyName : undefined;
+    if (existsSync(envPath)) {
+      secretsProvider = new DotenvSecretsProvider({ envPath });
+      const optionalKeys = secretKeyName ? [makeSecretKey(secretKeyName)] : [];
+      await secretsProvider.load({ required: [], optional: optionalKeys });
+      const tokenKey = secretKeyName ? makeSecretKey(secretKeyName) : null;
+      if (envKeyName === null) {
+        // Keyless provider (e.g. local Ollama).
+        llmClient = createLLMClient({
+          registry: providerRegistry,
+          provider: llmConfig.provider,
+          model: llmConfig.model,
+          token: null,
+        });
+      } else if (tokenKey && secretsProvider.has(tokenKey)) {
+        llmClient = createLLMClient({
+          registry: providerRegistry,
+          provider: llmConfig.provider,
+          model: llmConfig.model,
+          token: secretsProvider.get(tokenKey),
+        });
+      }
+    }
+
+    if (!llmClient) {
+      throw new GroupWakeError(
+        "MISSING_LLM_TOKEN",
+        `murmuration convene: ${secretKeyName ?? "LLM token"} not found in .env`,
+      );
+    }
   }
 
   // Resolve plugin terminology (for meeting prompts) and state graphs

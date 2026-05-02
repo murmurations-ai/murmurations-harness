@@ -10,7 +10,9 @@ This guide walks you from zero to a running meeting in under 10 minutes. No prio
 
 - **Node.js 20+** (`node --version`)
 - **npm** (ships with Node)
-- **An API key** for your LLM provider of choice. Free-tier Gemini works great for testing — get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (no credit card required).
+- **An LLM**, one of:
+  - **A subscription CLI you're already paying for** (recommended for new operators) — Claude Code, OpenAI Codex, or Gemini CLI. `murmuration init` auto-detects them. Skip the API-key step entirely. $0 marginal cost.
+  - **An API key.** Free-tier Gemini works great for testing — get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (no credit card required).
 - **Optional: a GitHub personal access token** if you want agents to read/write GitHub Issues. For the tutorial you can skip it — the example uses local-only collaboration.
 
 ---
@@ -51,7 +53,22 @@ Next:
   murmuration convene --name my-first-murm --group example --directive "what should we scout next?"
 ```
 
-### 3. Paste your Gemini API key
+### 3. Configure auth
+
+**Option A — already have Claude Code, Codex, or Gemini CLI installed and logged in?**
+
+The example defaults to Gemini API; to switch it to your subscription CLI, edit `murmuration/harness.yaml`:
+
+```yaml
+llm:
+  provider: "subscription-cli"
+  cli: "claude" # or "codex" / "gemini"
+  model: "claude-sonnet-4-6" # see defaults in docs/CONFIGURATION.md
+```
+
+Skip the rest of this step. No `.env` edit needed.
+
+**Option B — paste a Gemini API key:**
 
 ```sh
 cp .env.example .env
@@ -117,14 +134,15 @@ murmuration init my-production-murm
 The interactive interview will ask:
 
 1. **Purpose** — a sentence describing what this murmuration is for
-2. **Default LLM provider** — gemini / anthropic / openai / ollama
-3. **API key** — paste it; input is hidden; you'll see a last-4 confirmation
-4. **Collaboration provider** — `github` (recommended) or `local`
-5. **GitHub repo + token** (if github chosen)
-6. **Agent definitions** — name, provider override, group, wake schedule (one loop per agent)
-7. **Governance model** — self-organizing (S3) / chain-of-command / meritocratic / consensus / parliamentary / none
+2. **Default LLM provider** — `subscription-cli` (when one is detected, this is the recommended default) / gemini / anthropic / openai / ollama
+3. **Subscription CLI choice** (only if you picked subscription-cli and multiple are installed) — claude / codex / gemini, with a sensible default model attached
+4. **API key** (skipped for subscription-cli) — paste it; input is hidden; you'll see a last-4 confirmation
+5. **Collaboration provider** — `github` (recommended) or `local`
+6. **GitHub repo + token** (if github chosen)
+7. **Agent definitions** — name, provider override, group, wake schedule (one loop per agent)
+8. **Governance model** — self-organizing (S3) / chain-of-command / meritocratic / consensus / parliamentary / none
 
-Every question has a reasonable default you can ENTER through. API keys are validated for shape before confirmation (the init rejects an obviously wrong paste and lets you try again).
+The init flow auto-detects installed `claude` / `codex` / `gemini` CLIs at startup and shows a banner like `Detected subscription CLIs: claude (2.0.31), gemini (0.21.0)` before asking. Every question has a reasonable default you can ENTER through. API keys are validated for shape before confirmation (the init rejects an obviously wrong paste and lets you try again).
 
 After init, run `murmuration doctor` to validate, edit the scaffolded `role.md` / `soul.md` / `governance/groups/*.md` to flesh out your agents and groups, then `murmuration start` to boot the daemon (or `murmuration convene` for on-demand meetings).
 
@@ -141,7 +159,7 @@ The top things that can go wrong, with the exact fix.
 | `doctor` reports `secrets.env.<KEY>.missing`             | Your `.env` has the placeholder but not a real key                          | Edit `.env` and paste your actual key; save                                                   |
 | `doctor` reports `layout.env.mode`                       | `.env` is group/world-readable                                              | `chmod 600 .env`, or run `murmuration doctor --fix`                                           |
 | `doctor` reports `schema.role.<slug>.model_tier`         | A role.md has a non-enum `model_tier`                                       | Use one of `"fast"`, `"balanced"`, `"deep"`                                                   |
-| `doctor` reports `schema.role.<slug>.llm.provider`       | A role.md has an unrecognized provider                                      | Use one of `"gemini"`, `"anthropic"`, `"openai"`, `"ollama"`                                  |
+| `doctor` reports `schema.role.<slug>.llm.provider`       | A role.md has an unrecognized provider                                      | Use one of `"gemini"`, `"anthropic"`, `"openai"`, `"ollama"`, `"subscription-cli"`            |
 | `doctor` reports `layout.legacy-circles.only`            | You migrated from pre-ADR-0026 but still have `governance/circles/`         | `murmuration doctor --fix` renames it to `governance/groups/`                                 |
 | `group-wake: could not read LLM config from facilitator` | The facilitator agent's `role.md` has a schema issue                        | Run `murmuration doctor` — the real error is reported there                                   |
 | `create-issue: PERMISSION_DENIED`                        | Your `GITHUB_TOKEN` lacks `repo` scope, or the repo is wrong                | Regenerate token with `repo` scope; verify `collaboration.repo` in `murmuration/harness.yaml` |

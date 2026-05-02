@@ -16,7 +16,12 @@ npm install -g @murmurations-ai/cli
 murmuration init --example hello my-first-murm
 cd my-first-murm
 
-# 3. Paste your Gemini API key (free tier is plenty — https://aistudio.google.com/apikey)
+# 3a. Already have Claude Code, Codex, or Gemini CLI installed and logged in?
+#     `murmuration init` auto-detects them. Pick "subscription-cli" at the prompt
+#     and skip the API key entirely — your existing Pro/Max, ChatGPT, or Google
+#     subscription pays for it. $0 marginal cost. Move to step 4.
+
+# 3b. Otherwise, paste a Gemini API key (free tier is plenty — https://aistudio.google.com/apikey)
 cp .env.example .env
 chmod 600 .env
 # edit .env and paste GEMINI_API_KEY=AIza...
@@ -80,22 +85,44 @@ The harness auto-detects the `murmuration/` directory and loads all configuratio
 
 ## LLM providers
 
-The harness uses the [Vercel AI SDK](https://sdk.vercel.ai/) (ADR-0020) for all LLM calls. Four providers are supported out of the box:
+Two routes are supported out of the box:
 
-| Provider          | Package                       | Model examples                   |
-| ----------------- | ----------------------------- | -------------------------------- |
-| **Google Gemini** | `@ai-sdk/google`              | gemini-2.5-flash, gemini-2.5-pro |
-| **Anthropic**     | `@ai-sdk/anthropic`           | claude-sonnet-4-20250514         |
-| **OpenAI**        | `@ai-sdk/openai`              | gpt-4o, gpt-4o-mini              |
-| **Ollama**        | `@ai-sdk/openai` (compatible) | llama3, mistral                  |
+**API providers** (Vercel AI SDK, ADR-0020) — pay-per-token via your own API key:
+
+| Provider          | Package                       | Model examples                     |
+| ----------------- | ----------------------------- | ---------------------------------- |
+| **Google Gemini** | `@ai-sdk/google`              | gemini-2.5-flash, gemini-2.5-pro   |
+| **Anthropic**     | `@ai-sdk/anthropic`           | claude-sonnet-4-6, claude-opus-4-7 |
+| **OpenAI**        | `@ai-sdk/openai`              | gpt-5, gpt-5.5, gpt-4o             |
+| **Ollama**        | `@ai-sdk/openai` (compatible) | llama3, mistral                    |
+
+**Subscription-CLI providers** (ADR-0034) — $0 marginal cost via your existing subscription, no API key needed:
+
+| Provider       | CLI tool               | Default model       | Auth                 |
+| -------------- | ---------------------- | ------------------- | -------------------- |
+| **claude-cli** | Claude Code (`claude`) | `claude-sonnet-4-6` | Pro/Max OAuth        |
+| **codex-cli**  | OpenAI Codex (`codex`) | `gpt-5.5`           | ChatGPT subscription |
+| **gemini-cli** | Gemini CLI (`gemini`)  | `gemini-2.5-flash`  | Google subscription  |
+
+`murmuration init` auto-detects installed CLIs and offers the subscription path as the default when one is present.
 
 Configure per agent in `role.md`:
 
 ```yaml
+# API path
 llm:
   provider: "gemini"
   model: "gemini-2.5-flash"
+
+# Subscription-CLI path
+llm:
+  provider: "subscription-cli"
+  cli: "claude" # or "codex" / "gemini"
+  model: "claude-sonnet-4-6"
+  timeoutMs: 540000 # 9 min — must be < agent.maxWallClockMs
 ```
+
+Subscription-CLI wakes report `costMicros: 0` (actual) plus `shadowCostMicros` (would-be API cost). The TUI dashboard shows "Saved (subscription)" totals and per-(provider, model) token usage today / 7d, so operators can gauge headroom against their plan's published quota.
 
 ### Tool calling (MCP)
 

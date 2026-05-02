@@ -154,6 +154,22 @@ const renderCostSummary = (cost: CostSummary): string => {
     `  Today: ${bold(formatUsd(cost.todayMicros))} (${String(cost.todayWakes)}w)  ${dim("|")}  Week: ${formatUsd(cost.weekMicros)} (${String(cost.weekWakes)}w)  ${dim("|")}  Month: ${formatUsd(cost.monthMicros)} (${String(cost.monthWakes)}w)`,
   );
 
+  // Shadow API line: only show when there's actual subscription savings
+  // (shadow > actual) — otherwise it's noise. The "would have cost"
+  // framing is the operator-facing headline for subscription routing.
+  if (
+    cost.todayShadowMicros > cost.todayMicros ||
+    cost.weekShadowMicros > cost.weekMicros ||
+    cost.monthShadowMicros > cost.monthMicros
+  ) {
+    const todaySaved = cost.todayShadowMicros - cost.todayMicros;
+    const weekSaved = cost.weekShadowMicros - cost.weekMicros;
+    const monthSaved = cost.monthShadowMicros - cost.monthMicros;
+    lines.push(
+      `  ${dim("Saved (subscription)")}  Today: ${green(formatUsd(todaySaved))}  ${dim("|")}  Week: ${green(formatUsd(weekSaved))}  ${dim("|")}  Month: ${green(formatUsd(monthSaved))}`,
+    );
+  }
+
   // Sparkline (last 7 days) — real buckets from finishedAt timestamps,
   // computed in readCostSummary (fixes #59: previously we distributed
   // week wakes evenly across days 0-5, which misled Source about
@@ -174,7 +190,32 @@ const renderCostSummary = (cost: CostSummary): string => {
 
   lines.push(`  Wakes/day: ${cyan(spark)}   ${dim(dayLabels.join(" "))}`);
   lines.push(`             ${counts}`);
+
+  // Subscription-CLI usage rollup. Vendors don't expose remaining
+  // quota, so we show "tokens consumed today / 7d" per (provider, model).
+  // Operators compare against their plan's published allowance to gauge
+  // headroom before refresh. Skip the section entirely on API-only
+  // deployments to avoid noise.
+  if (cost.subscriptionUsage.length > 0) {
+    lines.push(``);
+    lines.push(`  ${dim("Subscription usage  (no remaining-quota API; compare to your plan)")}`);
+    for (const u of cost.subscriptionUsage) {
+      const today = formatTokens(u.todayInputTokens + u.todayOutputTokens);
+      const week = formatTokens(u.weekInputTokens + u.weekOutputTokens);
+      const label = `${u.provider}/${u.model}`.padEnd(34);
+      lines.push(
+        `  ${label} today: ${bold(today.padStart(7))} (${String(u.todayWakes).padStart(2)}w)  ${dim("|")}  7d: ${week.padStart(7)} (${String(u.weekWakes).padStart(2)}w)`,
+      );
+    }
+  }
+
   return lines.join("\n");
+};
+
+const formatTokens = (n: number): string => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+  return String(n);
 };
 
 // ---------------------------------------------------------------------------

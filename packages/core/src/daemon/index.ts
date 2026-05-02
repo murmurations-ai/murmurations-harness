@@ -108,8 +108,14 @@ export interface RegisteredAgent {
    * per-agent LLMClient.
    */
   readonly llm?: {
-    readonly provider: "gemini" | "anthropic" | "openai" | "ollama";
+    readonly provider: "gemini" | "anthropic" | "openai" | "ollama" | "subscription-cli";
     readonly model?: string;
+    /** ADR-0034: only used when provider is "subscription-cli". */
+    readonly cli?: "claude" | "gemini" | "codex";
+    /** ADR-0034: subprocess wall-clock timeout (subscription-cli only). */
+    readonly timeoutMs?: number;
+    /** ADR-0036: native vendor CLI tool authority. */
+    readonly permissionMode?: "restricted" | "operator-approved" | "trusted";
   };
 
   /**
@@ -215,10 +221,18 @@ export const registeredAgentFromLoadedIdentity = (
   const { chain, frontmatter } = loaded;
 
   // ADR-0016: map snake_case YAML fields to camelCase runtime fields.
+  // ADR-0034: forward cli + timeoutMs for subscription-cli provider family.
   const llm = frontmatter.llm
     ? {
         provider: frontmatter.llm.provider,
         ...(frontmatter.llm.model !== undefined ? { model: frontmatter.llm.model } : {}),
+        ...(frontmatter.llm.cli !== undefined ? { cli: frontmatter.llm.cli } : {}),
+        ...(frontmatter.llm.timeoutMs !== undefined
+          ? { timeoutMs: frontmatter.llm.timeoutMs }
+          : {}),
+        ...(frontmatter.llm.permissionMode !== undefined
+          ? { permissionMode: frontmatter.llm.permissionMode }
+          : {}),
       }
     : undefined;
 
@@ -1123,6 +1137,12 @@ export class Daemon {
           ...costRecord.llm,
           costMicros: costRecord.llm.costMicros.value,
           costUsdFormatted: formatUSDMicros(costRecord.llm.costMicros),
+          ...(costRecord.llm.shadowCostMicros !== undefined
+            ? {
+                shadowCostMicros: costRecord.llm.shadowCostMicros.value,
+                shadowCostUsdFormatted: formatUSDMicros(costRecord.llm.shadowCostMicros),
+              }
+            : {}),
         },
         github: {
           ...costRecord.github,

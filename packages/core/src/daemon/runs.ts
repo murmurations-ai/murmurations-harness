@@ -91,6 +91,13 @@ export interface RunArtifactIndexEntry {
     readonly cacheWriteTokens: number;
     readonly costMicros: number;
     readonly costUsdFormatted: string;
+    /**
+     * Shadow API cost in USD micros for subscription-CLI wakes. `null`
+     * when the wake used a direct API provider (its `costMicros` is the
+     * real spend). Always set for `claude-cli`/`codex-cli`/`gemini-cli`.
+     */
+    readonly shadowCostMicros: number | null;
+    readonly shadowCostUsdFormatted: string | null;
   };
   readonly github: {
     readonly restCalls: number;
@@ -203,6 +210,8 @@ const buildIndexEntry = (
       cacheWriteTokens: llm?.cacheWriteTokens ?? 0,
       costMicros: llm?.costMicros.value ?? 0,
       costUsdFormatted: llm ? formatUSDMicros(llm.costMicros) : "0.0000",
+      shadowCostMicros: llm?.shadowCostMicros ? llm.shadowCostMicros.value : null,
+      shadowCostUsdFormatted: llm?.shadowCostMicros ? formatUSDMicros(llm.shadowCostMicros) : null,
     },
     github: {
       restCalls: github?.restCalls ?? 0,
@@ -231,6 +240,9 @@ const renderDigestBody = (
   const provider = llm?.modelProvider ?? "unknown";
   const model = llm?.modelName ?? "unknown";
   const costDisplay = llm ? formatUSDMicros(llm.costMicros) : "0.0000";
+  const shadowLine = llm?.shadowCostMicros
+    ? `llm_shadow_cost_usd: ${formatUSDMicros(llm.shadowCostMicros)}  # would-be API cost; actual is $0 via subscription\n`
+    : "";
   return `---
 wake_id: ${result.wakeId.value}
 agent_id: ${result.agentId.value}
@@ -241,7 +253,7 @@ written_at: ${writtenAt.toISOString()}
 llm_provider: ${provider}
 llm_model: ${model}
 llm_cost_usd: ${costDisplay}
----
+${shadowLine}---
 
 ${result.wakeSummary}
 `;

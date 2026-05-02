@@ -90,7 +90,15 @@ export const humanizeSlug = (slug: string): string =>
 export const enrichRoleFrontmatter = (
   raw: unknown,
   agentDir: string,
-  roleDefaults?: { readonly llm?: { readonly provider: LLMProvider; readonly model?: string } },
+  roleDefaults?: {
+    readonly llm?: {
+      readonly provider: LLMProvider;
+      readonly model?: string;
+      readonly cli?: "claude" | "gemini" | "codex";
+      readonly timeoutMs?: number;
+      readonly permissionMode?: "restricted" | "operator-approved" | "trusted";
+    };
+  },
 ): Record<string, unknown> => {
   const base =
     typeof raw === "object" && raw !== null ? { ...(raw as Record<string, unknown>) } : {};
@@ -116,10 +124,17 @@ export const enrichRoleFrontmatter = (
   // `llm` cascade: inherit harness-level default only when role.md
   // declared nothing. Explicit operator override always wins.
   if ((base.llm === undefined || base.llm === null) && roleDefaults?.llm !== undefined) {
-    base.llm =
-      roleDefaults.llm.model !== undefined
-        ? { provider: roleDefaults.llm.provider, model: roleDefaults.llm.model }
-        : { provider: roleDefaults.llm.provider };
+    base.llm = {
+      provider: roleDefaults.llm.provider,
+      ...(roleDefaults.llm.model !== undefined ? { model: roleDefaults.llm.model } : {}),
+      ...(roleDefaults.llm.cli !== undefined ? { cli: roleDefaults.llm.cli } : {}),
+      ...(roleDefaults.llm.timeoutMs !== undefined
+        ? { timeoutMs: roleDefaults.llm.timeoutMs }
+        : {}),
+      ...(roleDefaults.llm.permissionMode !== undefined
+        ? { permissionMode: roleDefaults.llm.permissionMode }
+        : {}),
+    };
   }
   return base;
 };
@@ -220,7 +235,9 @@ const identifierSchema = z.string().min(1).max(IDENTIFIER_MAX_LENGTH).regex(IDEN
  * LLM provider enum — kept in sync with `@murmurations-ai/llm`'s
  * `ProviderId`. Extended in ADR-0016 (Phase 2C role template).
  */
-const llmProviderSchema = z.enum(["gemini", "anthropic", "openai", "ollama"]);
+// ADR-0034 added "subscription-cli" — routes to the subprocess provider family
+// (claude -p / gemini -p / codex exec) instead of the registry's API providers.
+const llmProviderSchema = z.enum(["gemini", "anthropic", "openai", "ollama", "subscription-cli"]);
 
 /** LLM provider enum surface used by harness-level defaults. Kept in
  *  sync with `llmProviderSchema` above. */
@@ -271,6 +288,14 @@ const wakeScheduleSchema = z
 const llmSchema = z.object({
   provider: llmProviderSchema,
   model: z.string().min(1).optional(),
+  // ADR-0034: subscription-CLI provider family. Required when
+  // provider: "subscription-cli"; ignored otherwise. Schema admits
+  // the field as optional so other providers don't have to know about it.
+  cli: z.enum(["claude", "gemini", "codex"]).optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  // ADR-0036: vendor-native CLI execution authority. Defaults are applied
+  // by the subscription-cli factory; schema only admits the explicit field.
+  permissionMode: z.enum(["restricted", "operator-approved", "trusted"]).optional(),
 });
 
 const githubFilterSchema = z
@@ -479,7 +504,13 @@ export interface IdentityLoaderConfig {
    * `llm:` block here. Undefined means "no cascade" (legacy behavior).
    */
   readonly roleDefaults?: {
-    readonly llm?: { readonly provider: LLMProvider; readonly model?: string };
+    readonly llm?: {
+      readonly provider: LLMProvider;
+      readonly model?: string;
+      readonly cli?: "claude" | "gemini" | "codex";
+      readonly timeoutMs?: number;
+      readonly permissionMode?: "restricted" | "operator-approved" | "trusted";
+    };
   };
 }
 
