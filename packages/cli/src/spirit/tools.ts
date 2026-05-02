@@ -21,6 +21,23 @@ import { z } from "zod";
 import { spiritSkillsDir } from "./system-prompt.js";
 
 // ---------------------------------------------------------------------------
+// Strict tool type for Spirit — ADR-0038 CF-D (harness#283)
+// ---------------------------------------------------------------------------
+//
+// Spirit's tools must use `z.object(...)` for `parameters` because the MCP
+// transport (mcp-server.ts) unwraps `.shape` to construct MCP `inputSchema`.
+// We narrow the type at this consumer site rather than tightening the public
+// `ToolDefinition` in @murmurations-ai/llm — extension- and MCP-loaded tools
+// keep `parameters: unknown` because they may carry an ai-sdk `Schema<T>`
+// from `jsonSchema(...)` rather than a Zod object. Inline narrowing here
+// makes Spirit's invariant a compile error at the tool definition site
+// without breaking the broader contract.
+
+type SpiritTool = ToolDefinition & {
+  readonly parameters: z.ZodObject<z.ZodRawShape>;
+};
+
+// ---------------------------------------------------------------------------
 // Socket response shape shared with attach.ts
 // ---------------------------------------------------------------------------
 
@@ -83,10 +100,10 @@ const formatSocketResponse = (resp: SocketResponse): string => {
 // Tool definitions
 // ---------------------------------------------------------------------------
 
-export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] => {
+export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
   const { send, rootDir } = ctx;
 
-  const statusTool: ToolDefinition = {
+  const statusTool: SpiritTool = {
     name: "status",
     description:
       "Get the daemon's current status: version, PID, governance model, agent count, pending governance items, in-flight meetings.",
@@ -94,7 +111,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     execute: async () => formatSocketResponse(await send("status")),
   };
 
-  const agentsTool: ToolDefinition = {
+  const agentsTool: SpiritTool = {
     name: "agents",
     description:
       "List registered agents with their state (idle/running/failed), total wakes, total artifacts, idle-wake rate, and group memberships.",
@@ -102,7 +119,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     execute: async () => formatSocketResponse(await send("agents.list")),
   };
 
-  const groupsTool: ToolDefinition = {
+  const groupsTool: SpiritTool = {
     name: "groups",
     description:
       "List groups with member counts. Use when the operator asks about circles, teams, or group structure.",
@@ -110,7 +127,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     execute: async () => formatSocketResponse(await send("groups.list")),
   };
 
-  const eventsTool: ToolDefinition = {
+  const eventsTool: SpiritTool = {
     name: "events",
     description:
       "Fetch recent daemon events (wake fires, governance transitions, meeting completions). Use for diagnosing why something did or didn't happen.",
@@ -130,7 +147,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     },
   };
 
-  const readFileTool: ToolDefinition = {
+  const readFileTool: SpiritTool = {
     name: "read_file",
     description:
       "Read a file in the murmuration root. Use for inspecting agent souls, role.md, harness.yaml, group docs, meeting minutes, etc. Paths are relative to the murmuration root. `.env*` files are blocked.",
@@ -149,7 +166,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     },
   };
 
-  const listDirTool: ToolDefinition = {
+  const listDirTool: SpiritTool = {
     name: "list_dir",
     description:
       "Enumerate entries in a directory under the murmuration root. Returns a simple list with `[dir]` or `[file]` markers.",
@@ -180,7 +197,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     },
   };
 
-  const loadSkillTool: ToolDefinition = {
+  const loadSkillTool: SpiritTool = {
     name: "load_skill",
     description:
       "Load a Spirit skill file by name (e.g. 'agent-anatomy', 'governance-models'). See the skills index in the system prompt for what's available.",
@@ -200,7 +217,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     },
   };
 
-  const wakeTool: ToolDefinition = {
+  const wakeTool: SpiritTool = {
     name: "wake",
     description:
       "Trigger an immediate wake for one agent. Equivalent to the operator typing `:wake <agent>`. Wakes are billable — use on clear operator intent.",
@@ -213,7 +230,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     },
   };
 
-  const directiveTool: ToolDefinition = {
+  const directiveTool: SpiritTool = {
     name: "directive",
     description:
       "Send a Source directive to an agent, a group, or all agents. Creates a coordination item that agents will see as a signal on their next wake.",
@@ -245,7 +262,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     },
   };
 
-  const conveneTool: ToolDefinition = {
+  const conveneTool: SpiritTool = {
     name: "convene",
     description:
       "Convene a group meeting. Triggers an LLM-backed meeting with real cost. Operator intent must be explicit.",
@@ -266,7 +283,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly ToolDefinition[] =>
     },
   };
 
-  const writeFileTool: ToolDefinition = {
+  const writeFileTool: SpiritTool = {
     name: "write_file",
     description:
       "Write content to a file in the murmuration root. Creates directories if they do not exist. Use for creating artifacts, drafting memories, or writing context files. Paths are relative to the murmuration root. Overwrites existing files.",

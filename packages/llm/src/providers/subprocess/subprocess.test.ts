@@ -452,6 +452,77 @@ describe("createSubscriptionCliClient — factory", () => {
     expect(client.capabilities().supportsToolUse).toBe(false);
   });
 
+  it("complete() rejects per-request `tools` with a validation error (CF-A, harness#282)", async () => {
+    // Per ADR-0038 acceptance: subscription-cli runs its own tool loop;
+    // per-request tools are silently dropped today. Fail loudly instead.
+    const client = createSubscriptionCliClient({
+      cli: "claude",
+      model: "test-model",
+      cliAdapter: mockAdapter,
+    });
+    const result = await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+      maxOutputTokens: 100,
+      tools: [
+        {
+          name: "noop",
+          description: "noop",
+          parameters: {},
+          execute: async () => Promise.resolve(null),
+        },
+      ],
+      maxSteps: 5,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("validation");
+    expect(result.error.message).toContain("Subscription-CLI does not honor");
+    expect(result.error.message).toContain("mcpConfigPath");
+  });
+
+  it("complete() rejects per-request `maxSteps > 1` with a validation error (CF-A)", async () => {
+    const client = createSubscriptionCliClient({
+      cli: "claude",
+      model: "test-model",
+      cliAdapter: mockAdapter,
+    });
+    const result = await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+      maxOutputTokens: 100,
+      maxSteps: 10,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("validation");
+  });
+
+  it("complete() accepts requests without tools/maxSteps (CF-A guard does not over-fire)", async () => {
+    const client = createSubscriptionCliClient({
+      cli: "claude",
+      model: "test-model",
+      cliAdapter: mockAdapter,
+    });
+    const result = await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+      maxOutputTokens: 100,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it("complete() accepts maxSteps=1 (the default; not a tool-loop request)", async () => {
+    const client = createSubscriptionCliClient({
+      cli: "claude",
+      model: "test-model",
+      cliAdapter: mockAdapter,
+    });
+    const result = await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+      maxOutputTokens: 100,
+      maxSteps: 1,
+    });
+    expect(result.ok).toBe(true);
+  });
+
   it("forwards bound model to buildFlags when request.model is unset", async () => {
     // Regression: runner/index.ts deliberately does not set request.model
     // (relies on bound model). Subprocess adapter must default it from

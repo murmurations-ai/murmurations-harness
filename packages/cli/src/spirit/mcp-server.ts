@@ -27,7 +27,6 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
 
 import { daemonRpc } from "../daemon-client.js";
 
@@ -77,21 +76,11 @@ export const runSpiritMcpServer = async (config: { readonly rootDir: string }): 
   );
 
   for (const tool of tools) {
-    // Each Spirit ToolDefinition has a Zod schema in `parameters`. The
-    // MCP SDK's registerTool wants a Zod raw shape (object's `.shape`)
-    // for inputSchema, so we extract it. All Spirit tools currently use
-    // z.object(...) at the top level, so this is safe; if a future
-    // tool uses a non-object schema, registerTool will reject it
-    // loudly at startup rather than silently misbehaving.
-    const shape =
-      tool.parameters instanceof z.ZodObject
-        ? (tool.parameters as z.ZodObject<z.ZodRawShape>).shape
-        : undefined;
-    if (shape === undefined) {
-      throw new Error(
-        `Spirit MCP server: tool "${tool.name}" parameters is not a z.object — cannot map to MCP inputSchema`,
-      );
-    }
+    // `buildSpiritTools()` returns `readonly SpiritTool[]` (CF-D, harness#283),
+    // where `parameters` is statically typed `z.ZodObject<z.ZodRawShape>`.
+    // The MCP SDK's registerTool wants the raw shape; we read it directly.
+    // Non-object schemas are a compile error at the tool definition site.
+    const shape = tool.parameters.shape;
 
     server.registerTool(
       tool.name,

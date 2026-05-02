@@ -24,6 +24,7 @@ import {
   LLMRateLimitError,
   LLMTransportError,
   LLMUnauthorizedError,
+  LLMValidationError,
 } from "../../errors.js";
 import type {
   LLMClientCapabilities,
@@ -94,6 +95,25 @@ export class SubprocessAdapter implements LLMAdapter {
     request: LLMRequest,
     options: ResolvedCallOptions,
   ): Promise<Result<LLMResponse, LLMClientError>> {
+    // ADR-0038 CF-A (harness#282): subscription-CLI runs its own tool loop
+    // via the vendor binary; per-request `tools` and `maxSteps` are not
+    // honored. Fail loudly here instead of silently dropping — silent
+    // drops are the regression class B5 detection (PR #240) was filed
+    // to catch. Tools must be configured at client construction via
+    // `mcpConfigPath` on `SubscriptionCliClientConfig` (see ADR-0038).
+    if ((request.tools?.length ?? 0) > 0 || (request.maxSteps ?? 1) > 1) {
+      return {
+        ok: false,
+        error: new LLMValidationError(
+          this.providerId,
+          `Subscription-CLI does not honor per-request tools or maxSteps. ` +
+            `Tools must be configured at client construction via mcpConfigPath ` +
+            `(see ADR-0038). Got ${String(request.tools?.length ?? 0)} tools, ` +
+            `maxSteps=${String(request.maxSteps ?? 1)}.`,
+          { requestUrl: `subprocess://${this.providerId}/${this.modelUsed}` },
+        ),
+      };
+    }
     const internal = await this.#runSubprocess(request, options.signal);
     if (internal.ok) {
       // Surface token counts to the cost hook for parity with VercelAdapter.
