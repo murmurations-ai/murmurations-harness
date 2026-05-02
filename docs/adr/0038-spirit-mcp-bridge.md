@@ -1,6 +1,6 @@
 # ADR-0038 — Spirit MCP Bridge for Subscription-CLI Tool Calls
 
-- **Status:** Accepted (with carry-forward conditions — see Acceptance below)
+- **Status:** Accepted (with carry-forward conditions — see Acceptance below; merge-blocker simplifications recorded 2026-05-01 19:58 PDT)
 - **Date:** 2026-05-01
 - **Decision-maker(s):** Source (Nori), Engineering Circle (consent round on EP #734, 2026-05-01)
 - **Driver:** Spirit must support `provider: subscription-cli` end-to-end (operator request, 2026-05-01) including its 9 harness-internal tools (status, agents, groups, events, read_file, list_dir, load_skill, wake, directive).
@@ -37,6 +37,25 @@ Carry-forward conditions split into merge-blockers and follow-ups.
 R1's intuitive "50–150 ms" estimate was right at p50 for claude/codex; p95 for claude exceeds it materially. Gemini's startup cost alone (~1 s p50) is operator-noticeable and relevant when Phase B brings gemini MCP support.
 
 **Source's verdict:** Treat ADR-0038 as Accepted; track CF-A/CF-C/CF-D as merge-blockers; file CF-B/CF-E/CF-F + CI/telemetry as separate harness issues.
+
+### Merge-blocker simplifications (2026-05-01)
+
+After the consent round, a typescript-runtime-agent wake produced ready-to-apply patches for CF-A/CF-C/CF-D. CF-D's patch was applied and reverted — it globally narrowed `parameters: unknown` → `z.ZodObject<...>`, which broke `packages/mcp/src/tool-loader.ts:128` where MCP-loaded external tools have `parameters: jsonSchema(...)` returning AI SDK `Schema<unknown>`. A three-agent independent review (architecture, security, simplicity) recommended simpler designs. Adopted:
+
+- **CF-A** — DROPPED the discriminated union. Replaced with a runtime fail-fast in `SubprocessAdapter.complete()`: subscription-CLI rejects per-request `tools` or `maxSteps > 1` with a typed `LLMValidationError`. Reviewers noted that "api-key vs subscription-cli" is the wrong discriminant axis (the durable distinction is tool-loop ownership, already captured by `LLMClientCapabilities.supportsToolUse`) and that the 6-file refactor with mode threading replicated what one runtime guard already does. ~5 lines + 4 tests instead of ~150 LOC.
+
+- **CF-D** — INLINED the type narrow at the consumer (`packages/cli/src/spirit/tools.ts`) instead of exporting a new public `ZodObjectToolDefinition`. `buildSpiritTools()` returns `readonly SpiritTool[]` where `SpiritTool extends ToolDefinition` with narrowed `parameters`. `mcp-server.ts` accepts the narrow type and accesses `.shape` directly; the runtime `instanceof` guard is removed for Spirit's path. MCP-loaded and extension tools keep base `ToolDefinition` with `parameters: unknown`. ~15 LOC.
+
+- **CF-C** — DROPPED. With CF-D's narrow in place, the only remaining bypass paths (`as` casts, extension-registered tools) don't apply to Spirit's hand-authored 9 tools. The existing runtime guard in `runSpiritMcpServer` (now removed for Spirit's path because the type guarantees it) was the defense-in-depth mechanism; CF-C was duplicative.
+
+Same operator-visible failure modes are closed (silent tool drop on subscription-cli; opaque schema-drift crashes for Spirit). ~30 LOC total instead of ~250 LOC. Reviewers' reports archived in commit `0d9c93a`. Implementation: commits `dfd120b` (Phase A) → `0d9c93a` (CF-A + CF-D simplified).
+
+Follow-ups filed:
+
+- harness#286 — Tool description sanitization in `tool-loader.ts` (security: external MCP tool descriptions are passed unsanitized to the model — prompt-injection vector)
+- harness#287 — Bind tool-loop ownership on `LLMClient` construction (phantom type / branded property; cost-attribution correctness)
+- harness#288 — Consolidate `packages/core/src/extensions/types.ts:9` duplicate `ToolDefinition` with the canonical one in `@murmurations-ai/llm`
+- harness#289 — `ToolInputSchema` unifying abstraction (would unify Zod ↔ MCP ↔ Vercel translations; deferred — surfaced as latent design)
 
 ## Context
 
