@@ -81,6 +81,7 @@ import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
 import { buildGithubReadToolsForAgent } from "./github-tools/index.js";
+import type { HarnessLLMConfig } from "./harness-config.js";
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 import { registerRunningSocket, unregisterRunningSocket } from "./running-sessions.js";
@@ -345,6 +346,12 @@ interface BuildAgentClientsArgs {
   readonly costBuilder?: WakeCostBuilder;
   readonly dryRun: boolean;
   readonly ollamaBaseUrl: string | undefined;
+  /** Harness-level LLM defaults (harness.yaml `llm:`). Used as fallback
+   *  when an agent's role.md doesn't pin a value — e.g. the harness sets
+   *  `llm.cli: claude` and individual agents inherit unless they override.
+   *  Closes harness#271 (agent compose silently fell back to a placeholder
+   *  stub when `cli` was set only at harness.yaml level). */
+  readonly harnessLlm: HarnessLLMConfig;
   /** Optional logger so the cost hook can emit `daemon.cost.pricing.unknown`
    *  warns when a model isn't in the pricing catalog (harness#251). */
   readonly logger?: { warn: (event: string, fields?: Record<string, unknown>) => void };
@@ -371,6 +378,7 @@ const buildAgentClients = ({
   costBuilder,
   dryRun,
   ollamaBaseUrl,
+  harnessLlm,
   logger,
 }: BuildAgentClientsArgs): BuildAgentClientsResult => {
   const result: {
@@ -384,14 +392,21 @@ const buildAgentClients = ({
     // ADR-0034: subscription-CLI provider family bypasses the registry
     // because it spawns a subprocess, not a Vercel LanguageModel.
     if (agent.llm.provider === "subscription-cli") {
-      const cli = agent.llm.cli;
+      // harness#271: agent's role.md cli takes precedence; fall back to
+      // harness.yaml's llm.cli when the agent doesn't pin one. Without
+      // this fallback, an operator who sets `llm.cli: claude` at the
+      // harness level and inherits it across all agents would see every
+      // agent silently downgrade to the placeholder stub.
+      const cli = agent.llm.cli ?? harnessLlm.cli;
       if (cli !== "claude" && cli !== "gemini" && cli !== "codex") {
-        result.llmSkipReason = `provider "subscription-cli" requires llm.cli: claude | gemini | codex`;
+        result.llmSkipReason = `provider "subscription-cli" requires llm.cli: claude | gemini | codex (set on agent role.md llm.cli, or fall back via harness.yaml llm.cli)`;
       } else {
         const costHook = costBuilder ? makeDaemonHook(costBuilder, logger) : undefined;
+        // Same fallback shape for model: agent override → harness default → empty
+        const model = agent.llm.model ?? harnessLlm.model ?? "";
         result.llm = createSubscriptionCliClient({
           cli,
-          model: agent.llm.model ?? "",
+          model,
           ...(agent.llm.timeoutMs !== undefined ? { timeoutMs: agent.llm.timeoutMs } : {}),
           ...(agent.llm.permissionMode !== undefined
             ? { permissionMode: agent.llm.permissionMode }
@@ -1169,6 +1184,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       providerRegistry,
       dryRun,
       ollamaBaseUrl,
+      harnessLlm: config.llm,
     });
 
     if (agent.llm && validation.llmSkipReason) {
@@ -1322,6 +1338,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               costBuilder,
               dryRun,
               ollamaBaseUrl,
+              harnessLlm: config.llm,
               logger,
             });
             const firstBranchScope = capturedAgent.githubWriteScopes.branchCommits[0];
