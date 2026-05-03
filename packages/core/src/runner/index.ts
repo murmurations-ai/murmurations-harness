@@ -391,14 +391,27 @@ export function createDefaultRunner(
     //     regression 2026-04-30: 7 tools threaded via the API but
     //     tool_calls: 0 across Gemini and Anthropic because the prompt
     //     never told the LLM the tools existed (Boundary 5 root cause).
+    //
+    // When the bound client reports `supportsToolUse: false`
+    // (subscription-CLI family, ADR-0034 / ADR-0038), per-request
+    // tool delivery is disabled. The prompt must NOT advertise tools
+    // the agent can't actually call — doing so produces the
+    // narrative-only-claim regression observed across May 1's
+    // engineering circle wakes (5 of 6 raised this as a TENSION).
+    // We collapse to the "_None._" fallback in that case so the
+    // agent stays text-only and routes capability gaps through
+    // GOVERNANCE_EVENT instead of pretending to call missing tools.
+    const supportsRequestTools = clients.llm.capabilities().supportsToolUse;
+    const mcpConfigs = supportsRequestTools ? (spawn.mcpServerConfigs ?? []) : [];
     const allTools: RunnerToolDefinition[] = [];
-    if (options.extensionTools && options.extensionTools.length > 0) {
-      allTools.push(...options.extensionTools);
-    }
-    const mcpConfigs = spawn.mcpServerConfigs ?? [];
-    if (clients.mcpToolLoader && mcpConfigs.length > 0) {
-      const mcpTools = await clients.mcpToolLoader.loadTools(mcpConfigs, spawn.environment);
-      allTools.push(...mcpTools);
+    if (supportsRequestTools) {
+      if (options.extensionTools && options.extensionTools.length > 0) {
+        allTools.push(...options.extensionTools);
+      }
+      if (clients.mcpToolLoader && mcpConfigs.length > 0) {
+        const mcpTools = await clients.mcpToolLoader.loadTools(mcpConfigs, spawn.environment);
+        allTools.push(...mcpTools);
+      }
     }
     const tools: RunnerToolDefinition[] | undefined = allTools.length > 0 ? allTools : undefined;
 
@@ -500,7 +513,9 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
     // bound client doesn't support it. Tools that need to reach a
     // subscription-CLI agent must be configured via mcpConfigPath at
     // client construction (boot.ts wiring, harness#291).
-    const supportsRequestTools = clients.llm.capabilities().supportsToolUse;
+    // `supportsRequestTools` was computed at section 7a so the prompt-
+    // building stage could honor the same gate. Reused here for the
+    // request-side spread.
     const passToolsOnRequest = supportsRequestTools && tools !== undefined && tools.length > 0;
     let result: Awaited<ReturnType<NonNullable<DefaultRunnerClients["llm"]>["complete"]>>;
     try {

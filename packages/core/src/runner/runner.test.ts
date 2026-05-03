@@ -220,22 +220,21 @@ describe("createDefaultRunner", () => {
     // through the Spirit MCP bridge at construction time, not on the
     // per-request wire. Passing `request.tools` regardless trips
     // CF-A's fail-loudly guard in SubprocessAdapter.complete(). The
-    // runner consults `capabilities().supportsToolUse` and skips the
-    // request-side spread when false.
+    // runner consults `capabilities().supportsToolUse` and:
+    //   1. skips MCP loadTools (no point paying the startup cost)
+    //   2. omits tools/maxSteps from the request payload
+    // The system prompt's "Tools you can call this wake" section
+    // collapses to "_None._" via the existing fallback, so the agent
+    // doesn't get told about tools it can't actually call.
     const runner = createDefaultRunner("test-agent", [], {}, rootDir);
     const llm = makeLlmClient("Text-only wake.", { supportsToolUse: false });
 
-    const loadedTools: RunnerToolDefinition[] = [
-      {
-        name: "fs__read_file",
-        description: "Read a file",
-        parameters: {},
-        execute: () => Promise.resolve("file contents"),
-      },
-    ];
-
+    let loadToolsCalled = false;
     const mcpToolLoader: NonNullable<DefaultRunnerClients["mcpToolLoader"]> = {
-      loadTools: () => Promise.resolve(loadedTools),
+      loadTools: () => {
+        loadToolsCalled = true;
+        return Promise.resolve([]);
+      },
       close: () => Promise.resolve(),
     };
 
@@ -244,6 +243,8 @@ describe("createDefaultRunner", () => {
     });
 
     await runner({ spawn, clients: { llm, mcpToolLoader } });
+
+    expect(loadToolsCalled).toBe(false);
 
     const llmCalls = (llm as unknown as { _calls: { tools?: unknown; maxSteps?: number }[] })
       ._calls;
