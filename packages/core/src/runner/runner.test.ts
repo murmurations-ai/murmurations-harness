@@ -216,7 +216,7 @@ describe("createDefaultRunner", () => {
   });
 
   it("does not pass tools/maxSteps to LLM when client reports supportsToolUse=false (subscription-CLI gate, ADR-0034 / ADR-0038)", async () => {
-    // Regression: harness#286. Subscription-CLI clients route tools
+    // Regression: harness#291. Subscription-CLI clients route tools
     // through the Spirit MCP bridge at construction time, not on the
     // per-request wire. Passing `request.tools` regardless trips
     // CF-A's fail-loudly guard in SubprocessAdapter.complete(). The

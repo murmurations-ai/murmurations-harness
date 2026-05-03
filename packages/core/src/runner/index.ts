@@ -499,7 +499,7 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
     // honors the contract: skip the request-side spread when the
     // bound client doesn't support it. Tools that need to reach a
     // subscription-CLI agent must be configured via mcpConfigPath at
-    // client construction (boot.ts wiring, harness#286).
+    // client construction (boot.ts wiring, harness#291).
     const supportsRequestTools = clients.llm.capabilities().supportsToolUse;
     const passToolsOnRequest = supportsRequestTools && tools !== undefined && tools.length > 0;
     let result: Awaited<ReturnType<NonNullable<DefaultRunnerClients["llm"]>["complete"]>>;
