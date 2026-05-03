@@ -1,6 +1,6 @@
 {
   "name": "@murmurations-ai/secrets-dotenv",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "Default SecretsProvider for the Murmuration Harness — reads from a .env file at the murmuration root.",
   "license": "MIT",
   "author": "Murmuration Harness Contributors",
