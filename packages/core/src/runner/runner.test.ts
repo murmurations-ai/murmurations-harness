@@ -80,7 +80,10 @@ const makeSpawn = (overrides: Partial<AgentSpawnContext> = {}): AgentSpawnContex
   ...overrides,
 });
 
-const makeLlmClient = (responseContent: string): NonNullable<DefaultRunnerClients["llm"]> => {
+const makeLlmClient = (
+  responseContent: string,
+  capabilities: { readonly supportsToolUse: boolean } = { supportsToolUse: true },
+): NonNullable<DefaultRunnerClients["llm"]> => {
   const calls: unknown[] = [];
   return {
     complete: (opts: Record<string, unknown>) => {
@@ -95,6 +98,7 @@ const makeLlmClient = (responseContent: string): NonNullable<DefaultRunnerClient
         },
       });
     },
+    capabilities: () => capabilities,
     _calls: calls,
   } as NonNullable<DefaultRunnerClients["llm"]> & { _calls: unknown[] };
 };
@@ -211,6 +215,43 @@ describe("createDefaultRunner", () => {
     expect(llmCalls[0]?.maxSteps).toBe(256);
   });
 
+  it("does not pass tools/maxSteps to LLM when client reports supportsToolUse=false (subscription-CLI gate, ADR-0034 / ADR-0038)", async () => {
+    // Regression: harness#286. Subscription-CLI clients route tools
+    // through the Spirit MCP bridge at construction time, not on the
+    // per-request wire. Passing `request.tools` regardless trips
+    // CF-A's fail-loudly guard in SubprocessAdapter.complete(). The
+    // runner consults `capabilities().supportsToolUse` and skips the
+    // request-side spread when false.
+    const runner = createDefaultRunner("test-agent", [], {}, rootDir);
+    const llm = makeLlmClient("Text-only wake.", { supportsToolUse: false });
+
+    const loadedTools: RunnerToolDefinition[] = [
+      {
+        name: "fs__read_file",
+        description: "Read a file",
+        parameters: {},
+        execute: () => Promise.resolve("file contents"),
+      },
+    ];
+
+    const mcpToolLoader: NonNullable<DefaultRunnerClients["mcpToolLoader"]> = {
+      loadTools: () => Promise.resolve(loadedTools),
+      close: () => Promise.resolve(),
+    };
+
+    const spawn = makeSpawn({
+      mcpServerConfigs: [{ name: "fs", command: "npx", args: ["-y", "mcp-fs"] }],
+    });
+
+    await runner({ spawn, clients: { llm, mcpToolLoader } });
+
+    const llmCalls = (llm as unknown as { _calls: { tools?: unknown; maxSteps?: number }[] })
+      ._calls;
+    expect(llmCalls).toHaveLength(1);
+    expect(llmCalls[0]?.tools).toBeUndefined();
+    expect(llmCalls[0]?.maxSteps).toBeUndefined();
+  });
+
   it("does not load tools when no mcpServerConfigs", async () => {
     const runner = createDefaultRunner("test-agent", [], {}, rootDir);
     const llm = makeLlmClient("No tools needed.");
@@ -241,6 +282,7 @@ describe("createDefaultRunner", () => {
           ok: false as const,
           error: { code: "INTERNAL", message: "LLM exploded" },
         }),
+      capabilities: () => ({ supportsToolUse: true }),
     };
 
     let closeWasCalled = false;
@@ -279,6 +321,7 @@ describe("createDefaultRunner", () => {
             modelUsed: "test-model",
           },
         }),
+      capabilities: () => ({ supportsToolUse: true }),
     };
 
     const result = await runner({
