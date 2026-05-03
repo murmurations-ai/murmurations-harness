@@ -173,9 +173,20 @@ export class SubprocessAdapter implements LLMAdapter {
       let child: ReturnType<typeof spawn>;
       try {
         // Array argv only. Never shell:true. Prompt is NOT in flags (D1).
+        //
+        // detached:true puts the child in its own process group on
+        // POSIX (PGID == PID). Combined with `process.kill(-pid, SIG)`
+        // in killTree() below, this lets us signal the CLI AND any
+        // helper processes it spawns. Without this, SIGKILL only kills
+        // the immediate child — if that child is a node wrapper (claude
+        // is `node /…/claude`) or has spawned helpers, those linger.
+        // Live evidence (2026-05-03 verification wake): claude-cli
+        // lingered ~5min past SIGKILL because helper subprocesses
+        // ignored the parent's death (D10).
         child = spawn(this.#cli.command, flags, {
           stdio: ["pipe", "pipe", "pipe"],
           shell: false,
+          detached: true,
         });
       } catch (err) {
         settle({
@@ -216,20 +227,37 @@ export class SubprocessAdapter implements LLMAdapter {
         stderr += chunk.toString("utf8");
       });
 
-      // Wall-clock timeout (D4): SIGTERM after timeoutMs, SIGKILL after grace.
-      const termTimer = setTimeout(() => {
-        timedOut = true;
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          /* already exited */
+      // killTree(): signal the entire process group, not just the
+      // immediate child. Required because `detached:true` on spawn
+      // gave the child its own PGID; without group-targeted kill,
+      // descendants survive (the D10 lingering-claude case).
+      // `process.kill(-pgid, sig)` is the POSIX idiom; on platforms
+      // where PGID isn't reliable we fall back to `child.kill()`.
+      const killTree = (signal: "SIGTERM" | "SIGKILL"): void => {
+        const pid = child.pid;
+        if (pid === undefined) {
+          // Child never started cleanly; nothing to signal.
+          return;
         }
-        setTimeout(() => {
+        try {
+          process.kill(-pid, signal);
+        } catch {
+          // -pid path failed (already-exited group, or POSIX limitation).
+          // Fall through to direct child kill so we still send the signal.
           try {
-            child.kill("SIGKILL");
+            child.kill(signal);
           } catch {
             /* already exited */
           }
+        }
+      };
+
+      // Wall-clock timeout (D4): SIGTERM after timeoutMs, SIGKILL after grace.
+      const termTimer = setTimeout(() => {
+        timedOut = true;
+        killTree("SIGTERM");
+        setTimeout(() => {
+          killTree("SIGKILL");
           // D10: prevent zombies — let event loop exit even if child lingers.
           child.unref();
         }, this.#killGraceMs);
@@ -239,17 +267,9 @@ export class SubprocessAdapter implements LLMAdapter {
       const onAbort = (): void => {
         timedOut = true;
         clearTimeout(termTimer);
-        try {
-          child.kill("SIGTERM");
-        } catch {
-          /* already exited */
-        }
+        killTree("SIGTERM");
         setTimeout(() => {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            /* already exited */
-          }
+          killTree("SIGKILL");
           child.unref();
         }, this.#killGraceMs);
       };
