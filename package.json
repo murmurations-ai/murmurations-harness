@@ -1,6 +1,6 @@
 {
   "name": "murmurations-harness-monorepo",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "private": true,
   "description": "Murmuration Harness — coordination and agent runtime layer for human-agent murmurations with pluggable governance. Monorepo root.",
   "license": "MIT",

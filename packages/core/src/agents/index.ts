@@ -56,6 +56,22 @@ export interface AgentRecord {
   readonly idleWakes: number;
   readonly currentWakeId: string | null;
   readonly currentWakeStartedAt: string | null; // ISO
+  /**
+   * SHA-256 of the wake context that was passed to the executor on
+   * the most recent **fired** wake (skipped wakes don't update this).
+   * Idle-wake skip (harness#297) compares this against the about-to-
+   * be-fired context to decide whether the LLM call is redundant.
+   * `null` if no wake has fired yet.
+   */
+  readonly lastFiredContextHash: string | null;
+  /**
+   * Number of consecutive idle-wake skips since the last actual fire.
+   * Counted separately from {@link idleWakes} (which counts wakes the
+   * runner judged ineffective). Bounded growth: at some threshold the
+   * daemon force-fires anyway to guard against indefinite skipping
+   * (see `MAX_IDLE_SKIP_STREAK` in daemon).
+   */
+  readonly idleSkipStreak: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +87,19 @@ export interface IAgentStateStore {
     outcome: WakeOutcome,
     options?: { errorMessage?: string; costMicros?: number; artifactCount?: number },
   ): void;
+  /**
+   * Record the context hash for a wake that DID fire (the LLM ran).
+   * Called by the daemon after `executor.spawn` so the next cron tick
+   * can compare against it for idle-wake skip (harness#297). Resets
+   * `idleSkipStreak` to 0.
+   */
+  recordFiredContextHash(agentId: string, contextHash: string): void;
+  /**
+   * Record an idle-wake skip — the daemon decided not to fire the LLM
+   * because the context hash matched the last fire and the last
+   * outcome was successful. Increments `idleSkipStreak`.
+   */
+  recordIdleSkip(agentId: string): void;
   getAgent(agentId: string): AgentRecord | undefined;
   getAllAgents(): readonly AgentRecord[];
   getRecentWakes(agentId: string, limit?: number): readonly AgentWakeInstance[];
@@ -125,7 +154,17 @@ export class AgentStateStore implements IAgentStateStore {
       };
       if (data.agents) {
         for (const [id, record] of Object.entries(data.agents)) {
-          this.#agents.set(id, record);
+          // Backfill fields added after this state.json was first written
+          // so older operator state files still load. We re-type the
+          // entry as Partial because on-disk state may be older than
+          // the current AgentRecord shape — fields added in newer
+          // releases will be missing from older state.json files.
+          const partial = record as Partial<AgentRecord>;
+          this.#agents.set(id, {
+            ...record,
+            lastFiredContextHash: partial.lastFiredContextHash ?? null,
+            idleSkipStreak: partial.idleSkipStreak ?? 0,
+          });
         }
       }
       if (data.wakes) {
@@ -166,6 +205,8 @@ export class AgentStateStore implements IAgentStateStore {
       idleWakes: 0,
       currentWakeId: null,
       currentWakeStartedAt: null,
+      lastFiredContextHash: null,
+      idleSkipStreak: 0,
     });
     if (!this.#wakesByAgent.has(agentId)) {
       this.#wakesByAgent.set(agentId, []);
@@ -278,6 +319,39 @@ export class AgentStateStore implements IAgentStateStore {
         currentWakeStartedAt: null,
       });
     }
+    void this.#persist();
+  }
+
+  /**
+   * Record the context hash for a wake that DID fire (LLM invoked).
+   * Resets `idleSkipStreak` to 0 since this counts as fresh activity.
+   */
+  public recordFiredContextHash(agentId: string, contextHash: string): void {
+    this.#guardWrite("recordFiredContextHash");
+    const agent = this.#agents.get(agentId);
+    if (!agent) return;
+    this.#agents.set(agentId, {
+      ...agent,
+      lastFiredContextHash: contextHash,
+      idleSkipStreak: 0,
+    });
+    void this.#persist();
+  }
+
+  /**
+   * Record an idle-wake skip — the daemon decided not to fire the LLM
+   * because the context hash matched the last fire and the prior wake
+   * succeeded. Increments `idleSkipStreak` so the daemon can choose to
+   * force-fire after a configured number of consecutive skips.
+   */
+  public recordIdleSkip(agentId: string): void {
+    this.#guardWrite("recordIdleSkip");
+    const agent = this.#agents.get(agentId);
+    if (!agent) return;
+    this.#agents.set(agentId, {
+      ...agent,
+      idleSkipStreak: agent.idleSkipStreak + 1,
+    });
     void this.#persist();
   }
 

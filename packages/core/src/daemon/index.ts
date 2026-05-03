@@ -11,7 +11,7 @@
  * Spec §4 architecture diagram, §15 Phase 1 gate.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { resolve, dirname } from "node:path";
 import cronParser from "cron-parser";
 import { formatUSDMicros } from "../cost/usd.js";
@@ -63,6 +63,46 @@ import {
 
 /** Circuit breaker: skip wakes after this many consecutive failures. */
 const CIRCUIT_BREAKER_THRESHOLD = 3;
+
+/**
+ * Idle-wake skip ceiling. After this many consecutive skips (context
+ * unchanged + last wake successful), force-fire on the next trigger
+ * regardless of hash match. Guards against indefinite skipping if a
+ * signal change is somehow invisible to the hash (e.g., upstream
+ * agent's digest changed but the bundle hash stayed identical).
+ *
+ * 12 = roughly an hour at the typical 5min cron cadence — long enough
+ * to see real cost wins, short enough to surface staleness.
+ */
+const MAX_IDLE_SKIP_STREAK = 12;
+
+/**
+ * Hash the wake context's stable shape for idle-wake skip (harness#297).
+ * Captures everything that should cause the LLM to behave differently
+ * across wakes:
+ *   - all signal fields except `fetchedAt` (which is just Date.now()
+ *     on each aggregation and would defeat any cache hit)
+ *   - action items
+ *   - signal warnings (a new transport error ought to fire a wake)
+ *   - identity frontmatter (catches role.md / soul edits between wakes)
+ *
+ * Volatile fields (wakeId, fetchedAt) are excluded so a cron tick on
+ * unchanged content produces the same hash as the prior tick.
+ */
+const stripVolatile = <T extends { fetchedAt?: unknown }>(obj: T): Omit<T, "fetchedAt"> => {
+  const { fetchedAt: _drop, ...rest } = obj;
+  return rest;
+};
+
+const hashWakeContext = (context: AgentSpawnContext): string => {
+  const sig = {
+    signals: context.signals.signals.map(stripVolatile),
+    actionItems: context.signals.actionItems.map(stripVolatile),
+    warnings: context.signals.warnings,
+    identity: context.identity.frontmatter,
+  };
+  return createHash("sha256").update(JSON.stringify(sig)).digest("hex");
+};
 
 // ---------------------------------------------------------------------------
 // Agent registry (Phase 1A: hardcoded inline; Phase 1B: loaded from disk)
@@ -719,6 +759,42 @@ export class Daemon {
     // injection needed. Agents see directives as github-issue signals
     // with the "source-directive" label and respond in their wake output.
 
+    // Idle-wake skip (harness#297): if the bound context hashes equal
+    // to what we fired last time AND the last wake succeeded AND we
+    // haven't been skipping for too long, drop the LLM call entirely.
+    // The hash captures signal IDs + their updatedAt + action items +
+    // identity frontmatter, so any meaningful change forces a fire.
+    // Manual triggers (`--now`, scheduler kind === "manual") always
+    // fire — operators expect that override to actually run.
+    const contextHash = hashWakeContext(context);
+    const isManualTrigger = event.wakeReason.kind === "manual";
+    if (this.#agentStateStore && !isManualTrigger) {
+      const record = this.#agentStateStore.getAgent(agent.agentId);
+      // The first guard is `record?.lastFiredContextHash === contextHash`,
+      // which short-circuits when record is undefined (?. yields undefined,
+      // never equal to a string hash). Once that passes, `record` is
+      // narrowed to defined and the rest of the conditions can use plain
+      // dot access without `?.` (TS no-unnecessary-condition).
+      if (
+        record?.lastFiredContextHash === contextHash &&
+        record.lastOutcome === "success" &&
+        record.idleSkipStreak < MAX_IDLE_SKIP_STREAK
+      ) {
+        this.#agentStateStore.recordIdleSkip(agent.agentId);
+        this.#logger.info("daemon.wake.skipped", {
+          agentId: agent.agentId,
+          wakeId: event.wakeId.value,
+          reason: "idle",
+          contextHash,
+          idleSkipStreak: record.idleSkipStreak + 1,
+          maxIdleSkipStreak: MAX_IDLE_SKIP_STREAK,
+          lastFiredAt: record.lastWokenAt,
+          signalCount: context.signals.signals.length,
+        });
+        return;
+      }
+    }
+
     this.#logger.info("daemon.wake.fire", {
       agentId: agent.agentId,
       wakeId: event.wakeId.value,
@@ -729,6 +805,9 @@ export class Daemon {
 
     try {
       this.#agentStateStore?.transition(agent.agentId, "waking", event.wakeId.value);
+      // Record the hash on fire (not on skip — keeps the comparator
+      // anchored to the last actually-LLM-processed context).
+      this.#agentStateStore?.recordFiredContextHash(agent.agentId, contextHash);
       const handle = await this.#executor.spawn(context);
       this.#agentStateStore?.transition(agent.agentId, "running", event.wakeId.value);
       const result = await this.#executor.waitForCompletion(handle);
