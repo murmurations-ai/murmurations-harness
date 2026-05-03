@@ -85,6 +85,7 @@ import type { HarnessLLMConfig } from "./harness-config.js";
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 import { registerRunningSocket, unregisterRunningSocket } from "./running-sessions.js";
+import { writeSpiritMcpConfig } from "./spirit/mcp-config.js";
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
@@ -352,6 +353,15 @@ interface BuildAgentClientsArgs {
    *  Closes harness#271 (agent compose silently fell back to a placeholder
    *  stub when `cli` was set only at harness.yaml level). */
   readonly harnessLlm: HarnessLLMConfig;
+  /** Murmuration root directory (the operator's `<root>` containing
+   *  `murmuration/`, `agents/`, etc.). Required for subscription-CLI
+   *  agents on the claude-cli path because the Spirit MCP config gets
+   *  written under `<rootDir>/.murmuration/spirit-mcp.json` and the
+   *  spawned `mcp-bin.js` reads `MURMURATION_ROOT` from this path to
+   *  attach to the daemon socket. Closes harness#291 — without this
+   *  wiring, daemon-spawned subscription-CLI wakes ran text-only with
+   *  no tool surface, while the Spirit interactive REPL had it. */
+  readonly rootDir: string;
   /** Optional logger so the cost hook can emit `daemon.cost.pricing.unknown`
    *  warns when a model isn't in the pricing catalog (harness#251). */
   readonly logger?: { warn: (event: string, fields?: Record<string, unknown>) => void };
@@ -379,6 +389,7 @@ const buildAgentClients = ({
   dryRun,
   ollamaBaseUrl,
   harnessLlm,
+  rootDir,
   logger,
 }: BuildAgentClientsArgs): BuildAgentClientsResult => {
   const result: {
@@ -404,6 +415,15 @@ const buildAgentClients = ({
         const costHook = costBuilder ? makeDaemonHook(costBuilder, logger) : undefined;
         // Same fallback shape for model: agent override → harness default → empty
         const model = agent.llm.model ?? harnessLlm.model ?? "";
+        // harness#291: wire Spirit MCP config so daemon-spawned claude-cli
+        // agents can call harness-internal tools (status, agents, wake, ...)
+        // through the same MCP bridge the interactive REPL uses (ADR-0038
+        // Phase A). Without this, daemon wakes ran text-only — every EP
+        // engineering wake on May 1 staged inline analysis instead of
+        // posting to GitHub. Codex/gemini fall through (no `--mcp-config`
+        // analogue today) and remain text-only until per-CLI MCP support
+        // lands.
+        const mcpConfigPath = cli === "claude" ? writeSpiritMcpConfig(rootDir) : undefined;
         result.llm = createSubscriptionCliClient({
           cli,
           model,
@@ -411,6 +431,7 @@ const buildAgentClients = ({
           ...(agent.llm.permissionMode !== undefined
             ? { permissionMode: agent.llm.permissionMode }
             : {}),
+          ...(mcpConfigPath !== undefined ? { mcpConfigPath } : {}),
           ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
         });
       }
@@ -1185,6 +1206,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       dryRun,
       ollamaBaseUrl,
       harnessLlm: config.llm,
+      rootDir: exampleRoot,
     });
 
     if (agent.llm && validation.llmSkipReason) {
@@ -1339,6 +1361,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               dryRun,
               ollamaBaseUrl,
               harnessLlm: config.llm,
+              rootDir: exampleRoot,
               logger,
             });
             const firstBranchScope = capturedAgent.githubWriteScopes.branchCommits[0];

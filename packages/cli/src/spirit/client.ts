@@ -10,9 +10,8 @@
  * detach drops it.
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 import { makeSecretKey, makeSecretValue, type SecretValue } from "@murmurations-ai/core";
 import {
@@ -34,6 +33,7 @@ import {
   type SubscriptionCliPermissionMode,
   type SubscriptionCli,
 } from "../harness-config.js";
+import { writeSpiritMcpConfig } from "./mcp-config.js";
 import { buildSpiritSystemPrompt } from "./system-prompt.js";
 import { buildSpiritTools } from "./tools.js";
 
@@ -107,37 +107,6 @@ const PRICING: Record<LLMProvider, { readonly input: number; readonly output: nu
   openai: { input: 2.5, output: 10.0 },
   ollama: { input: 0, output: 0 },
   "subscription-cli": { input: 0, output: 0 },
-};
-
-/**
- * Write Spirit's MCP config so the subscription CLI exposes harness-internal
- * tools (status, agents, wake, directive, etc.) to its tool loop. The CLI
- * spawns `node <mcp-bin.js>` with `MURMURATION_ROOT` set to the murmuration
- * root; the spawned process attaches to the daemon socket and serves Spirit's
- * tools over MCP stdio.
- *
- * Returns the absolute path to the written config so the caller can pass it
- * via `--mcp-config <path>` (claude). Codex/gemini support is a follow-up.
- */
-const writeSpiritMcpConfig = (rootDir: string): string => {
-  const configDir = join(rootDir, ".murmuration");
-  mkdirSync(configDir, { recursive: true });
-  const configPath = join(configDir, "spirit-mcp.json");
-
-  const here = dirname(fileURLToPath(import.meta.url));
-  const mcpBinPath = join(here, "mcp-bin.js");
-
-  const config = {
-    mcpServers: {
-      "murmuration-spirit": {
-        command: "node",
-        args: [mcpBinPath],
-        env: { MURMURATION_ROOT: rootDir },
-      },
-    },
-  };
-  writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
-  return configPath;
 };
 
 /** Resolve the API key for a provider. Reads `<rootDir>/.env` first,
