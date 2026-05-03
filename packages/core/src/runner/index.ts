@@ -107,6 +107,16 @@ export interface DefaultRunnerClients {
           error: { code: string; message: string };
         }
     >;
+    /**
+     * Reports the bound client's tool-delivery contract. The runner
+     * consults `supportsToolUse` before spreading `request.tools` —
+     * subscription-CLI clients (ADR-0034, ADR-0038) report `false`
+     * because tools reach those clients via Spirit MCP at construction
+     * time, not on the per-request wire. Only the field the runner
+     * reads is declared here; the underlying `LLMClient` interface
+     * surfaces more.
+     */
+    capabilities(): { readonly supportsToolUse: boolean };
   };
   /** MCP tool loader — connects to MCP servers and returns tool definitions. */
   readonly mcpToolLoader?: {
@@ -479,6 +489,19 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
     // the one provider it actually applied to (balanced → flash, not
     // pro). The actual model used in the wake is reported back via
     // `result.value.modelUsed` and logged below.
+    //
+    // Tool delivery is gated on the client's reported capability. The
+    // subscription-CLI provider family (ADR-0034, ADR-0038) reports
+    // `supportsToolUse: false` because tools reach those clients via
+    // the Spirit MCP bridge at construction time, not via the per-
+    // request wire. Passing `tools` regardless would trip the CF-A
+    // fail-loudly guard in `SubprocessAdapter.complete()`. The runner
+    // honors the contract: skip the request-side spread when the
+    // bound client doesn't support it. Tools that need to reach a
+    // subscription-CLI agent must be configured via mcpConfigPath at
+    // client construction (boot.ts wiring, harness#291).
+    const supportsRequestTools = clients.llm.capabilities().supportsToolUse;
+    const passToolsOnRequest = supportsRequestTools && tools !== undefined && tools.length > 0;
     let result: Awaited<ReturnType<NonNullable<DefaultRunnerClients["llm"]>["complete"]>>;
     try {
       result = await clients.llm.complete(
@@ -487,7 +510,7 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
           systemPromptOverride: systemPrompt,
           maxOutputTokens: 16000,
           temperature: 0.3,
-          ...(tools && tools.length > 0 ? { tools, maxSteps: options.maxSteps ?? 256 } : {}),
+          ...(passToolsOnRequest ? { tools, maxSteps: options.maxSteps ?? 256 } : {}),
         },
         ...(signal ? [{ signal }] : []),
       );
