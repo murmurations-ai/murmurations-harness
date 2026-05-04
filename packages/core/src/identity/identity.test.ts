@@ -821,6 +821,70 @@ describe("examples/research-agent identity chain", () => {
 });
 
 // ---------------------------------------------------------------------------
+// v0.7.0 — examples/facilitator-agent reference implementation (ADR-0041)
+// ---------------------------------------------------------------------------
+
+describe("examples/facilitator-agent identity chain", () => {
+  const hereDir = dirname(fileURLToPath(import.meta.url));
+  // packages/core/src/identity → repo root → examples/facilitator-agent
+  const exampleRoot = resolve(hereDir, "..", "..", "..", "..", "examples", "facilitator-agent");
+
+  it("loads the facilitator-agent identity chain without errors", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("facilitator-agent");
+
+    expect(loaded.agentId.value).toBe("facilitator-agent");
+    expect(loaded.frontmatter.name).toBe("Facilitator Agent");
+    expect(loaded.frontmatter.group_memberships).toEqual(["facilitation"]);
+  });
+
+  it("parses the twice-daily wake schedule (07:00 + 18:00)", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("facilitator-agent");
+
+    expect(loaded.frontmatter.wake_schedule?.cron).toBe("0 7,18 * * *");
+  });
+
+  it("parses the four ADR-0042 accountabilities with done_when blocks", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("facilitator-agent");
+
+    const accountabilities = loaded.frontmatter.accountabilities;
+    expect(accountabilities).toBeDefined();
+    expect(accountabilities?.map((a) => a.id)).toEqual([
+      "advance-and-close-governance-items",
+      "decision-log",
+      "facilitator-log",
+      "awaiting-source-close-surfacing",
+    ]);
+    // Every accountability must have at least one done_when condition.
+    for (const acc of accountabilities ?? []) {
+      expect(acc.done_when.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("declares the closure-related label write scope", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("facilitator-agent");
+
+    const labels = loaded.frontmatter.github.write_scopes.labels;
+    expect(labels).toContain("awaiting:source-close");
+    expect(labels).toContain("verification-failed");
+  });
+
+  it("declares branch-commit scope for governance/decisions and agreements", async () => {
+    const loader = new IdentityLoader({ rootDir: exampleRoot });
+    const loaded = await loader.load("facilitator-agent");
+
+    const branchCommits = loaded.frontmatter.github.write_scopes.branch_commits;
+    expect(branchCommits).toHaveLength(1);
+    expect(branchCommits[0]?.paths).toEqual(
+      expect.arrayContaining(["governance/decisions/**", "governance/agreements/**"]),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ADR-0027 — Fallback identity for incomplete agent directories
 // ---------------------------------------------------------------------------
 
