@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { computeMetricsFromDisk } from "./metrics-cmd.js";
+import { computeMetricsFromDisk } from "@murmurations-ai/core";
 
 describe("computeMetricsFromDisk", () => {
   let dir = "";

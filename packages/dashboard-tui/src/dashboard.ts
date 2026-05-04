@@ -14,10 +14,12 @@ import {
   readRecentActivity,
   readGovernanceState,
   readCostSummary,
+  readMetricsSnapshot,
   type AgentStatus,
   type ActivityEntry,
   type GovernanceEntry,
   type CostSummary,
+  type MetricsSnapshot,
 } from "./data.js";
 
 // ---------------------------------------------------------------------------
@@ -293,6 +295,45 @@ const renderActivity = (entries: readonly ActivityEntry[]): string => {
 };
 
 // ---------------------------------------------------------------------------
+// Effectiveness metrics — 30-day window (Workstream K2)
+// ---------------------------------------------------------------------------
+
+const renderMetrics = (m: MetricsSnapshot): string => {
+  const lines = [` ${bold("Effectiveness")} ${dim(`(last ${String(m.windowDays)}d)`)}`, ` ${HR}`];
+  const agg = m.aggregate;
+  if (agg.totalWakes === 0) {
+    lines.push(`  ${dim("No wake records yet — start the daemon for metrics.")}`);
+    return lines.join("\n");
+  }
+
+  const aggRate = (agg.completionRate * 100).toFixed(1);
+  const aggCostUsd = (agg.totalCostMicros / 1_000_000).toFixed(2);
+  const rateColor = agg.completionRate >= 0.9 ? green : agg.completionRate >= 0.7 ? yellow : red;
+  lines.push(
+    `  ${bold("Wakes:")} ${String(agg.totalWakes)}  ${bold("Completed:")} ${rateColor(`${aggRate}%`)}  ${bold("Spend:")} $${aggCostUsd}`,
+  );
+
+  if (m.accountabilityMetRates.length > 0) {
+    lines.push("");
+    lines.push(`  ${bold("Accountability met-rate")}`);
+    for (const r of m.accountabilityMetRates.slice(0, 6)) {
+      const ratePct = (r.rate * 100).toFixed(0);
+      const color = r.rate >= 0.8 ? green : r.rate >= 0.5 ? yellow : red;
+      lines.push(
+        `    ${r.accountabilityId.padEnd(32)} ${color(`${ratePct.padStart(3)}%`)} ${dim(`(${String(r.metCount)}/${String(r.observations)})`)}`,
+      );
+    }
+    const remaining = m.accountabilityMetRates.length - 6;
+    if (remaining > 0) {
+      lines.push(`    ${dim(`… and ${String(remaining)} more`)}`);
+    }
+  } else {
+    lines.push(`  ${dim("No done_when observations yet — declare accountabilities in role.md.")}`);
+  }
+  return lines.join("\n");
+};
+
+// ---------------------------------------------------------------------------
 // Dashboard entry point
 // ---------------------------------------------------------------------------
 
@@ -335,11 +376,12 @@ export const startDashboard = async (rootDir: string): Promise<void> => {
       return;
     }
 
-    const [pipeline, activity, governance, cost] = await Promise.all([
+    const [pipeline, activity, governance, cost, metrics] = await Promise.all([
       readPipelineState(root),
       readRecentActivity(root),
       readGovernanceState(root),
       readCostSummary(root),
+      readMetricsSnapshot(root),
     ]);
 
     const header = `  ${bold("Murmuration Dashboard")} ${dim("—")} ${dim(root)}  ${dim("[q] quit  [r] refresh")}\n`;
@@ -348,6 +390,7 @@ export const startDashboard = async (rootDir: string): Promise<void> => {
       renderAgents(pipeline, cost),
       renderCostSummary(cost),
       renderGovernance(governance),
+      renderMetrics(metrics),
       renderActivity(activity),
     ].join("\n\n");
 

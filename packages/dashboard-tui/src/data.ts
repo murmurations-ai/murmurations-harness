@@ -7,6 +7,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import { computeMetricsFromDisk, type DiskMetricsSnapshot } from "@murmurations-ai/core";
 import cronParser from "cron-parser";
 
 // ---------------------------------------------------------------------------
@@ -743,4 +744,21 @@ export const readCostSummary = async (rootDir: string): Promise<CostSummary> => 
         : a.provider.localeCompare(b.provider),
     ),
   };
+};
+
+// ---------------------------------------------------------------------------
+// Panel: Effectiveness metrics (Workstream K2)
+// ---------------------------------------------------------------------------
+
+export type MetricsSnapshot = DiskMetricsSnapshot;
+
+/**
+ * Read a 30-day effectiveness snapshot from on-disk artifacts. Mirrors
+ * what `murmuration metrics --json` returns (both call into
+ * `computeMetricsFromDisk`).
+ */
+export const readMetricsSnapshot = async (rootDir: string): Promise<MetricsSnapshot> => {
+  const now = new Date();
+  const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  return computeMetricsFromDisk({ rootDir, since, now, windowDays: 30 });
 };
