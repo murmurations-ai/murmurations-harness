@@ -71,6 +71,17 @@ export interface LLMRequest {
   readonly tools?: readonly ToolDefinition[];
   /** Maximum number of LLM round-trips for tool calling loops. Default: 1 (no loop). */
   readonly maxSteps?: number;
+  /**
+   * v0.7.0 (harness#293): subscription-CLI session resume. When set,
+   * the adapter passes the CLI's native resume flag (claude --resume,
+   * codex --continue / --session, gemini equivalent) so the vendor
+   * keeps its conversation cache warm. Direct API providers (Vercel
+   * adapter) ignore this field — their request is fully self-contained.
+   *
+   * First-turn callers omit this; subsequent turns pass the
+   * `sessionId` returned on the previous {@link LLMResponse}.
+   */
+  readonly sessionId?: string;
 }
 
 /** Output of a successful completion. */
@@ -89,6 +100,15 @@ export interface LLMResponse {
   readonly toolCalls?: readonly ToolCallResult[];
   /** Number of LLM round-trips (1 = no tool loop, >1 = multi-step). */
   readonly steps?: number;
+  /**
+   * v0.7.0 (harness#293): the vendor's session/conversation id captured
+   * from the response. Subscription-CLI adapters surface this so callers
+   * (Spirit REPL, daemon's PersistentContextExecutor) can pass it back
+   * on the next request to enable native session resume. Undefined for
+   * direct API providers and for first turns where the CLI didn't
+   * surface an id.
+   */
+  readonly sessionId?: string;
 }
 
 /** Declarative description of what a given {@link LLMClient} instance can do. */

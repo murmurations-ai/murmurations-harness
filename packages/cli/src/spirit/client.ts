@@ -225,16 +225,31 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
   const history: LLMMessage[] = [];
   const pricing = PRICING[harness.llm.provider];
 
+  // v0.7.0 (harness#293): subscription-CLI session resume. Closure-tracked
+  // across turns; passed back on each subsequent request so the CLI keeps
+  // its prompt cache warm. Direct API providers ignore the field.
+  let sessionId: string | undefined;
+
   const turn = async (message: string): Promise<SpiritTurnResult> => {
     history.push({ role: "user", content: message });
 
     const maxSteps = harness.spirit.maxSteps;
+    // When sessionId is present, the subscription-CLI adapter uses
+    // `--resume <id>` and only the latest user message is the
+    // material new context (the rest lives in the CLI's session
+    // cache). Send the trailing user message only, in that case;
+    // first turn sends full history. Direct API path ignores
+    // sessionId and gets the full history regardless.
+    const lastMessage = history[history.length - 1];
+    const messages: readonly LLMMessage[] =
+      sessionId !== undefined && lastMessage ? [lastMessage] : history;
     const result = await client.complete({
       model,
-      messages: history,
+      messages,
       systemPromptOverride: systemPrompt,
       maxOutputTokens: 4096,
       temperature: 0.2,
+      ...(sessionId !== undefined ? { sessionId } : {}),
       ...(tools ? { tools, maxSteps } : {}),
     });
 
@@ -244,6 +259,11 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     }
 
     history.push({ role: "assistant", content: result.value.content });
+
+    // Capture the CLI's session id for the next turn (if surfaced).
+    if (typeof result.value.sessionId === "string" && result.value.sessionId.length > 0) {
+      sessionId = result.value.sessionId;
+    }
 
     const inputTokens = result.value.inputTokens;
     const outputTokens = result.value.outputTokens;

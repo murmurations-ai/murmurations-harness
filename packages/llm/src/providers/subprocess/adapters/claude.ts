@@ -113,6 +113,9 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
   /**
    * Build CLI argv for `claude -p --output-format json …`.
    * ADR-0034 D1: never includes prompt content; prompt is delivered via stdin.
+   *
+   * v0.7.0 (harness#293): when `req.sessionId` is set, emits
+   * `--resume <id>` so the CLI keeps prompt cache warm across turns.
    */
   public buildFlags(req: LLMRequest): readonly string[] {
     const flags: string[] = ["-p", "--output-format", "json"];
@@ -124,6 +127,9 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
     }
     if (this.#mcpConfigPath) {
       flags.push("--mcp-config", this.#mcpConfigPath);
+    }
+    if (req.sessionId) {
+      flags.push("--resume", req.sessionId);
     }
     return flags;
   }
@@ -192,6 +198,16 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
       if (e.type === "assistant") lastAssistant = e;
     }
 
+    // v0.7.0 (harness#293): capture session_id for resume. Claude CLI
+    // emits it on the system/init event AND echoes it on the result
+    // event; either is fine. Prefer the result event since it's the
+    // one we already pinned for usage extraction.
+    const sessionId =
+      typeof resultEvent.session_id === "string"
+        ? resultEvent.session_id
+        : (events.find((e) => e.type === "system" && typeof e.session_id === "string")
+            ?.session_id ?? undefined);
+
     const toolCalls: { name: string; args: Record<string, unknown>; result: unknown }[] = [];
     if (lastAssistant?.message?.content) {
       for (const block of lastAssistant.message.content) {
@@ -223,6 +239,7 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
       providerUsed: this.providerId,
       toolCalls,
       steps: 1,
+      ...(sessionId !== undefined ? { sessionId } : {}),
     };
     return { ok: true, value: response };
   }

@@ -216,6 +216,13 @@ export class GeminiCliAdapter implements SubprocessLLMAdapter {
       }
     }
 
+    // v0.7.0 (harness#293): capture session_id so callers can persist
+    // it. Gemini's --resume flag takes either "latest" or an index
+    // (not a UUID), so the captured id isn't directly resumable
+    // today; surfacing it lets us track sessions for telemetry +
+    // future resume support when gemini's CLI exposes id-based resume.
+    const sessionId = typeof parsed.session_id === "string" ? parsed.session_id : undefined;
+
     return {
       ok: true,
       value: {
@@ -228,6 +235,7 @@ export class GeminiCliAdapter implements SubprocessLLMAdapter {
         providerUsed: "gemini-cli",
         toolCalls,
         steps: 1,
+        ...(sessionId !== undefined ? { sessionId } : {}),
       },
     };
   }

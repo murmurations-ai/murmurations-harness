@@ -52,6 +52,140 @@ describe("ClaudeCliAdapter.buildFlags", () => {
   });
 });
 
+describe("ClaudeCliAdapter — session resume (harness#293)", () => {
+  it("emits --resume <id> when sessionId is set on the request", () => {
+    const adapter = new ClaudeCliAdapter();
+    const flags = adapter.buildFlags(
+      minimalRequest({ sessionId: "01abcdef-1234-5678-9abc-def012345678" }),
+    );
+    expect(flags).toContain("--resume");
+    expect(flags).toContain("01abcdef-1234-5678-9abc-def012345678");
+  });
+
+  it("omits --resume when sessionId is unset (first turn)", () => {
+    const adapter = new ClaudeCliAdapter();
+    const flags = adapter.buildFlags(minimalRequest());
+    expect(flags).not.toContain("--resume");
+  });
+
+  it("captures session_id from the result event into LLMResponse.sessionId", () => {
+    const adapter = new ClaudeCliAdapter();
+    const stream = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "sess-init" }),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        result: "ok",
+        session_id: "sess-result",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    ].join("\n");
+    const out = adapter.parseOutput(stream);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    // Result event takes precedence (more authoritative than system/init).
+    expect(out.value.sessionId).toBe("sess-result");
+  });
+
+  it("falls back to system/init session_id when result has none", () => {
+    const adapter = new ClaudeCliAdapter();
+    const stream = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "sess-fallback" }),
+      JSON.stringify({
+        type: "result",
+        result: "ok",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    ].join("\n");
+    const out = adapter.parseOutput(stream);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.value.sessionId).toBe("sess-fallback");
+  });
+
+  it("omits sessionId when neither event carries one", () => {
+    const adapter = new ClaudeCliAdapter();
+    const stream = JSON.stringify({
+      type: "result",
+      result: "ok",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    const out = adapter.parseOutput(stream);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.value.sessionId).toBeUndefined();
+  });
+});
+
+describe("CodexCliAdapter — session resume (harness#293)", () => {
+  it("switches to `exec resume <id>` form when sessionId is set", () => {
+    const adapter = new CodexCliAdapter();
+    const flags = adapter.buildFlags(minimalRequest({ sessionId: "thread-abc" }));
+    expect(flags[0]).toBe("exec");
+    expect(flags[1]).toBe("resume");
+    expect(flags[2]).toBe("thread-abc");
+    // --ephemeral conflicts with resume; must NOT be passed.
+    expect(flags).not.toContain("--ephemeral");
+  });
+
+  it("uses standard `exec --ephemeral` form on first turn (no sessionId)", () => {
+    const adapter = new CodexCliAdapter();
+    const flags = adapter.buildFlags(minimalRequest());
+    expect(flags[0]).toBe("exec");
+    expect(flags).toContain("--ephemeral");
+    expect(flags).not.toContain("resume");
+  });
+
+  it("captures thread_id from thread.started event into LLMResponse.sessionId", () => {
+    const adapter = new CodexCliAdapter();
+    const stream = [
+      JSON.stringify({ type: "thread.started", thread_id: "thread-xyz" }),
+      JSON.stringify({ type: "turn.started" }),
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "hello" },
+      }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    ].join("\n");
+    const out = adapter.parseOutput(stream);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.value.sessionId).toBe("thread-xyz");
+  });
+});
+
+describe("GeminiCliAdapter — session capture (harness#293)", () => {
+  it("captures session_id from JSON output", () => {
+    const adapter = new GeminiCliAdapter();
+    const stream = JSON.stringify({
+      session_id: "gemini-sess-1",
+      response: "hello",
+      stats: {
+        models: {
+          "gemini-2.5-flash": {
+            tokens: { prompt: 10, candidates: 5 },
+          },
+        },
+      },
+    });
+    const out = adapter.parseOutput(stream);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.value.sessionId).toBe("gemini-sess-1");
+  });
+
+  it("does NOT yet pass --resume flag (gemini's resume is index-based, not UUID)", () => {
+    // Gemini's --resume takes "latest" or an index, not the captured
+    // session_id UUID. v0.7.0 ships capture-only; resume is a follow-up.
+    const adapter = new GeminiCliAdapter();
+    const flags = adapter.buildFlags(minimalRequest({ sessionId: "gemini-sess-1" }));
+    expect(flags).not.toContain("--resume");
+  });
+});
+
 describe("ClaudeCliAdapter.parseOutput", () => {
   const adapter = new ClaudeCliAdapter();
 

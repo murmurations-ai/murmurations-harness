@@ -70,7 +70,16 @@ export class CodexCliAdapter implements SubprocessLLMAdapter {
     // --skip-git-repo-check: let agents run regardless of cwd.
     // --ephemeral: don't persist session files (operator may run many wakes).
     // ADR-0036: only explicit `trusted` mode emits Codex's sandbox bypass.
-    const flags: string[] = ["exec", "--json", "--skip-git-repo-check", "--ephemeral"];
+    //
+    // v0.7.0 (harness#293): when req.sessionId is set, switch to the
+    // resume subcommand form (`codex exec resume <id> -`). This drops
+    // --ephemeral because resume requires the session file. Future
+    // refinement: capture the trade-off in a config knob so operators
+    // can tune persistence vs. ephemerality per agent.
+    const flags: string[] =
+      req.sessionId !== undefined
+        ? ["exec", "resume", req.sessionId, "--json", "--skip-git-repo-check"]
+        : ["exec", "--json", "--skip-git-repo-check", "--ephemeral"];
     if (this.#permissionMode === "trusted") {
       flags.push("--dangerously-bypass-approvals-and-sandbox");
     }
@@ -188,6 +197,13 @@ export class CodexCliAdapter implements SubprocessLLMAdapter {
       };
     }
 
+    // v0.7.0 (harness#293): capture thread_id from thread.started event
+    // so callers can persist it for future resume. Returned on
+    // LLMResponse.sessionId.
+    const threadStarted = events.find((e) => e.type === "thread.started");
+    const sessionId =
+      typeof threadStarted?.thread_id === "string" ? threadStarted.thread_id : undefined;
+
     // Codex doesn't echo the model in its event stream. The daemon sets it
     // via buildFlags; we surface "codex" as a placeholder so the cost record
     // doesn't crash. Operators can override via role.md `llm.model`.
@@ -205,6 +221,7 @@ export class CodexCliAdapter implements SubprocessLLMAdapter {
         providerUsed: "codex-cli",
         toolCalls,
         steps: 1,
+        ...(sessionId !== undefined ? { sessionId } : {}),
       },
     };
   }
