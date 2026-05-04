@@ -285,6 +285,7 @@ Usage:
   murmuration groups [--root|--name] [--json]
   murmuration events [--root|--name] [--json]
   murmuration cost   [--root|--name] [--json]
+  murmuration metrics [--root|--name] [--json] [--since <days>]
 
 start options:
   --root <path>    Identity root directory (default: bundled hello-world example)
@@ -502,6 +503,11 @@ const main = async (): Promise<void> => {
     case "providers": {
       const { runProviders } = await import("./providers-cmd.js");
       await runProviders(argv.slice(1));
+      break;
+    }
+    case "metrics": {
+      const { runMetrics } = await import("./metrics-cmd.js");
+      await runMetrics(argv.slice(1), resolveRoot(argv.slice(1)));
       break;
     }
     case "register": {
