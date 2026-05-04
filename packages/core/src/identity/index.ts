@@ -23,6 +23,7 @@ import cronParser from "cron-parser";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
+import { accountabilitiesSchema } from "../done-criteria/index.js";
 import {
   makeAgentId,
   makeGroupId,
@@ -429,6 +430,12 @@ export const roleFrontmatterSchema = z.object({
   // the agent relies on. Declarative today (plugins load daemon-wide);
   // per-agent gating is a future enhancement.
   plugins: pluginsSchema,
+
+  // ADR-0042: accountabilities with done_when blocks (v0.7.0). Optional
+  // so existing role.md files validate unchanged; agents that don't
+  // declare accountabilities fall back to legacy self-reported
+  // EFFECTIVENESS reflection without machine-checked done conditions.
+  accountabilities: accountabilitiesSchema,
 });
 
 /** Parsed, validated shape of a `role.md` frontmatter block. */
