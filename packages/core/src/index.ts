@@ -59,3 +59,4 @@ export * from "./collaboration/index.js";
 export * from "./extensions/index.js";
 export * from "./daemon/command-executor.js";
 export * from "./done-criteria/index.js";
+export * from "./metrics/effectiveness.js";
