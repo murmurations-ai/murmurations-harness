@@ -81,12 +81,12 @@ All five sub-blocks present.
 
 ### Layer 6 — Monitoring & Observability
 
-| Reference component    | Status                          | Pointer                                                                                                                                     |
-| ---------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tracing & Logging      | ✅ (now adequate after PR #269) | Daemon structured logs; OTEL hooks; per-step LLM logging (PR #269 just landed). `packages/llm/src/telemetry.ts` covers token-usage capture. |
-| Metrics & Dashboards   | ✅                              | `WakeCostBuilder` (`packages/core/src/cost/`) emits `WakeCostRecord` per ADR-0011; `packages/dashboard-tui` renders live state.             |
-| Alerts & Notifications | ❌ real gap                     | Logs only. No first-class alerting routing. **Tracked separately** — file follow-up issue if operator demand surfaces.                      |
-| Audit & Compliance     | ✅                              | `index.jsonl` immutable audit log; ADR-0017 write-scope enforcement leaves an audit row per mutation.                                       |
+| Reference component    | Status      | Pointer                                                                                                                                                                                                                                           |
+| ---------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tracing & Logging      | ⚠️ partial  | Daemon structured logs; OTEL hooks; `packages/llm/src/telemetry.ts` covers token-usage capture. Per-step LLM logging (PR #269) still open — not yet on main. "Fully built" = PR #269 merged. Adequate for v0.5; upgrade to ✅ when PR #269 lands. |
+| Metrics & Dashboards   | ✅          | `WakeCostBuilder` (`packages/core/src/cost/`) emits `WakeCostRecord` per ADR-0011; `packages/dashboard-tui` renders live state.                                                                                                                   |
+| Alerts & Notifications | ❌ real gap | Logs only. No first-class alerting routing. **Tracked separately** — file follow-up issue if operator demand surfaces.                                                                                                                            |
+| Audit & Compliance     | ✅          | `index.jsonl` immutable audit log; ADR-0017 write-scope enforcement leaves an audit row per mutation.                                                                                                                                             |
 
 ### Layer 7 — Reliability & Failure Management
 
@@ -195,5 +195,6 @@ This is documentation. Cost to revise is low; cost to delete is the loss of the 
 - **Source directive:** [xeeban/emergent-praxis#725](https://github.com/xeeban/emergent-praxis/issues/725)
 - **Reference image:** https://pbs.twimg.com/media/HHGS3-OaMAEHpSR?format=jpg&name=large
 - **Foundational ADRs:** ADR-0017 (write-scope), ADR-0023 (extensions), ADR-0025 (pluggable LLM providers), ADR-0026 (directory layout), ADR-0029 (agent memory), ADR-0034 (subscription-CLI family).
-- **Recently-landed:** PR #261/#263 (GitHub read tools), PR #269 (per-step LLM logging), commit `2bcae1d` (subscription-CLI implementation).
+- **Recently-landed:** PR #261/#263 (GitHub read tools), PR #270 (subscription-CLI family + Spirit MCP bridge, commit `2bcae1d`).
+- **Pending:** PR #269 (per-step LLM logging) — open; Layer 6 Tracing row upgrades to ✅ when merged.
 - **Open tracking:** [murmurations-ai/murmurations-harness#4](https://github.com/murmurations-ai/murmurations-harness/issues/4) (plugin trust + prompt injection).
