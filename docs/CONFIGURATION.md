@@ -111,6 +111,82 @@ CLI flags override `harness.yaml` for the keys they cover:
 
 Environment variables are read at runtime by the providers themselves (e.g. `GEMINI_API_KEY`, `GITHUB_TOKEN`) — they never appear in `harness.yaml`. See `.env.example`.
 
+## Spirit memory (v0.7.0 [O])
+
+The Spirit accumulates curated facts across attaches at:
+
+```
+<root>/.murmuration/spirit/memory/
+  MEMORY.md        — index, always loaded into the Spirit system prompt
+  user_*.md        — facts about Source (preferences, role, working context)
+  feedback_*.md    — corrections + validations from Source
+  project_*.md     — what's happening in this murmuration (drift fast)
+  reference_*.md   — pointers into external systems (Linear, Slack, vaults)
+```
+
+The four-type taxonomy comes from Claude Code's auto-memory system — same shape, same write rules, same hand-edit semantics.
+
+**REPL commands:**
+
+| Command            | Effect                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| `:remember <name>` | Source-explicit save (interactive: prompt for description, multi-line body until `.`) |
+| `:forget <name>`   | Confirm-then-remove                                                                   |
+| `:reset memory`    | Clear every memory file + index (cannot be undone)                                    |
+
+**Spirit tools** (called by the LLM during a turn):
+
+| Tool                                      | Purpose                                               |
+| ----------------------------------------- | ----------------------------------------------------- |
+| `remember(type, name, description, body)` | Auto-save when Spirit detects a save-worthy moment    |
+| `forget(name)`                            | Idempotent remove                                     |
+| `recall(query?)`                          | Case-insensitive search; no query → returns the index |
+
+**Hand-edit:** the files are plain markdown with frontmatter (`name`, `description`, `type`). Source can edit `MEMORY.md` and individual files directly — Spirit picks up changes on next attach.
+
+**Sync between machines:** memory lives under `<root>/.murmuration/`, which is **not** in git by default (would expose `user`-type memory in repo). For cross-machine continuity, sync the murmuration root via your usual mechanism (cloud storage, manual rsync) — there's no harness-managed sync.
+
+## Spirit skills (v0.7.0 [R])
+
+Operators can install skills at:
+
+```
+<root>/.murmuration/spirit/skills/
+  SKILLS.md       — operator-installed skill index
+  *.md            — operator-installed skill bodies
+```
+
+Per-murmuration skills **shadow bundled skills with the same name**. Skills are markdown — no runtime, no sandbox. Use them to teach this Spirit operator-specific patterns (e.g. `pricing-context`, `incident-response`) without forking the harness.
+
+**Install:**
+
+- Spirit tool: `install_skill(name, description, body)` — writes the file + updates SKILLS.md.
+- Hand-drop: write `.md` files directly into the skills dir; Spirit picks them up next attach.
+
+**Load:** `load_skill(name)` checks the per-murmuration overlay first, then falls back to bundled. The response prefixes `[per-murmuration]` or `[bundled]` so the caller knows which body it got.
+
+**System prompt:** at attach, the prompt includes both the bundled skill index AND the per-murmuration index — operators see what's available without an explicit `recall`/`load_skill`.
+
+## Spirit cross-attach context (v0.7.0 [N])
+
+The Spirit's REPL session persists across attaches at:
+
+```
+<root>/.murmuration/spirit/
+  conversation.jsonl    — append-only LLM turns
+  session.json          — { "sessionId": "..." } for subscription-CLI resume
+```
+
+On `murmuration attach`, Spirit hydrates prior conversation + sessionId. On every turn, both files update before the next prompt. Detach is implicit (Ctrl-C, terminal close) — appends are immediately durable.
+
+**REPL commands:**
+
+| Command           | Effect                                                                 |
+| ----------------- | ---------------------------------------------------------------------- |
+| `:reset`          | Clear `conversation.jsonl` + `session.json` (next attach starts fresh) |
+| `:bye`            | Detach with a "context preserved" farewell                             |
+| `:report [scope]` | One-call murmuration report — health \| activity \| attention \| all   |
+
 ## Not yet configurable
 
 Several tunables are still hardcoded and tracked in [issue #152](https://github.com/murmurations-ai/murmurations-harness/issues/152): daemon circuit-breaker threshold, LLM retry policy, signal aggregator caps, meeting-prompt context caps, and group-meeting LLM params. Each moves to `harness.yaml` in subsequent PRs following the `spirit.maxSteps` pattern.

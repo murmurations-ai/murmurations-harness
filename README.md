@@ -251,7 +251,9 @@ murmuration restart [--root|--name]         # Stop + start
 murmuration status [--root|--name]          # Show agent status
 
 # Session management
-murmuration attach <name>                   # Interactive REPL
+murmuration attach <name>                   # Interactive REPL (Spirit; resumes prior context)
+                                            # Per-murmuration commands: :report, :remember, :forget, :reset, :bye
+                                            # See docs/CONFIGURATION.md § Spirit memory + skills
 murmuration list                            # Show registered murmurations
 murmuration register <name> --root <path>   # Register by name
 murmuration config [edit|path]              # Show/edit config.toml
