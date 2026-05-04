@@ -540,3 +540,141 @@ describe("DefaultSignalAggregator + collaborationProvider", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// v0.7.0 — priority-tiered bundle composition (ADR-0042 / Workstream G)
+// ---------------------------------------------------------------------------
+
+describe("DefaultSignalAggregator + priorityBundle", () => {
+  let rootDir = "";
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "sig-priority-"));
+  });
+
+  afterEach(async () => {
+    await rm(rootDir, { recursive: true, force: true });
+  });
+
+  it("preserves legacy behavior when priorityBundle is unset (default false)", async () => {
+    const issues = Array.from({ length: 8 }, (_, i) =>
+      fakeIssue({ n: i + 1, labels: ["priority:critical"] }),
+    );
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("07-wren"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const githubSignals = result.bundle.signals.filter((s) => s.kind === "github-issue");
+      // Legacy path = github cap (default 15) caps it; all 8 fit.
+      expect(githubSignals).toHaveLength(8);
+    }
+  });
+
+  it("composes a tiered bundle when priorityBundle is true", async () => {
+    const issues = [
+      fakeIssue({ n: 1, labels: ["priority:critical"] }),
+      fakeIssue({ n: 2, labels: ["priority:critical"] }),
+      ...Array.from({ length: 10 }, (_, i) => fakeIssue({ n: 100 + i, labels: ["priority:low"] })),
+    ];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO }],
+      priorityBundle: true,
+    });
+    const result = await agg.aggregate(mkContext("07-wren"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // 2 critical + low fills budget. The order in the emitted
+      // bundle should put critical first.
+      const first = result.bundle.signals[0];
+      if (first?.kind === "github-issue") {
+        expect(first.number).toBe(1);
+      }
+    }
+  });
+
+  it("excludes done items via getDoneSignalIds hook", async () => {
+    const issues = [
+      fakeIssue({ n: 1, labels: ["priority:critical"] }),
+      fakeIssue({ n: 2, labels: ["priority:critical"] }),
+      fakeIssue({ n: 3, labels: ["priority:critical"] }),
+    ];
+    let capturedIds: ReadonlySet<string> | undefined;
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO }],
+      priorityBundle: true,
+      // eslint-disable-next-line @typescript-eslint/require-await -- async to match interface
+      getDoneSignalIds: async () => {
+        // Pretend issue #2's signal is verified done. Signal IDs use
+        // the format `github-issue:owner/repo#N` (see issueToSignal).
+        const ids = new Set<string>(["github-issue:xeeban/emergent-praxis#2"]);
+        capturedIds = ids;
+        return ids;
+      },
+    });
+    const result = await agg.aggregate(mkContext("07-wren"));
+    expect(result.ok).toBe(true);
+    expect(capturedIds).toBeDefined();
+    if (result.ok) {
+      const numbers = result.bundle.signals.flatMap((s) =>
+        s.kind === "github-issue" ? [s.number] : [],
+      );
+      // #2 should be excluded; #1 and #3 remain.
+      expect(numbers).not.toContain(2);
+      expect(numbers).toContain(1);
+      expect(numbers).toContain(3);
+    }
+  });
+
+  it("facilitator-agent sees awaiting:source-close as critical", async () => {
+    const issues = [
+      fakeIssue({ n: 50, labels: ["awaiting:source-close"] }),
+      fakeIssue({ n: 51, labels: ["test"] }),
+    ];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO }],
+      priorityBundle: true,
+    });
+    const result = await agg.aggregate(
+      mkContext("facilitator-agent", { agentId: makeAgentId("facilitator-agent") }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // awaiting:source-close is critical for facilitator → emitted first.
+      const first = result.bundle.signals[0];
+      if (first?.kind === "github-issue") {
+        expect(first.number).toBe(50);
+      }
+    }
+  });
+
+  it("emits warnings naming tier counts when items are dropped", async () => {
+    const many = Array.from({ length: 20 }, (_, i) =>
+      fakeIssue({ n: i + 1, labels: ["priority:critical"] }),
+    );
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(many),
+      githubScopes: [{ repo: REPO }],
+      caps: { githubIssue: 20, total: 15 },
+      priorityBundle: true,
+    });
+    const result = await agg.aggregate(mkContext("07-wren"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // critical cap is 5; rest dropped.
+      const counted = result.bundle.signals.filter((s) => s.kind === "github-issue");
+      expect(counted).toHaveLength(5);
+      expect(result.bundle.warnings.some((w) => w.includes("priority bundle"))).toBe(true);
+    }
+  });
+});

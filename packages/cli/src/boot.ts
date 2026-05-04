@@ -927,6 +927,10 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const filesystemOnlyAggregator: SignalAggregator = new DefaultSignalAggregator({
     rootDir: exampleRoot,
     ...(localCollaborationProvider ? { collaborationProvider: localCollaborationProvider } : {}),
+    // v0.7.0 (ADR-0042): tier wakes by priority for filesystem-only
+    // aggregator too — non-github signals still benefit from the
+    // tiered ordering.
+    priorityBundle: true,
   });
 
   const firstPassDaemon = new Daemon({
@@ -1564,6 +1568,10 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               rootDir: exampleRoot,
               github: githubClient,
               githubScopes: githubSignalScopes,
+              // v0.7.0 (ADR-0042): tier wakes by priority. The daemon
+              // owns the integration; agent role.md doesn't need to
+              // know.
+              priorityBundle: true,
             })
           : filesystemOnlyAggregator,
         runArtifactWriter,

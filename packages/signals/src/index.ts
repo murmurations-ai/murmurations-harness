@@ -29,6 +29,8 @@ import type {
   RepoCoordinate,
 } from "@murmurations-ai/github";
 
+import { composeBundle, filterDoneItems, type ClassifierContext } from "./priority.js";
+
 // ---------------------------------------------------------------------------
 // Public config + caps
 // ---------------------------------------------------------------------------
@@ -71,6 +73,28 @@ export interface DefaultSignalAggregatorConfig {
   readonly trustedSenderAgentIds?: readonly string[];
   /** CollaborationProvider for local item signals (ADR-0021). */
   readonly collaborationProvider?: SignalCollaborationProvider;
+  /**
+   * v0.7.0 (ADR-0042): replace flat "15 most-recent" with priority-
+   * tiered bundle composition. Default false to preserve pre-v0.7.0
+   * behavior for direct callers. The daemon enables it for every
+   * agent in v0.7.0 — operators don't need to set this themselves.
+   */
+  readonly priorityBundle?: boolean;
+  /**
+   * v0.7.0 (Workstream H): hook the wake-end `done_when` validator
+   * output into bundle composition. Returns the set of signal ids
+   * that have been verified done at wake-start; the aggregator
+   * filters them out before tiering. Returning undefined / empty
+   * Set is the safe no-op.
+   */
+  readonly getDoneSignalIds?: (agentId: AgentId) => Promise<ReadonlySet<string>>;
+  /**
+   * v0.7.0: hook to surface issues where the agent is currently
+   * named in an active consent round. Used by the priority
+   * classifier to promote those issues to the `high` tier.
+   * Returning undefined / empty Set leaves them in `normal`.
+   */
+  readonly getActiveConsentRoundIssueNumbers?: (agentId: AgentId) => Promise<ReadonlySet<number>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,17 +197,56 @@ export class DefaultSignalAggregator implements SignalAggregator {
       }
     }
 
-    if (signals.length > this.#caps.total) {
+    // v0.7.0 (ADR-0042) — priority-tiered bundle composition.
+    //
+    // When enabled (default), the aggregator filters done items via
+    // the wake-end validator hook (Workstream H), classifies the
+    // remainder into 4 tiers via composeBundle, and emits the
+    // top-N respecting per-tier + total caps. Falls back to the
+    // legacy flat truncation when priorityBundle is explicitly false.
+    const priorityEnabled = this.#config.priorityBundle ?? false;
+    let finalSignals: readonly Signal[];
+    if (priorityEnabled) {
+      const doneIds = (await this.#config.getDoneSignalIds?.(context.agentId)) ?? new Set();
+      const consentRoundIssues =
+        (await this.#config.getActiveConsentRoundIssueNumbers?.(context.agentId)) ?? new Set();
+      const candidates = doneIds.size > 0 ? filterDoneItems(signals, doneIds) : signals;
+      const filteredCount = signals.length - candidates.length;
+      const classifierCtx: ClassifierContext = {
+        selfAgentId: context.agentId.value,
+        wakeStartedAt: context.now,
+        isFacilitator: context.agentId.value === "facilitator-agent",
+        activeConsentRoundIssueNumbers: consentRoundIssues,
+        issuesFiledBySelf: new Set(),
+      };
+      const bundle = composeBundle(candidates, classifierCtx, {
+        totalCap: this.#caps.total,
+      });
+      finalSignals = bundle.signals;
+      if (filteredCount > 0) {
+        warnings.push(
+          `priority bundle: ${String(filteredCount)} done items excluded by wake-end validator`,
+        );
+      }
+      if (bundle.droppedCount > 0) {
+        warnings.push(
+          `priority bundle: ${String(bundle.droppedCount)} candidates dropped to fit cap (critical=${String(bundle.counts.critical)} high=${String(bundle.counts.high)} normal=${String(bundle.counts.normal)} low=${String(bundle.counts.low)})`,
+        );
+      }
+    } else if (signals.length > this.#caps.total) {
       const dropped = signals.length - this.#caps.total;
       signals.length = this.#caps.total;
       warnings.push(
         `bundle truncated to ${String(this.#caps.total)} signals (total cap); dropped ${String(dropped)} from tail`,
       );
+      finalSignals = signals;
+    } else {
+      finalSignals = signals;
     }
 
     // Partition action items assigned to this agent
     const agentIdValue = context.agentId.value;
-    const actionItems = signals.filter((s) => {
+    const actionItems = finalSignals.filter((s) => {
       if (s.kind !== "github-issue") return false;
       const labels = (s as unknown as { labels: readonly string[] }).labels;
       return labels.includes("action-item") && labels.some((l) => l === `assigned:${agentIdValue}`);
@@ -194,7 +257,7 @@ export class DefaultSignalAggregator implements SignalAggregator {
       bundle: {
         wakeId: context.wakeId,
         assembledAt: this.#now(),
-        signals,
+        signals: finalSignals,
         actionItems,
         warnings,
       },
