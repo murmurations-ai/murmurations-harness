@@ -60,3 +60,4 @@ export * from "./extensions/index.js";
 export * from "./daemon/command-executor.js";
 export * from "./done-criteria/index.js";
 export * from "./metrics/effectiveness.js";
+export * from "./metrics/observations.js";
