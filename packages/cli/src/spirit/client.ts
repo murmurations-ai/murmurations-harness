@@ -234,7 +234,7 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     useApiTools = true;
   }
 
-  const systemPrompt = await buildSpiritSystemPrompt();
+  const systemPrompt = await buildSpiritSystemPrompt(rootDir);
   const tools = useApiTools ? buildSpiritTools({ rootDir, send }) : undefined;
 
   // v0.7.0 [N]: per-murmuration Spirit conversation persistence.

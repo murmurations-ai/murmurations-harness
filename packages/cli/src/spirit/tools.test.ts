@@ -316,6 +316,91 @@ describe("Spirit tools — list_awaiting_source_close (K3)", () => {
   });
 });
 
+describe("Spirit tools — memory (Workstream O)", () => {
+  let root = "";
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), `spirit-memtools-${randomUUID().slice(0, 8)}-`));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const getTool = (name: string) => {
+    const tools = buildSpiritTools({ rootDir: root, send: noopSend });
+    const tool = tools.find((t) => t.name === name);
+    if (!tool) throw new Error(`tool ${name} not found`);
+    return tool;
+  };
+
+  it("remember + recall round-trip", async () => {
+    const remember = getTool("remember");
+    const out = (await remember.execute({
+      type: "user",
+      name: "user_role",
+      description: "Source is a knowledge-business operator",
+      body: "Pacific time, daily standup at 7am",
+    })) as string;
+    expect(out).toContain("Saved memory");
+
+    const recall = getTool("recall");
+    const all = (await recall.execute({})) as string;
+    expect(all).toContain("user_role");
+    expect(all).toContain("Pacific time");
+  });
+
+  it("recall with query returns only matches", async () => {
+    const remember = getTool("remember");
+    await remember.execute({
+      type: "project",
+      name: "release",
+      description: "v0.7.0",
+      body: "ships Spirit work",
+    });
+    await remember.execute({
+      type: "reference",
+      name: "vault",
+      description: "Xeeban runbook",
+      body: "in 00 - Projects directory",
+    });
+    const recall = getTool("recall");
+    const out = (await recall.execute({ query: "spirit" })) as string;
+    expect(out).toContain("release");
+    expect(out).not.toContain("vault");
+  });
+
+  it("forget removes a memory", async () => {
+    const remember = getTool("remember");
+    await remember.execute({ type: "user", name: "x", description: "d", body: "b" });
+
+    const forget = getTool("forget");
+    const out = (await forget.execute({ name: "x" })) as string;
+    expect(out).toContain('Removed memory "x"');
+
+    const recall = getTool("recall");
+    const all = (await recall.execute({})) as string;
+    expect(all).toContain("No memories yet");
+  });
+
+  it("recall on empty returns a hint", async () => {
+    const recall = getTool("recall");
+    const out = (await recall.execute({})) as string;
+    expect(out).toContain("No memories yet");
+  });
+
+  it("rejects an invalid memory name with a clear error", async () => {
+    const remember = getTool("remember");
+    const out = (await remember.execute({
+      type: "user",
+      name: "bad name",
+      description: "d",
+      body: "b",
+    })) as string;
+    expect(out).toMatch(/remember error.*invalid memory name/);
+  });
+});
+
 describe("Spirit tools — close_issue (K3)", () => {
   it("returns a gh issue close command for the operator to run", async () => {
     const tools = buildSpiritTools({ rootDir: "/", send: noopSend });

@@ -534,6 +534,8 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
           ":help",
           ":reset",
           ":bye",
+          ":remember",
+          ":forget",
         ];
         return finalize(
           commands.filter((c) => c.startsWith(cmd)),
@@ -793,12 +795,21 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   };
 
   // v0.7.0 [N] — `:reset` clears Spirit's cross-attach context.
-  // `:reset memory` is reserved for [O] (Spirit memory). `:reset
-  // conversation` is an explicit alias for `:reset` (clears
+  // v0.7.0 [O] — `:reset memory` clears Spirit's per-murmuration memory.
+  // `:reset conversation` is an explicit alias for `:reset` (clears
   // conversation.jsonl + session.json only).
   const handleSpiritReset = async (input: string): Promise<void> => {
     if (input === ":reset memory") {
-      console.log("(`:reset memory` will land with Workstream O — see harness#313)");
+      const { SpiritMemory } = await import("./spirit/memory.js");
+      const mem = new SpiritMemory(rootDir);
+      try {
+        const result = await mem.resetAll();
+        console.log(
+          `Spirit memory cleared (${String(result.cleared)} files removed). This cannot be undone.`,
+        );
+      } catch (err) {
+        console.log(`(reset memory error: ${err instanceof Error ? err.message : String(err)})`);
+      }
       rl.prompt();
       return;
     }
@@ -815,6 +826,64 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
       );
     } catch (err) {
       console.log(`(reset error: ${err instanceof Error ? err.message : String(err)})`);
+    }
+    rl.prompt();
+  };
+
+  const handleSpiritRemember = async (name: string): Promise<void> => {
+    if (name.length === 0) {
+      console.log("Usage: :remember <name>   (kebab-case, e.g. user_role)");
+      rl.prompt();
+      return;
+    }
+    const { SpiritMemory } = await import("./spirit/memory.js");
+    const mem = new SpiritMemory(rootDir);
+    const description = await question(rl, "  description (one line): ");
+    if (description.trim().length === 0) {
+      console.log("(no description provided — aborted)");
+      rl.prompt();
+      return;
+    }
+    console.log("  body (end with a single line containing only `.`):");
+    const lines: string[] = [];
+    for (;;) {
+      const line = await question(rl, "  ");
+      if (line.trim() === ".") break;
+      lines.push(line);
+    }
+    try {
+      await mem.remember({
+        type: "user",
+        name,
+        description: description.trim(),
+        body: lines.join("\n"),
+      });
+      console.log(`Saved memory "${name}" (type=user). Edit ${mem.dir}/${name}.md to refine.`);
+    } catch (err) {
+      console.log(`(remember error: ${err instanceof Error ? err.message : String(err)})`);
+    }
+    rl.prompt();
+  };
+
+  const handleSpiritForget = async (name: string): Promise<void> => {
+    if (name.length === 0) {
+      console.log("Usage: :forget <name>");
+      rl.prompt();
+      return;
+    }
+    const { SpiritMemory } = await import("./spirit/memory.js");
+    const mem = new SpiritMemory(rootDir);
+    const confirm = await question(rl, `  forget "${name}"? [y/N]: `);
+    if (confirm.trim().toLowerCase() !== "y") {
+      console.log("(aborted)");
+      rl.prompt();
+      return;
+    }
+    try {
+      const result = await mem.forget(name);
+      console.log(result.removed ? `Removed memory "${name}".` : `(no memory named "${name}")`);
+    } catch (err) {
+      console.log(`(forget error: ${err instanceof Error ? err.message : String(err)})`);
     }
     rl.prompt();
   };
@@ -870,6 +939,19 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     if (input === ":bye") {
       console.log("(detaching — Spirit context preserved for next attach)");
       rl.close();
+      return;
+    }
+    // Spirit memory REPL commands (v0.7.0 [O]) — direct hand-write path
+    // that does not require the LLM. Source can use these to seed a
+    // memory before the first turn or fix a mistaken auto-save.
+    if (input.startsWith(":remember ")) {
+      const name = input.slice(":remember ".length).trim();
+      void handleSpiritRemember(name);
+      return;
+    }
+    if (input.startsWith(":forget ")) {
+      const name = input.slice(":forget ".length).trim();
+      void handleSpiritForget(name);
       return;
     }
 
@@ -1553,6 +1635,9 @@ const handleCommand = async (
   :switch <session-name>            Switch to another murmuration
   :stop                             Stop the daemon
   :reset                            Clear Spirit's cross-attach conversation
+  :reset memory                     Clear Spirit's per-murmuration memory
+  :remember <name>                  Save a Source-authored memory (interactive)
+  :forget <name>                    Remove a memory (with confirmation)
   :bye                              Detach with a Spirit-context-preserved farewell
   :quit (q)                         Detach from daemon
   :help (?)                         Show this help

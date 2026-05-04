@@ -18,6 +18,7 @@ import { join, resolve, relative, basename, dirname } from "node:path";
 import type { ToolDefinition } from "@murmurations-ai/llm";
 import { z } from "zod";
 
+import { SpiritMemory, type MemoryType } from "./memory.js";
 import { spiritSkillsDir } from "./system-prompt.js";
 
 // ---------------------------------------------------------------------------
@@ -306,6 +307,101 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
   };
 
   // ------------------------------------------------------------------------
+  // Spirit memory tools (Workstream O)
+  //
+  // remember/forget/recall over per-murmuration memory at
+  // <root>/.murmuration/spirit/memory/. The index (MEMORY.md) is also
+  // injected into the Spirit system prompt at attach so the LLM sees
+  // available memories without an explicit recall.
+  // ------------------------------------------------------------------------
+  const memory = new SpiritMemory(rootDir);
+
+  const rememberTool: SpiritTool = {
+    name: "remember",
+    description:
+      "Save a memory file under .murmuration/spirit/memory/. Types: 'user' (facts about Source), 'feedback' (corrections/validations), 'project' (what's happening in this murmuration), 'reference' (pointers to external systems). Use the same taxonomy as Claude Code's auto-memory.",
+    parameters: z.object({
+      type: z
+        .enum(["user", "feedback", "project", "reference"])
+        .describe("Memory type — see tool description for when to use each."),
+      name: z
+        .string()
+        .describe(
+          "Memory name (kebab-case, no extension). Convention: prefix with type, e.g. user_role, feedback_testing, project_v07_release.",
+        ),
+      description: z
+        .string()
+        .describe("One-line summary used in the index — be specific about when this is relevant."),
+      body: z.string().describe("Memory body (markdown)."),
+    }),
+    execute: async (input) => {
+      const { type, name, description, body } = input as {
+        type: MemoryType;
+        name: string;
+        description: string;
+        body: string;
+      };
+      try {
+        await memory.remember({ type, name, description, body });
+        return `Saved memory "${name}" (${type}). Visible in MEMORY.md and recall().`;
+      } catch (err) {
+        return `remember error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  const forgetTool: SpiritTool = {
+    name: "forget",
+    description:
+      "Delete a memory file by name. Removes both the .md file and its line in MEMORY.md. Idempotent — silently no-ops on missing memories.",
+    parameters: z.object({
+      name: z.string().describe("Memory name (no extension)."),
+    }),
+    execute: async (input) => {
+      const { name } = input as { name: string };
+      try {
+        const result = await memory.forget(name);
+        return result.removed ? `Removed memory "${name}".` : `No memory named "${name}".`;
+      } catch (err) {
+        return `forget error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  const recallTool: SpiritTool = {
+    name: "recall",
+    description:
+      "Search Spirit memory. With no query, returns a summary of every memory file. With a query, returns case-insensitive substring matches across name, description, and body — each with a snippet around the hit.",
+    parameters: z.object({
+      query: z
+        .string()
+        .optional()
+        .describe(
+          "Optional case-insensitive substring. Omit to list all memories with their descriptions.",
+        ),
+    }),
+    execute: async (input) => {
+      const { query } = input as { query?: string };
+      try {
+        const hits = await memory.recall(query);
+        if (hits.length === 0) {
+          return query !== undefined
+            ? `No memories matched "${query}".`
+            : `No memories yet — use \`remember\` or \`:remember\` to save one.`;
+        }
+        return hits
+          .map(
+            (h) =>
+              `- [${h.type}] ${h.name} — ${h.description}\n  ${h.snippet.replace(/\n/g, "\n  ")}`,
+          )
+          .join("\n\n");
+      } catch (err) {
+        return `recall error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  // ------------------------------------------------------------------------
   // Facilitator-related tools (Workstream K3)
   //
   // Source-facing surfaces for v0.7.0 effectiveness work — read-only
@@ -405,6 +501,9 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     wakeTool,
     directiveTool,
     conveneTool,
+    rememberTool,
+    forgetTool,
+    recallTool,
     getFacilitatorLogTool,
     getAgreementTool,
     listAwaitingSourceCloseTool,
