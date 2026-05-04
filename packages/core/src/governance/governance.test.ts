@@ -8,6 +8,7 @@ import { makeAgentId } from "../execution/index.js";
 import {
   GovernanceStateStore,
   NoOpGovernancePlugin,
+  isTerminalState,
   makeGovernanceStateReader,
   type GovernancePlugin,
   type GovernanceStateGraph,
@@ -403,6 +404,86 @@ describe("GovernanceStateStore persistence", () => {
     const store = new GovernanceStateStore({ persistDir });
     const loaded = await store.load();
     expect(loaded).toBe(0);
+  });
+
+  // -------------------------------------------------------------------
+  // v0.7.0 — facilitator-callable helpers (ADR-0041 Workstream B)
+  // -------------------------------------------------------------------
+
+  describe("isTerminalState helper", () => {
+    const plugin: Pick<GovernancePlugin, "stateGraphs"> = {
+      stateGraphs: () => [
+        S3_TENSION,
+        {
+          kind: "proposal",
+          initialState: "drafted",
+          terminalStates: ["ratified", "rejected", "withdrawn"],
+          transitions: [],
+        },
+      ],
+    };
+
+    it("returns true for terminal states scoped by kind", () => {
+      expect(isTerminalState(plugin, "resolved", "tension")).toBe(true);
+      expect(isTerminalState(plugin, "ratified", "proposal")).toBe(true);
+    });
+
+    it("returns false for non-terminal states scoped by kind", () => {
+      expect(isTerminalState(plugin, "open", "tension")).toBe(false);
+      expect(isTerminalState(plugin, "drafted", "proposal")).toBe(false);
+    });
+
+    it("returns true if state is terminal in any graph when kind is omitted", () => {
+      expect(isTerminalState(plugin, "ratified")).toBe(true);
+      expect(isTerminalState(plugin, "withdrawn")).toBe(true); // present in both graphs
+    });
+
+    it("returns false for unknown states regardless of kind", () => {
+      expect(isTerminalState(plugin, "made-up-state")).toBe(false);
+      expect(isTerminalState(plugin, "made-up-state", "tension")).toBe(false);
+    });
+
+    it("returns false when kind is unknown to the plugin", () => {
+      expect(isTerminalState(plugin, "ratified", "nonexistent-kind")).toBe(false);
+    });
+
+    it("works on plugins with no graphs (NoOp)", () => {
+      const noOp: Pick<GovernancePlugin, "stateGraphs"> = { stateGraphs: () => [] };
+      expect(isTerminalState(noOp, "anything")).toBe(false);
+    });
+  });
+
+  describe("GovernancePlugin v0.7.0 optional methods", () => {
+    it("NoOpGovernancePlugin omits all v0.7.0 optional methods (interface stays optional)", () => {
+      const plugin: GovernancePlugin = new NoOpGovernancePlugin();
+      expect(typeof plugin.computeNextState).toBe("undefined");
+      expect(typeof plugin.isTerminal).toBe("undefined");
+      expect(typeof plugin.verifyClosure).toBe("undefined");
+      expect(typeof plugin.buildAgenda).toBe("undefined");
+      expect(typeof plugin.closerFor).toBe("undefined");
+    });
+
+    it("a plugin can implement all optional methods and stay structurally typed", () => {
+      const plugin: GovernancePlugin = {
+        name: "test",
+        version: "0.0.0",
+        stateGraphs: () => [S3_TENSION],
+        // eslint-disable-next-line @typescript-eslint/require-await -- async to match interface
+        onEventsEmitted: async () => [],
+        // eslint-disable-next-line @typescript-eslint/require-await -- async to match interface
+        evaluateAction: async () => ({ allow: true }),
+        // eslint-disable-next-line @typescript-eslint/require-await -- async to match interface
+        computeNextState: async () => null,
+        isTerminal: (state) => state === "resolved" || state === "withdrawn",
+        verifyClosure: () => ({ ok: true }),
+        buildAgenda: () => "agenda",
+        closerFor: () => "facilitator",
+      };
+      expect(typeof plugin.computeNextState).toBe("function");
+      expect(plugin.isTerminal?.("resolved", "tension")).toBe(true);
+      expect(plugin.isTerminal?.("open", "tension")).toBe(false);
+      expect(plugin.closerFor?.("[PROPOSAL]")).toBe("facilitator");
+    });
   });
 
   it("load skips malformed lines gracefully", async () => {

@@ -305,6 +305,166 @@ const S3GovernancePlugin = {
       );
     }
   },
+
+  // ---------------------------------------------------------------------
+  // v0.7.0 — facilitator-callable methods (ADR-0041)
+  // ---------------------------------------------------------------------
+
+  /**
+   * S3 default closer assignments per issue type.
+   * - [TENSION]: filer closes their own when resolved
+   * - [PROPOSAL]: facilitator closes after consent quorum + verification
+   * - [*MEETING]: facilitator closes after agenda items advance
+   * - [DIRECTIVE]: Source closes (facilitator labels awaiting:source-close)
+   * - [other]: agent named in `assigned:` label closes when done
+   */
+  closerFor(issueType) {
+    if (issueType === "[TENSION]") return "filer";
+    if (issueType === "[PROPOSAL]") return "facilitator";
+    if (issueType === "[OPERATIONAL MEETING]") return "facilitator";
+    if (issueType === "[GOVERNANCE MEETING]") return "facilitator";
+    if (issueType === "[RETROSPECTIVE MEETING]") return "facilitator";
+    if (issueType === "[DIRECTIVE]") return "source";
+    return "responsible";
+  },
+
+  /**
+   * Compute next state for an S3 governance item.
+   *
+   * Tensions advance when filer comments resolution evidence; proposals
+   * advance when the comment thread reflects a consent round outcome
+   * (quorum consents → ratified; any unintegrated objection → back to
+   * deliberating).
+   *
+   * Returns null when no transition applies (waiting on positions,
+   * quorum not reached, etc.).
+   */
+  async computeNextState(input) {
+    const { currentState, itemKind, issue, circleMembers } = input;
+    const positions = collectS3Positions(issue.comments);
+
+    if (itemKind === "tension") {
+      // Filer's own resolution comment with linked closed issue → resolved.
+      const filerPositions = issue.authorAgentId
+        ? positions.filter((p) => p.author === issue.authorAgentId.value)
+        : [];
+      const resolvedByFiler = filerPositions.some(
+        (p) => p.position === "resolve" && p.cites.length > 0,
+      );
+      if (resolvedByFiler && currentState !== "resolved") {
+        return { next: "resolved", reason: "tension filer cited resolution evidence" };
+      }
+      // Any "withdraw" by filer → withdrawn.
+      const withdrawnByFiler = filerPositions.some((p) => p.position === "withdraw");
+      if (withdrawnByFiler && currentState !== "withdrawn") {
+        return { next: "withdrawn", reason: "tension filer withdrew" };
+      }
+      return null;
+    }
+
+    if (itemKind === "proposal") {
+      // Quorum-aware advancement. An unintegrated objection bounces
+      // the proposal back to deliberating (where it waits for a new
+      // round). Consent quorum (majority of named circle members)
+      // proposes ratified.
+      const memberValues = new Set(circleMembers.map((m) => m.value));
+      const memberPositions = positions.filter((p) => memberValues.has(p.author));
+
+      const objections = memberPositions.filter((p) => p.position === "object" && !p.integrated);
+      if (objections.length > 0 && currentState === "consent-round") {
+        return {
+          next: "deliberating",
+          reason: `${String(objections.length)} unintegrated objection(s) raised`,
+        };
+      }
+
+      const consents = memberPositions.filter((p) => p.position === "consent");
+      const quorum = Math.ceil(circleMembers.length / 2);
+      if (
+        consents.length >= quorum &&
+        objections.length === 0 &&
+        (currentState === "consent-round" || currentState === "deliberating")
+      ) {
+        return {
+          next: "ratified",
+          reason: `consent quorum reached (${String(consents.length)}/${String(circleMembers.length)})`,
+        };
+      }
+      return null;
+    }
+
+    return null;
+  },
+
+  /**
+   * S3 closure verification — layered on top of the harness default.
+   *
+   * For proposals: must be in `ratified` or `withdrawn` terminal state.
+   * For tensions: must be in `resolved` or `withdrawn`. Plus the harness
+   * default structural-evidence check (which the caller composes
+   * separately).
+   */
+  verifyClosure(input) {
+    const { state, itemKind, evidence } = input;
+    const expectedTerminals = {
+      proposal: ["ratified", "withdrawn", "rejected"],
+      tension: ["resolved", "withdrawn"],
+    };
+    const validTerminals = expectedTerminals[itemKind];
+    if (validTerminals && !validTerminals.includes(state)) {
+      return {
+        ok: false,
+        reason: `S3 closure for ${itemKind} requires terminal state, got "${state}"`,
+      };
+    }
+    if (evidence.verifications.length === 0) {
+      return {
+        ok: false,
+        reason:
+          "S3 closure requires at least one structural verification (linked closed issue, commit ref, confirming comment, or agreement entry)",
+      };
+    }
+    return { ok: true };
+  },
 };
+
+// ---------------------------------------------------------------------------
+// S3 helper — parse positions from comment text
+// ---------------------------------------------------------------------------
+
+/**
+ * @typedef {{author: string, position: "consent"|"object"|"amend"|"resolve"|"withdraw", integrated: boolean, cites: string[]}} S3Position
+ */
+
+/**
+ * Extract S3 positions from a list of issue comments. One position per
+ * comment when matched; comments without a clear position are ignored.
+ * @param {ReadonlyArray<{authorAgentId?: {value: string}, body: string}>} comments
+ * @returns {S3Position[]}
+ */
+function collectS3Positions(comments) {
+  /** @type {S3Position[]} */
+  const out = [];
+  for (const c of comments) {
+    if (!c.authorAgentId) continue;
+    const text = String(c.body);
+    const lower = text.toLowerCase();
+    /** @type {S3Position["position"] | null} */
+    let position = null;
+    // Order matters: check object before consent because "no objection"
+    // contains "object" but is not an objection.
+    if (/(?<!no )(object|block|veto)/i.test(lower)) position = "object";
+    else if (/withdraw/i.test(lower)) position = "withdraw";
+    else if (/(consent|ratify|approve|adopt|agree)/i.test(lower)) position = "consent";
+    else if (/(amend|integrate.*concern|with concern)/i.test(lower)) position = "amend";
+    else if (/(resolved|resolution)/i.test(lower) && !/unresolved/i.test(lower))
+      position = "resolve";
+    if (!position) continue;
+    const integrated = /\bintegrated\b|\baddressed\b|\bresolved\b/i.test(lower);
+    const cites = (text.match(/#\d+/g) ?? []).map((s) => s.slice(1));
+    out.push({ author: c.authorAgentId.value, position, integrated, cites });
+  }
+  return out;
+}
 
 export default S3GovernancePlugin;

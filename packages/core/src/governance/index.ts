@@ -613,6 +613,102 @@ export const DEFAULT_TERMINOLOGY: GovernanceTerminology = {
   governanceEvent: "governance event",
 };
 
+// ---------------------------------------------------------------------------
+// v0.7.0 — facilitator-facing types (ADR-0041)
+// ---------------------------------------------------------------------------
+
+/**
+ * Snapshot of a GitHub-side issue at a moment in time, fed to the
+ * facilitator-callable plugin methods (`computeNextState`,
+ * `verifyClosure`, `buildAgenda`). Decoupled from `GovernanceItem`
+ * because the facilitator works with the live GitHub view and may
+ * advance items that don't yet have a `GovernanceItem` record.
+ */
+export interface IssueSnapshot {
+  readonly number: number;
+  readonly title: string;
+  readonly body: string;
+  readonly labels: readonly string[];
+  readonly state: "open" | "closed";
+  readonly comments: readonly IssueComment[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  /** Author agent id when traceable via comment authorship or label heuristics; otherwise undefined. */
+  readonly authorAgentId?: AgentId;
+}
+
+export interface IssueComment {
+  readonly authorAgentId?: AgentId;
+  readonly body: string;
+  readonly createdAt: string;
+}
+
+/**
+ * Evidence that a closure is structurally backed. The facilitator
+ * collects these from the issue thread before closing; a closure
+ * with zero verifications fails the default `verifyClosure` check
+ * and is re-opened with `verification-failed`.
+ */
+export interface ClosureEvidence {
+  readonly closerAgentId: AgentId;
+  readonly reason: string;
+  readonly verifications: readonly Verification[];
+}
+
+export type Verification =
+  | { readonly kind: "linked-closed-issue"; readonly issueNumber: number }
+  | { readonly kind: "commit-ref"; readonly sha: string; readonly path: string }
+  | {
+      readonly kind: "confirmation-comment";
+      readonly authorAgentId: AgentId;
+      readonly commentSha: string;
+    }
+  | { readonly kind: "agreement-entry"; readonly slug: string };
+
+/**
+ * Default closer roles for an issue type. Returned by `closerFor()`
+ * (plugin override; harness default for unknown types).
+ *
+ * - `"facilitator"` — facilitator-agent closes after state machine reaches terminal
+ * - `"source"` — Source closes (facilitator labels `awaiting:source-close`)
+ * - `"filer"` — the agent that filed the issue closes their own when resolved
+ * - `"responsible"` — the agent named in the `assigned:` label closes when done
+ */
+export type CloserRole = "facilitator" | "source" | "filer" | "responsible";
+
+/** Result of `verifyClosure` — either success or a named failure reason. */
+export type ClosureVerificationResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string };
+
+// ---------------------------------------------------------------------------
+// State graph helper — derived from plugin's stateGraphs()
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when `state` is terminal for the given `kind` according
+ * to the plugin's declared state graphs. Falls back to checking every
+ * graph when `kind` is omitted (returns true if state is terminal in
+ * any graph). Implements the "is this closeable?" check the
+ * facilitator runs each wake.
+ */
+export const isTerminalState = (
+  plugin: Pick<GovernancePlugin, "stateGraphs">,
+  state: string,
+  kind?: string,
+): boolean => {
+  const graphs = plugin.stateGraphs();
+  for (const graph of graphs) {
+    if (kind !== undefined && graph.kind !== kind) continue;
+    if (graph.terminalStates.includes(state)) return true;
+  }
+  return false;
+};
+
+// ---------------------------------------------------------------------------
+// GovernancePlugin interface
+// ---------------------------------------------------------------------------
+
 export interface GovernancePlugin {
   /** Human-readable name for logging (e.g. "self-organizing", "chain-of-command", "meritocratic", "consensus", "parliamentary"). */
   readonly name: string;
@@ -684,6 +780,88 @@ export interface GovernancePlugin {
    * these vocabularies belong in core.
    */
   isResolvingRecommendation?(recommendation: string): boolean;
+
+  /**
+   * v0.7.0 — Compute the next state for a governance item given its
+   * current state, the live GitHub issue snapshot, and the named
+   * circle members. The facilitator-agent calls this once per wake
+   * for each open governance-typed issue.
+   *
+   * Returns the proposed transition + a human-readable reason. Returns
+   * `null` when no transition applies (e.g. waiting on a named member's
+   * position, or quorum not yet reached).
+   *
+   * Plugins that don't implement this leave items in their current
+   * state — the facilitator will not advance items for plugins that
+   * haven't opted in.
+   *
+   * @see ADR-0041 Part 2
+   */
+  computeNextState?(input: {
+    readonly currentState: string;
+    readonly itemKind: string;
+    readonly issue: IssueSnapshot;
+    readonly circleMembers: readonly AgentId[];
+  }): Promise<{ readonly next: string; readonly reason: string } | null>;
+
+  /**
+   * v0.7.0 — Whether a state is terminal (closeable) for a given kind.
+   * Convenience override; if absent, the harness derives this from the
+   * plugin's `stateGraphs()` via {@link isTerminalState}. Plugins
+   * normally don't need to override unless terminal-ness depends on
+   * runtime conditions beyond the static graph.
+   *
+   * @see ADR-0041 Part 2
+   */
+  isTerminal?(state: string, kind: string): boolean;
+
+  /**
+   * v0.7.0 — Optional plugin-specific closure verification. The
+   * harness always runs a default check that requires structural
+   * change evidence (linked closed issue / commit ref / confirmation
+   * comment / agreement entry). Plugins can layer additional checks
+   * (e.g. consent quorum threshold, expert weighting, majority vote).
+   *
+   * Return `{ ok: true }` to allow closure. Return `{ ok: false; reason }`
+   * to block closure — the facilitator labels the issue
+   * `verification-failed` and re-opens it for one retry; second
+   * failure escalates to Source.
+   *
+   * @see ADR-0041 Part 3
+   */
+  verifyClosure?(input: {
+    readonly issue: IssueSnapshot;
+    readonly state: string;
+    readonly itemKind: string;
+    readonly evidence: ClosureEvidence;
+  }): ClosureVerificationResult;
+
+  /**
+   * v0.7.0 — Build the human-readable agenda block for a circle
+   * meeting given the current state machine snapshot. Plugins can
+   * specialize the agenda format per governance style. If absent,
+   * the facilitator produces a generic list grouped by state.
+   *
+   * @see ADR-0041 Part 1
+   */
+  buildAgenda?(input: {
+    readonly circleId: string;
+    readonly openItems: readonly { readonly issue: IssueSnapshot; readonly state: string }[];
+  }): string;
+
+  /**
+   * v0.7.0 — Determine the default closer role for a given issue type
+   * (`"[TENSION]"`, `"[PROPOSAL]"`, `"[*MEETING]"`, `"[DIRECTIVE]"`,
+   * `"[other]"`, etc.). The harness has its own defaults; plugins can
+   * override per governance style (e.g. parliamentary may want
+   * `"facilitator"` for everything, chain-of-command may route most
+   * closures to `"source"`).
+   *
+   * Returning `undefined` falls through to the harness default.
+   *
+   * @see ADR-0041 Part 3
+   */
+  closerFor?(issueType: string): CloserRole | undefined;
 
   /**
    * Optional hook called once when the daemon starts. Unlike
