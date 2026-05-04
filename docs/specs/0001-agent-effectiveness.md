@@ -428,6 +428,8 @@ Cross-cutting risk: **"big release" cadence loses iterative learning.** Mitigati
 | harness#308 | E          | Priority-tiered signal bundles (subsumes harness#298)        |
 | harness#309 | F          | Effectiveness metrics surface (dashboard tab + Spirit tools) |
 
+**Sister spec — Spec 0002 (Spirit Meta-Agent)** ships in the same v0.7.0 release as workstreams **N–S**: Spirit cross-attach context, memory, murmuration overview, reporting surfaces, per-murmuration skill installation, joint acceptance fixture. Tracked in harness#312–#317. Both specs tag together.
+
 Operator-side adoption work (e.g. backlog cleanup, per-agent role.md migration) is tracked in operator repos and runs in parallel; not blocking the harness release.
 
 ---

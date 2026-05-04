@@ -64,7 +64,7 @@ The four memory types come from Claude Code's auto-memory system — proven taxo
 
 ### Part 3 — Per-murmuration skill installation
 
-Today Spirit's skills are compiled in (`packages/cli/src/spirit/skills/`). v0.8.0 adds an overlay:
+Today Spirit's skills are compiled in (`packages/cli/src/spirit/skills/`). v0.7.0 adds an overlay:
 
 ```
 <root>/.murmuration/spirit/skills/
@@ -92,11 +92,11 @@ Today Spirit's skills are compiled in (`packages/cli/src/spirit/skills/`). v0.8.
 - Memory poisoning surface (ADR-0029 §amendment) applies here too — anything that writes to disk is a vector. Spirit's writers are: Source via `:remember`, Spirit via auto-memory rules. Both are gated on Source intent (Spirit auto-memory only fires inside an attach session).
 - `:reset` is destructive — needs a confirmation prompt and a "this cannot be undone" line.
 
-**Out of scope for ADR-0043 (and v0.8.0):**
+**Out of scope for ADR-0043 (and v0.7.0):**
 
-- **Spirit-as-cron-agent** (Spirit wakes on a schedule, emits digests to Source). The persistent-context plumbing this ADR ships _enables_ that future, but the cron loop, source-facing digest format, and proactive notification surface are deferred to v0.9.
+- **Spirit-as-cron-agent** (Spirit wakes on a schedule, emits digests to Source). The persistent-context plumbing this ADR ships _enables_ that future, but the cron loop, source-facing digest format, and proactive notification surface are deferred to v0.8.
 - **First-class project model.** Murmurations don't yet have a `projects/` directory. Spirit's vision includes "report on project progress" — that needs a separate ADR establishing the project concept first.
-- **Tool installation** (vs skill installation). Compiled tools stay compiled in v0.8. Per-murmuration _tools_ would mean a sandbox runtime; not yet justified.
+- **Tool installation** (vs skill installation). Compiled tools stay compiled in v0.7. Per-murmuration _tools_ would mean a sandbox runtime; not yet justified.
 
 ## Migration
 

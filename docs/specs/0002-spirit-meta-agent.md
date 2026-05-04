@@ -1,16 +1,16 @@
-# Spec 0002 — Spirit Meta-Agent Release (v0.8.0)
+# Spec 0002 — Spirit Meta-Agent Expansion (v0.7.0)
 
 - **Status:** Draft
 - **Owner:** Source (Nori) + Engineering Circle
-- **Target release:** Murmuration Harness v0.8.0
+- **Target release:** Murmuration Harness v0.7.0 (bundled with the agent-effectiveness sweep — Spec 0001)
 - **Driver date:** 2026-05-04
-- **References:** ADR-0043 (Spirit as meta-agent), ADR-0029 (agent memory), ADR-0024 (Spirit identity), ADR-0038 (Spirit MCP bridge), v0.7.0 J1/J2 (session resume plumbing)
+- **References:** Spec 0001 (agent effectiveness — sister spec, same release), ADR-0043 (Spirit as meta-agent), ADR-0029 (agent memory), ADR-0024 (Spirit identity), ADR-0038 (Spirit MCP bridge), v0.7.0 J1/J2 (session resume plumbing)
 
 ---
 
 ## 1. Executive summary
 
-Spirit today is a stateless REPL companion. Every `murmuration attach` starts cold; Source carries the connective tissue between sessions. v0.8.0 turns Spirit into a **per-murmuration meta-agent** that:
+Spirit today is a stateless REPL companion. Every `murmuration attach` starts cold; Source carries the connective tissue between sessions. v0.7.0 turns Spirit into a **per-murmuration meta-agent** that:
 
 1. **Remembers across sessions** — conversation context + curated memory survive detach/re-attach.
 2. **Knows itself** — synthesizes a structured model of the murmuration on demand, cached in memory.
@@ -19,7 +19,9 @@ Spirit today is a stateless REPL companion. Every `murmuration attach` starts co
 
 Spirit becomes the personal-assistant interface to the murmuration. ADR-0043 contains the architectural decisions; this spec is the implementation plan.
 
-**Scope discipline.** v0.8.0 is foundation only — no proactive cron, no project model, no agent-scaffolding interview loop. Those land in v0.8.1 and v0.9 once the foundation is stable. See §13.
+**Why bundled with v0.7.0.** v0.7.0 is the "agent improvement sweep" — Spec 0001 raises agent effectiveness (closure authority, done-criteria, priority bundles, metrics); this spec raises Spirit's effectiveness (cross-attach context, memory, reporting, installable skills) using the same J1/J2/ADR-0029 plumbing. Splitting them would ship two halves of one coherent improvement.
+
+**Scope discipline.** This spec is foundation only — no proactive cron, no project model, no agent-scaffolding interview loop. Those land in v0.7.1 and v0.8 once the foundation is stable. See §13.
 
 ---
 
@@ -57,14 +59,14 @@ Give Spirit the same persistence Story v0.7.0 gave agents (J1/J2 + ADR-0029 memo
 - Operator can install a markdown skill into a running murmuration and have Spirit load it without restart.
 - Memory autosave triggers documented; Source has full control via `:remember` / `:forget` / direct file edit.
 
-### Non-goals (explicitly out of scope for v0.8.0)
+### Non-goals (explicitly out of scope for v0.7.0)
 
-- Spirit-as-cron-agent (proactive wakes) — v0.9
+- Spirit-as-cron-agent (proactive wakes) — v0.8
 - First-class project model (`projects/<slug>/`) — separate ADR + spec
 - Per-murmuration _tool_ installation (sandboxed runtime) — out of scope
 - Web/TUI surface for Spirit memory — REPL only
-- Agent-scaffolding interview tools (`scaffold_agent`) — v0.8.1
-- Optimization advisor (pattern-recognition over time-series metrics) — v0.8.1
+- Agent-scaffolding interview tools (`scaffold_agent`) — v0.7.1
+- Optimization advisor (pattern-recognition over time-series metrics) — v0.7.1
 
 ---
 
@@ -148,7 +150,7 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 
 ## 5. Workstream breakdown
 
-### Workstream A — Per-murmuration Spirit conversation context
+### Workstream N — Per-murmuration Spirit conversation context
 
 **Goal:** Spirit no longer forgets across attaches.
 
@@ -169,7 +171,7 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 - Test: `:reset` clears both files; subsequent attach is fresh.
 - Smoke: real REPL flow against a live `claude` CLI (`RUN_SUBSCRIPTION_CLI_SMOKE=1`).
 
-### Workstream B — Spirit memory
+### Workstream O — Spirit memory
 
 **Goal:** Spirit accumulates curated facts across attaches.
 
@@ -181,7 +183,7 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 - System prompt extended with the four-type taxonomy + autosave rules (copied/adapted from Claude Code's auto-memory section)
 - `MEMORY.md` index, always rendered into system prompt at attach (truncate at 200 lines)
 
-**Dependencies:** Workstream A (memory directory lives next to conversation.jsonl).
+**Dependencies:** Workstream N (memory directory lives next to conversation.jsonl).
 
 **Acceptance:**
 
@@ -191,7 +193,7 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 - Test: `MEMORY.md` truncation at 200 lines preserves frontmatter.
 - A real attach session demonstrates auto-memory firing on a "Source said X" pattern.
 
-### Workstream C — Murmuration overview
+### Workstream P — Murmuration overview
 
 **Goal:** Spirit answers "what is this murmuration?" with a coherent summary instead of file-walking every time.
 
@@ -202,7 +204,7 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 - Result auto-written to `project_murmuration_overview.md` in Spirit memory; future calls return the cached version unless `--refresh` is passed
 - Cache invalidates if any sourced file's mtime is newer than the cache's mtime
 
-**Dependencies:** Workstream B (writes to memory).
+**Dependencies:** Workstream O (writes to memory).
 
 **Acceptance:**
 
@@ -210,7 +212,7 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 - Test: editing `harness.yaml` invalidates the cache; next call rewrites.
 - Test: overview includes every agent dir under `agents/` (no silent skips).
 
-### Workstream D — Reporting surfaces
+### Workstream Q — Reporting surfaces
 
 **Goal:** Spirit synthesizes operator-readable reports — Source asks one question, gets one answer.
 
@@ -221,7 +223,7 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 - New `attention_queue` Spirit tool: failing agents + low met-rate accountabilities + awaiting-source-close items, ranked
 - `:report` REPL leader command (alias for `report all`)
 
-**Dependencies:** Workstreams A + B (reports auto-save themselves to `project_*.md` so subsequent attaches start with "since the last report you asked for…").
+**Dependencies:** Workstreams N + O (reports auto-save themselves to `project_*.md` so subsequent attaches start with "since the last report you asked for…").
 
 **Acceptance:**
 
@@ -230,7 +232,7 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 - Test: `report attention` ranks items by Source-actionability heuristic (documented in spec).
 - Real attach session: ask `:report`, get one screen of useful prose, no JSON dump.
 
-### Workstream E — Per-murmuration skill installation
+### Workstream R — Per-murmuration skill installation
 
 **Goal:** Operators can teach this Spirit operator-specific patterns without forking the harness.
 
@@ -242,7 +244,7 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 - System prompt at attach merges bundled `SKILLS.md` with per-murmuration `SKILLS.md` (per-murmuration shown first)
 - Hand-dropped files picked up on next attach
 
-**Dependencies:** none (independent of A/B/C/D).
+**Dependencies:** none (independent of N/O/P/Q).
 
 **Acceptance:**
 
@@ -251,9 +253,9 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 - Test: a per-murmuration skill with the same name as a bundled skill (e.g. `governance-models`) shadows it.
 - Test: hand-dropped `<root>/.murmuration/spirit/skills/foo.md` is loadable next attach.
 
-### Workstream F — Documentation + acceptance fixture
+### Workstream S — Documentation + acceptance fixture
 
-**Goal:** v0.8.0 ships with the same tag-blocking gate v0.7.0 had.
+**Goal:** v0.7.0's Spirit half ships with the same tag-blocking gate the agent-effectiveness half (Workstream L) provided.
 
 **Deliverables:**
 
@@ -262,45 +264,47 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 - `packages/cli/src/spirit/spirit-meta-fixture.test.ts` — synthetic-corpus-style fixture exercising all five workstreams
 - README mention of the feature
 
-**Dependencies:** Workstreams A–E complete.
+**Dependencies:** Workstreams N–R complete.
 
 **Acceptance:**
 
 - Fixture pins memory write/read shape, conversation persistence across simulated attach, report synthesis output.
-- All v0.7.0 tests still pass.
+- All Spec 0001 (A–M) tests still pass.
 - `pnpm run check` clean.
 
 ---
 
 ## 6. Sequencing
 
+Spec 0001 (A–M) is already on `feat/v0.7.0-agent-effectiveness`. Spec 0002 (N–S) lands on the same branch before the v0.7.0 tag.
+
 ```
-Week 1
-  └── Workstream A (cross-attach context) ── load-bearing prereq ────────┐
+Week 1 (this spec)
+  └── Workstream N (cross-attach context) ── load-bearing prereq ────────┐
                                                                           │
 Week 2                                                                    │
-  ├── Workstream B (memory) ── depends on A ─────────────────────────────┤
-  └── Workstream E (skill install) ── independent, parallel ─────────────┘
+  ├── Workstream O (memory) ── depends on N ─────────────────────────────┤
+  └── Workstream R (skill install) ── independent, parallel ─────────────┘
 
 Week 3
-  ├── Workstream C (overview) ── depends on B ───────────────────────────┐
-  └── Workstream D (reporting) ── depends on B ──────────────────────────┘
+  ├── Workstream P (overview) ── depends on O ───────────────────────────┐
+  └── Workstream Q (reporting) ── depends on O ──────────────────────────┘
 
 Week 4
-  └── Workstream F (fixture + docs) + tag v0.8.0 ────────────────────────┘
+  └── Workstream S (fixture + docs) + tag v0.7.0 (joint with Spec 0001) ─┘
 ```
 
-Total wall-clock: ~3–4 weeks of focused harness work. Phasing matches v0.7.0's pattern (foundation → surfaces → fixture → tag).
+Total wall-clock: ~3–4 weeks of focused harness work for the Spirit half. The branch already carries A–M (shipped); N–S extend it. Single tag at the end.
 
 ---
 
 ## 7. Migration plan
 
-- Single PR per workstream A–F, all merged on `feat/v0.8.0-spirit-meta-agent` branch.
-- Branch is the v0.8.0 release candidate; tag from there after fixture passes.
+- Single PR per workstream N–S, all merged on the existing `feat/v0.7.0-agent-effectiveness` branch (PR #311).
+- Branch is the v0.7.0 release candidate; tag from there after the joint Spec 0001 + Spec 0002 fixtures pass.
 - New murmurations: `murmuration init` creates `<root>/.murmuration/spirit/` with empty `MEMORY.md` + `SKILLS.md` index.
 - Existing murmurations: first `murmuration attach` after upgrade auto-creates the directory. No data migration.
-- No backwards-compatibility shims for system-prompt changes — the new prompt teaches the new memory taxonomy; older Spirit conversations don't survive the upgrade and don't need to (no on-disk state existed pre-v0.8.0).
+- No backwards-compatibility shims for system-prompt changes — the new prompt teaches the new memory taxonomy; older Spirit conversations don't survive the upgrade and don't need to (no on-disk state existed pre-v0.7.0).
 
 **Operator migration** (separate work): operators may seed per-murmuration `MEMORY.md` files manually before first attach if they want Spirit to start with operator context already loaded. Documented as optional in CONFIGURATION.md.
 
@@ -318,7 +322,7 @@ Total wall-clock: ~3–4 weeks of focused harness work. Phasing matches v0.7.0's
 ### Acceptance gates (tag-blocking)
 
 - All workstream tests pass.
-- Synthetic fixture (Workstream F) pins all v0.8.0 behavior.
+- Synthetic fixture (Workstream S) pins all Spec 0002 behavior; Spec 0001's L fixture continues to pin A–M behavior.
 - `pnpm run check` clean.
 - One real-Source attach session demonstrates resume + memory recall + report synthesis (smoke test, not automated).
 
@@ -348,18 +352,18 @@ Total wall-clock: ~3–4 weeks of focused harness work. Phasing matches v0.7.0's
 
 | Issue       | Workstream                                      |
 | ----------- | ----------------------------------------------- |
-| harness#312 | A — Per-murmuration Spirit conversation context |
-| harness#313 | B — Spirit memory                               |
-| harness#314 | C — Murmuration overview tool                   |
-| harness#315 | D — Reporting surfaces                          |
-| harness#316 | E — Per-murmuration skill installation          |
-| harness#317 | F — Documentation + acceptance fixture          |
+| harness#312 | N — Per-murmuration Spirit conversation context |
+| harness#313 | O — Spirit memory                               |
+| harness#314 | P — Murmuration overview tool                   |
+| harness#315 | Q — Reporting surfaces                          |
+| harness#316 | R — Per-murmuration skill installation          |
+| harness#317 | S — Documentation + acceptance fixture          |
 
 ---
 
 ## 12. Open questions
 
-1. **Memory autosave aggressiveness.** Claude Code's auto-memory fires on detected patterns. Should Spirit's autosave be identical (aggressive) or more conservative (explicit `:remember` only at first, tune later)? Initial recommendation: ship aggressive, observe one operator's first month, tune in v0.8.1.
+1. **Memory autosave aggressiveness.** Claude Code's auto-memory fires on detected patterns. Should Spirit's autosave be identical (aggressive) or more conservative (explicit `:remember` only at first, tune later)? Initial recommendation: ship aggressive, observe one operator's first month, tune in v0.7.1.
 2. **Reset granularity.** ADR-0043 §open-questions noted `:reset memory` and `:reset conversation` separately. Spec proposes both — confirm.
 3. **Memory sync between machines.** Source uses Spirit from his laptop _and_ his desktop. Is `<root>/.murmuration/spirit/` checked in via git, synced via cloud, or kept local-only? Recommendation: explicitly _not_ in git (would expose user-type memory in repo); operator decides if they want cloud sync. Document in CONFIGURATION.md.
 4. **Subscription-CLI sessionId portability.** Across machines, the CLI's session store is local. Cross-machine attach with the same `sessionId` will fail upstream (CLI returns "session not found"). Spirit should detect this and fall back to fresh-session-with-conversation-replay. Acceptance test required.
@@ -367,11 +371,11 @@ Total wall-clock: ~3–4 weeks of focused harness work. Phasing matches v0.7.0's
 
 ---
 
-## 13. Out-of-scope follow-ups (post-v0.8.0)
+## 13. Out-of-scope follow-ups (post-v0.7.0)
 
-- **v0.8.1 — Spirit recommendations.** Optimization advisor that surfaces "agent X has 3 consecutive failures" or "weekly-digest met-rate dropped from 80% to 30% over 2 weeks." Pattern recognition over time-series metrics.
-- **v0.8.1 — Agent scaffolding interview.** `propose-new-agent` skill + `scaffold_agent` / `commit_agent` tools. Discovery loop → staging → install.
-- **v0.9.0 — Spirit-as-cron-agent.** Spirit wakes on a schedule, emits digest _to Source_ (not GitHub). Mirrors agent pattern but Source-facing. Needs separate ADR (notification surface, schedule semantics, opt-in vs default).
-- **v0.9.0 — Project model.** First-class `projects/<slug>/` directory; agents declare project membership; Spirit `project_status(slug)` aggregates relevant signals across the murmuration.
+- **v0.7.1 — Spirit recommendations.** Optimization advisor that surfaces "agent X has 3 consecutive failures" or "weekly-digest met-rate dropped from 80% to 30% over 2 weeks." Pattern recognition over time-series metrics.
+- **v0.7.1 — Agent scaffolding interview.** `propose-new-agent` skill + `scaffold_agent` / `commit_agent` tools. Discovery loop → staging → install.
+- **v0.8.0 — Spirit-as-cron-agent.** Spirit wakes on a schedule, emits digest _to Source_ (not GitHub). Mirrors agent pattern but Source-facing. Needs separate ADR (notification surface, schedule semantics, opt-in vs default).
+- **v0.8.0 — Project model.** First-class `projects/<slug>/` directory; agents declare project membership; Spirit `project_status(slug)` aggregates relevant signals across the murmuration.
 
-These are flagged here so v0.8.0's foundation is built with them in mind, but they don't gate v0.8.0's tag.
+These are flagged here so v0.7.0's foundation is built with them in mind, but they don't gate v0.7.0's tag.
