@@ -19,6 +19,7 @@ import type { ToolDefinition } from "@murmurations-ai/llm";
 import { z } from "zod";
 
 import { SpiritMemory, type MemoryType } from "./memory.js";
+import { describeMurmuration } from "./overview.js";
 import { spiritSkillsDir } from "./system-prompt.js";
 
 // ---------------------------------------------------------------------------
@@ -402,6 +403,37 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
   };
 
   // ------------------------------------------------------------------------
+  // Murmuration overview (Workstream P)
+  //
+  // describe_murmuration walks harness.yaml + soul.md + agents/* + groups/*
+  // and returns a structured overview. Result is auto-cached as a project
+  // memory; cache invalidates if any source file's mtime is newer.
+  // ------------------------------------------------------------------------
+  const describeMurmurationTool: SpiritTool = {
+    name: "describe_murmuration",
+    description:
+      "Return a structured overview of this murmuration: governance model, agents (with tier + wake schedule + group membership), groups (with members + facilitator), and the murmuration's purpose. Cached in Spirit memory; cache invalidates when source files change. Pass --refresh (refresh: true) to force a re-walk.",
+    parameters: z.object({
+      refresh: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true, re-walk source files even if the cache is fresh. Use sparingly — the cache is already mtime-checked.",
+        ),
+    }),
+    execute: async (input) => {
+      const { refresh } = input as { refresh?: boolean };
+      try {
+        const result = await describeMurmuration(rootDir, { refresh: refresh ?? false });
+        const cacheTag = result.overview.fromCache ? " (from cache)" : "";
+        return `${result.markdown}\n\n_Source: ${result.overview.fromCache ? "cached overview" : "fresh walk"}${cacheTag}._`;
+      } catch (err) {
+        return `describe_murmuration error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  // ------------------------------------------------------------------------
   // Facilitator-related tools (Workstream K3)
   //
   // Source-facing surfaces for v0.7.0 effectiveness work — read-only
@@ -504,6 +536,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     rememberTool,
     forgetTool,
     recallTool,
+    describeMurmurationTool,
     getFacilitatorLogTool,
     getAgreementTool,
     listAwaitingSourceCloseTool,
