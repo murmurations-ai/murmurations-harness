@@ -532,6 +532,8 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
           ":stop",
           ":quit",
           ":help",
+          ":reset",
+          ":bye",
         ];
         return finalize(
           commands.filter((c) => c.startsWith(cmd)),
@@ -790,6 +792,48 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     rl.prompt();
   };
 
+  // v0.7.0 [N] — `:reset` clears Spirit's cross-attach context.
+  // `:reset memory` is reserved for [O] (Spirit memory). `:reset
+  // conversation` is an explicit alias for `:reset` (clears
+  // conversation.jsonl + session.json only).
+  const handleSpiritReset = async (input: string): Promise<void> => {
+    if (input === ":reset memory") {
+      console.log("(`:reset memory` will land with Workstream O — see harness#313)");
+      rl.prompt();
+      return;
+    }
+    const session = await ensureSpirit();
+    if (!session) {
+      console.log(`(Spirit unavailable: ${spiritUnavailableReason ?? "unknown"})`);
+      rl.prompt();
+      return;
+    }
+    try {
+      await session.reset();
+      console.log(
+        "Spirit conversation context cleared. The next turn will start fresh (this cannot be undone).",
+      );
+    } catch (err) {
+      console.log(`(reset error: ${err instanceof Error ? err.message : String(err)})`);
+    }
+    rl.prompt();
+  };
+
+  // Eagerly initialise the Spirit on attach so we can show a "resumed"
+  // greeting before the operator types anything. Failures are silent
+  // (fall through to the lazy path on first turn — same as before).
+  const initialSession = await ensureSpirit();
+  if (initialSession) {
+    if (initialSession.resumed && initialSession.lastTurnAt) {
+      console.log(
+        `Spirit resumed (last turn ${initialSession.lastTurnAt}). Type :reset to start fresh.\n`,
+      );
+    } else {
+      console.log("Spirit fresh attach (no prior context).\n");
+    }
+    rl.prompt();
+  }
+
   rl.on("line", (line) => {
     const input = line.trim();
 
@@ -814,6 +858,18 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     // state while thinking; the REPL should respect that.
     if (input.length === 0) {
       rl.prompt();
+      return;
+    }
+
+    // Spirit-context REPL commands (v0.7.0 [N]) — handled here because
+    // they need the closure-tracked spiritSession reference.
+    if (input === ":reset" || input === ":reset memory" || input === ":reset conversation") {
+      void handleSpiritReset(input);
+      return;
+    }
+    if (input === ":bye") {
+      console.log("(detaching — Spirit context preserved for next attach)");
+      rl.close();
       return;
     }
 
@@ -1496,6 +1552,8 @@ const handleCommand = async (
   :open <url|agent|group>           Open URL in browser, or file in $EDITOR
   :switch <session-name>            Switch to another murmuration
   :stop                             Stop the daemon
+  :reset                            Clear Spirit's cross-attach conversation
+  :bye                              Detach with a Spirit-context-preserved farewell
   :quit (q)                         Detach from daemon
   :help (?)                         Show this help
 

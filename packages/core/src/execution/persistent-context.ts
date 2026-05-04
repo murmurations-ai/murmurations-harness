@@ -14,7 +14,7 @@
  * the message array across wakes instead of starting fresh each time.
  */
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -132,6 +132,40 @@ export class ConversationStore {
     this.#messages.push(msg);
     this.#totalTokens += msg.tokenCount ?? 0;
     await this.#persist();
+  }
+
+  /**
+   * Drop the trailing message from memory and disk. Used by the Spirit
+   * REPL when an LLM call fails mid-turn — the user message was already
+   * persisted, but no assistant reply is coming, so the orphan record
+   * would mislead the next attach. No-op when the store is empty.
+   */
+  public async popLast(): Promise<ConversationMessage | undefined> {
+    const last = this.#messages.pop();
+    if (!last) return undefined;
+    this.#totalTokens -= last.tokenCount ?? 0;
+    await this.#persist();
+    return last;
+  }
+
+  /**
+   * Clear all messages and the captured sessionId, removing both files
+   * from disk. Used by Spirit's `:reset` REPL command.
+   */
+  public async reset(): Promise<void> {
+    this.#messages = [];
+    this.#totalTokens = 0;
+    this.#sessionId = undefined;
+    try {
+      await rm(this.#path, { force: true });
+    } catch {
+      /* best-effort */
+    }
+    try {
+      await rm(this.#sessionPath, { force: true });
+    } catch {
+      /* best-effort */
+    }
   }
 
   /**

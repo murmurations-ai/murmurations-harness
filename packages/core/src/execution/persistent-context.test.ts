@@ -261,6 +261,95 @@ describe("ConversationStore", () => {
   });
 });
 
+describe("ConversationStore.popLast (v0.7.0 [N])", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = join(tmpdir(), `murm-conv-pop-${randomUUID().slice(0, 8)}`);
+    mkdirSync(tmpDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true });
+  });
+
+  it("removes the trailing message from memory and disk", async () => {
+    const store = new ConversationStore(tmpDir);
+    await store.append({ role: "user", content: "first", ts: "2026-05-04T10:00:00Z" });
+    await store.append({ role: "assistant", content: "second", ts: "2026-05-04T10:00:01Z" });
+    await store.append({ role: "user", content: "third", ts: "2026-05-04T10:00:02Z" });
+
+    const popped = await store.popLast();
+    expect(popped?.content).toBe("third");
+    expect(store.messages).toHaveLength(2);
+
+    const reloaded = new ConversationStore(tmpDir);
+    await reloaded.load();
+    expect(reloaded.messages).toHaveLength(2);
+    expect(reloaded.messages[reloaded.messages.length - 1]?.content).toBe("second");
+  });
+
+  it("returns undefined and is a no-op on an empty store", async () => {
+    const store = new ConversationStore(tmpDir);
+    const popped = await store.popLast();
+    expect(popped).toBeUndefined();
+    expect(store.isEmpty).toBe(true);
+  });
+
+  it("decrements totalTokens by the popped message's count", async () => {
+    const store = new ConversationStore(tmpDir);
+    await store.append({ role: "user", content: "a", ts: "t1", tokenCount: 5 });
+    await store.append({ role: "assistant", content: "b", ts: "t2", tokenCount: 8 });
+    expect(store.totalTokens).toBe(13);
+    await store.popLast();
+    expect(store.totalTokens).toBe(5);
+  });
+});
+
+describe("ConversationStore.reset (v0.7.0 [N])", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = join(tmpdir(), `murm-conv-reset-${randomUUID().slice(0, 8)}`);
+    mkdirSync(tmpDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true });
+  });
+
+  it("clears in-memory state, sessionId, and both files", async () => {
+    const store = new ConversationStore(tmpDir);
+    await store.append({ role: "user", content: "hi", ts: "t1" });
+    await store.setSessionId("sess-123");
+    expect(existsSync(join(tmpDir, "conversation.jsonl"))).toBe(true);
+    expect(existsSync(join(tmpDir, "session.json"))).toBe(true);
+
+    await store.reset();
+    expect(store.isEmpty).toBe(true);
+    expect(store.sessionId).toBeUndefined();
+    expect(existsSync(join(tmpDir, "conversation.jsonl"))).toBe(false);
+    expect(existsSync(join(tmpDir, "session.json"))).toBe(false);
+  });
+
+  it("a fresh store after reset behaves like a new store", async () => {
+    const store = new ConversationStore(tmpDir);
+    await store.append({ role: "user", content: "first", ts: "t1" });
+    await store.reset();
+
+    const fresh = new ConversationStore(tmpDir);
+    expect(await fresh.load()).toBe(false);
+    expect(fresh.isEmpty).toBe(true);
+    expect(fresh.sessionId).toBeUndefined();
+  });
+
+  it("is idempotent on an empty store", async () => {
+    const store = new ConversationStore(tmpDir);
+    await store.reset();
+    expect(store.isEmpty).toBe(true);
+  });
+});
+
 describe("parsePersistentConfig", () => {
   it("returns null for stateless agents", () => {
     expect(parsePersistentConfig({})).toBeNull();

@@ -13,7 +13,12 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { makeSecretKey, makeSecretValue, type SecretValue } from "@murmurations-ai/core";
+import {
+  ConversationStore,
+  makeSecretKey,
+  makeSecretValue,
+  type SecretValue,
+} from "@murmurations-ai/core";
 import {
   createLLMClient,
   createSubscriptionCliClient,
@@ -47,8 +52,18 @@ type Send = (method: string, params?: Record<string, unknown>) => Promise<Socket
 
 export interface SpiritSession {
   turn(message: string): Promise<SpiritTurnResult>;
+  /**
+   * Clear the per-murmuration conversation context: in-memory history,
+   * captured sessionId, and the on-disk `<root>/.murmuration/spirit/`
+   * conversation.jsonl + session.json files. The next turn starts cold.
+   */
+  reset(): Promise<void>;
   readonly provider: LLMProvider;
   readonly model: string;
+  /** True when prior conversation context was rehydrated at attach. */
+  readonly resumed: boolean;
+  /** ISO timestamp of the most recent persisted turn, when resumed. */
+  readonly lastTurnAt: string | undefined;
 }
 
 export interface SpiritTurnResult {
@@ -222,16 +237,33 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
   const systemPrompt = await buildSpiritSystemPrompt();
   const tools = useApiTools ? buildSpiritTools({ rootDir, send }) : undefined;
 
-  const history: LLMMessage[] = [];
+  // v0.7.0 [N]: per-murmuration Spirit conversation persistence.
+  // Same ConversationStore the daemon uses for J2 (agent wake-to-wake
+  // resume); reused at the REPL boundary so re-attach picks up where
+  // the prior attach left off. Files live at:
+  //   <root>/.murmuration/spirit/conversation.jsonl  — turn log
+  //   <root>/.murmuration/spirit/session.json        — captured sessionId
+  const spiritDir = join(rootDir, ".murmuration", "spirit");
+  const store = new ConversationStore(spiritDir);
+  const resumed = await store.load();
+  const history: LLMMessage[] = store
+    .toLLMMessages()
+    .filter((m): m is LLMMessage => m.role === "user" || m.role === "assistant");
+  const lastPersisted = store.messages[store.messages.length - 1];
+  const lastTurnAt = lastPersisted?.ts;
+
   const pricing = PRICING[harness.llm.provider];
 
   // v0.7.0 (harness#293): subscription-CLI session resume. Closure-tracked
   // across turns; passed back on each subsequent request so the CLI keeps
   // its prompt cache warm. Direct API providers ignore the field.
-  let sessionId: string | undefined;
+  // [N] adds cross-attach restore from session.json.
+  let sessionId: string | undefined = store.sessionId;
 
   const turn = async (message: string): Promise<SpiritTurnResult> => {
     history.push({ role: "user", content: message });
+    const userTs = new Date().toISOString();
+    await store.append({ role: "user", content: message, ts: userTs });
 
     const maxSteps = harness.spirit.maxSteps;
     // When sessionId is present, the subscription-CLI adapter uses
@@ -255,14 +287,23 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
 
     if (!result.ok) {
       history.pop();
+      // The user message was already persisted before the LLM call;
+      // roll it back so the next attach doesn't see an orphan turn.
+      await store.popLast();
       throw new Error(`\n${formatLLMError(result.error, { agentId: "spirit", model })}`);
     }
 
     history.push({ role: "assistant", content: result.value.content });
+    await store.append({
+      role: "assistant",
+      content: result.value.content,
+      ts: new Date().toISOString(),
+    });
 
     // Capture the CLI's session id for the next turn (if surfaced).
     if (typeof result.value.sessionId === "string" && result.value.sessionId.length > 0) {
       sessionId = result.value.sessionId;
+      await store.setSessionId(sessionId);
     }
 
     const inputTokens = result.value.inputTokens;
@@ -289,5 +330,18 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     };
   };
 
-  return { turn, provider: harness.llm.provider, model };
+  const reset = async (): Promise<void> => {
+    history.length = 0;
+    sessionId = undefined;
+    await store.reset();
+  };
+
+  return {
+    turn,
+    reset,
+    provider: harness.llm.provider,
+    model,
+    resumed,
+    lastTurnAt,
+  };
 };
