@@ -305,6 +305,94 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     },
   };
 
+  // ------------------------------------------------------------------------
+  // Facilitator-related tools (Workstream K3)
+  //
+  // Source-facing surfaces for v0.7.0 effectiveness work — read-only
+  // disk queries that do not require the daemon. Items requiring
+  // GitHub state (label queries, issue mutations) defer to the
+  // operator's `gh` CLI with a generated command, since Spirit does
+  // not currently hold a GitHub client. A daemon-RPC version is
+  // planned as a follow-up.
+  // ------------------------------------------------------------------------
+
+  const getFacilitatorLogTool: SpiritTool = {
+    name: "get_facilitator_log",
+    description:
+      "Read the most recent facilitator-agent wake digest from disk (or a specific date if given). Returns the full digest body — transitions, closures, retries, escalations. Use to scan what the facilitator did on its latest pass.",
+    parameters: z.object({
+      date: z
+        .string()
+        .optional()
+        .describe("Optional YYYY-MM-DD date to fetch. Defaults to the most recent wake."),
+    }),
+    execute: async (input) => {
+      const { date } = input as { date?: string };
+      try {
+        return await readLatestFacilitatorDigest(rootDir, date);
+      } catch (err) {
+        return `get_facilitator_log error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  const getAgreementTool: SpiritTool = {
+    name: "get_agreement",
+    description:
+      "Fetch a governance agreement (item) by id from the on-disk store at .murmuration/governance/items.jsonl. Returns JSON with current state, history, and reviewAt. Use after `convene` to confirm a decision was recorded.",
+    parameters: z.object({
+      id: z.string().describe("Governance item id (e.g. 'proposal-2026-05-04-priorities')."),
+    }),
+    execute: async (input) => {
+      const { id } = input as { id: string };
+      try {
+        const item = await readGovernanceItem(rootDir, id);
+        if (!item) return `get_agreement: no item with id "${id}"`;
+        return JSON.stringify(item, null, 2);
+      } catch (err) {
+        return `get_agreement error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  const listAwaitingSourceCloseTool: SpiritTool = {
+    name: "list_awaiting_source_close",
+    description:
+      'List GitHub issues the facilitator has flagged as awaiting Source action (label `awaiting:source-close`). Best-effort disk scan: parses the most recent facilitator-agent digest for the awaiting-close section. For an authoritative live query, run: `gh issue list --label "awaiting:source-close" --repo <owner>/<repo>`.',
+    parameters: z.object({}),
+    execute: async () => {
+      try {
+        const digest = await readLatestFacilitatorDigest(rootDir);
+        return extractAwaitingCloseSection(digest);
+      } catch (err) {
+        return `list_awaiting_source_close error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  const closeIssueTool: SpiritTool = {
+    name: "close_issue",
+    description:
+      "Source-side close from the REPL. Spirit does not currently hold a GitHub write client — this tool returns the exact `gh issue close` invocation to run, including the closing comment. Run it with `:!` or paste it into a terminal.",
+    parameters: z.object({
+      number: z.number().int().positive().describe("Issue number to close."),
+      reason: z.string().describe("Closing comment / decision summary."),
+      repo: z
+        .string()
+        .optional()
+        .describe("owner/repo. If omitted, gh uses the current working directory's repo."),
+    }),
+    execute: (input) => {
+      const { number, reason, repo } = input as { number: number; reason: string; repo?: string };
+      const escaped = reason.replace(/'/g, "'\\''");
+      const repoArg = repo ? ` --repo ${repo}` : "";
+      const cmd = `gh issue close ${String(number)}${repoArg} --comment '${escaped}'`;
+      return Promise.resolve(
+        `Run this to close the issue (Spirit can't mutate GitHub directly yet):\n\n  ${cmd}\n`,
+      );
+    },
+  };
+
   return [
     statusTool,
     agentsTool,
@@ -317,5 +405,107 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     wakeTool,
     directiveTool,
     conveneTool,
+    getFacilitatorLogTool,
+    getAgreementTool,
+    listAwaitingSourceCloseTool,
+    closeIssueTool,
   ];
+};
+
+// ---------------------------------------------------------------------------
+// Workstream K3 — disk readers backing the facilitator-related tools
+// ---------------------------------------------------------------------------
+
+const readLatestFacilitatorDigest = async (rootDir: string, date?: string): Promise<string> => {
+  const facilitatorDir = join(rootDir, "runs", "facilitator-agent");
+  let dayDirs: string[];
+  try {
+    const entries = await readdir(facilitatorDir, { withFileTypes: true });
+    dayDirs = entries
+      .filter((e) => e.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(e.name))
+      .map((e) => e.name)
+      .sort();
+  } catch {
+    return "(facilitator-agent has no runs yet — start the daemon and wait for its first wake)";
+  }
+  if (dayDirs.length === 0) {
+    return "(facilitator-agent has no wake digests yet)";
+  }
+
+  const targetDay = date ?? dayDirs[dayDirs.length - 1] ?? "";
+  const dayPath = join(facilitatorDir, targetDay);
+
+  let digestFiles: string[];
+  try {
+    const dayEntries = await readdir(dayPath);
+    digestFiles = dayEntries.filter((f) => f.startsWith("digest-") && f.endsWith(".md")).sort();
+  } catch {
+    return `(no digests found for ${targetDay})`;
+  }
+  if (digestFiles.length === 0) {
+    return `(no digests found for ${targetDay})`;
+  }
+
+  const latest = digestFiles[digestFiles.length - 1] ?? "";
+  return await readFile(join(dayPath, latest), "utf8");
+};
+
+interface RawGovernanceItem {
+  readonly id?: unknown;
+  readonly kind?: unknown;
+  readonly currentState?: unknown;
+  readonly createdBy?: { readonly value?: unknown };
+  readonly createdAt?: unknown;
+  readonly reviewAt?: unknown;
+  readonly history?: readonly unknown[];
+}
+
+const readGovernanceItem = async (
+  rootDir: string,
+  id: string,
+): Promise<RawGovernanceItem | null> => {
+  const path = join(rootDir, ".murmuration", "governance", "items.jsonl");
+  let content: string;
+  try {
+    content = await readFile(path, "utf8");
+  } catch {
+    return null;
+  }
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    try {
+      const parsed = JSON.parse(trimmed) as RawGovernanceItem;
+      if (parsed.id === id) return parsed;
+    } catch {
+      /* skip malformed line */
+    }
+  }
+  return null;
+};
+
+const extractAwaitingCloseSection = (digest: string): string => {
+  if (digest.startsWith("(")) return digest;
+
+  const lines = digest.split("\n");
+  const collected: string[] = [];
+  let inSection = false;
+  for (const line of lines) {
+    const isHeader = /^#{1,6}\s/.test(line);
+    if (isHeader) {
+      const lower = line.toLowerCase();
+      if (lower.includes("awaiting") && lower.includes("source")) {
+        inSection = true;
+        collected.push(line);
+        continue;
+      }
+      if (inSection) break;
+    }
+    if (inSection) collected.push(line);
+  }
+
+  if (collected.length === 0) {
+    return "(no 'awaiting source' section in the latest facilitator digest — check `gh issue list --label \"awaiting:source-close\"` for live state)";
+  }
+  return collected.join("\n").trim();
 };
