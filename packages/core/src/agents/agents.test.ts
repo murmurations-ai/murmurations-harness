@@ -138,6 +138,45 @@ describe("AgentStateStore", () => {
     store.register("c", 3000);
     expect(store.getAllAgents()).toHaveLength(3);
   });
+
+  // -------------------------------------------------------------------
+  // Idle-wake skip — harness#297
+  // -------------------------------------------------------------------
+
+  it("recordFiredContextHash stores the hash and resets idleSkipStreak", () => {
+    const store = new AgentStateStore();
+    store.register("agent", 1000);
+    expect(store.getAgent("agent")?.lastFiredContextHash).toBeNull();
+    expect(store.getAgent("agent")?.idleSkipStreak).toBe(0);
+
+    // Simulate a few skips first.
+    store.recordIdleSkip("agent");
+    store.recordIdleSkip("agent");
+    expect(store.getAgent("agent")?.idleSkipStreak).toBe(2);
+
+    // A real fire records the hash and zeros the streak.
+    store.recordFiredContextHash("agent", "abc123");
+    expect(store.getAgent("agent")?.lastFiredContextHash).toBe("abc123");
+    expect(store.getAgent("agent")?.idleSkipStreak).toBe(0);
+  });
+
+  it("recordIdleSkip increments idleSkipStreak monotonically", () => {
+    const store = new AgentStateStore();
+    store.register("agent", 1000);
+
+    store.recordIdleSkip("agent");
+    expect(store.getAgent("agent")?.idleSkipStreak).toBe(1);
+    store.recordIdleSkip("agent");
+    store.recordIdleSkip("agent");
+    expect(store.getAgent("agent")?.idleSkipStreak).toBe(3);
+  });
+
+  it("idle-skip methods are no-ops for unknown agentId", () => {
+    const store = new AgentStateStore();
+    expect(() => store.recordFiredContextHash("ghost", "x")).not.toThrow();
+    expect(() => store.recordIdleSkip("ghost")).not.toThrow();
+    expect(store.getAgent("ghost")).toBeUndefined();
+  });
 });
 
 describe("AgentStateStore persistence", () => {

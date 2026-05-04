@@ -116,7 +116,14 @@ export interface DefaultRunnerClients {
      * reads is declared here; the underlying `LLMClient` interface
      * surfaces more.
      */
-    capabilities(): { readonly supportsToolUse: boolean };
+    capabilities(): {
+      readonly supportsToolUse: boolean;
+      /** Optional provider id (e.g. "claude-cli", "anthropic"); used to
+       *  describe the runtime in the prompt when no per-request tools
+       *  are advertised. Narrowed locally; full LLMClient capabilities
+       *  surface this and more. */
+      readonly provider?: string | undefined;
+    };
   };
   /** MCP tool loader — connects to MCP servers and returns tool definitions. */
   readonly mcpToolLoader?: {
@@ -394,14 +401,17 @@ export function createDefaultRunner(
     //
     // When the bound client reports `supportsToolUse: false`
     // (subscription-CLI family, ADR-0034 / ADR-0038), per-request
-    // tool delivery is disabled. The prompt must NOT advertise tools
-    // the agent can't actually call — doing so produces the
-    // narrative-only-claim regression observed across May 1's
-    // engineering circle wakes (5 of 6 raised this as a TENSION).
-    // We collapse to the "_None._" fallback in that case so the
-    // agent stays text-only and routes capability gaps through
-    // GOVERNANCE_EVENT instead of pretending to call missing tools.
-    const supportsRequestTools = clients.llm.capabilities().supportsToolUse;
+    // tool delivery is disabled. We do not pass `request.tools` and
+    // do not list per-request tools in the prompt — but we MUST tell
+    // the agent it has its runtime's own tool ecosystem (Bash incl.
+    // `gh`, file editing, code search, plus any MCP servers wired
+    // via the subprocess's --mcp-config). The previous "_None._"
+    // fallback caused 18 agents in a single round (live run
+    // 2026-05-03) to file convergent TENSION/PROPOSAL issues
+    // complaining their declared capabilities (e.g. "Comment on
+    // issues: YES") didn't match the prompt's empty tools list.
+    const llmCaps = clients.llm.capabilities();
+    const supportsRequestTools = llmCaps.supportsToolUse;
     const mcpConfigs = supportsRequestTools ? (spawn.mcpServerConfigs ?? []) : [];
     const allTools: RunnerToolDefinition[] = [];
     if (supportsRequestTools) {
@@ -446,6 +456,15 @@ export function createDefaultRunner(
               ", ",
             )}) to check whether the repo is already indexed. Skip indexing when state is current — re-indexing dumps massive confirmation payloads into your context (verified: 1M+ tokens for one needless re-index).`
         : "";
+    // The "no per-request tools" message branches on whether the
+    // client runs its own tool loop. Subscription-CLI clients do —
+    // their runtime (claude-cli, codex-cli, gemini-cli) provides
+    // Bash, file editing, gh CLI, etc. natively, plus any MCP
+    // servers wired via --mcp-config. API-tool clients with no
+    // tools loaded truly have nothing.
+    const noPerRequestToolsBlock = supportsRequestTools
+      ? `\n### Tools you can call this wake\n_None._ If your task requires a tool you don't have, file a GOVERNANCE_EVENT requesting the capability rather than narrating fictional completion.`
+      : `\n### Tools you can call this wake\nPer-request tools are not advertised — your runtime${llmCaps.provider ? ` (\`${llmCaps.provider}\`)` : ""} runs its own tool loop and provides them directly: shell access (use \`gh\` for GitHub operations matching your declared capabilities above), file editing, code search, and any MCP servers configured for your subprocess. **Use them to act on issues** — do not narrate "I will comment on #N" or "I would post Y." Call the tool. If a capability you need is genuinely missing from your runtime, file a GOVERNANCE_EVENT naming the specific gap.`;
     const toolsBlock =
       tools && tools.length > 0
         ? `\n### Tools you can call this wake\n${tools
@@ -453,7 +472,7 @@ export function createDefaultRunner(
             .join(
               "\n",
             )}\n\nThese are real tool calls. **Use them** — do not narrate "I will read X" or "I would post Y." Either call the tool to do the work, or file a GOVERNANCE_EVENT explaining the specific blocker that prevents the call. Narrating an action without calling its tool is a Boundary 5 hallucination and will be flagged in your wake artifacts.${setupDisciplineBlock}`
-        : `\n### Tools you can call this wake\n_None._ If your task requires a tool you don't have, file a GOVERNANCE_EVENT requesting the capability rather than narrating fictional completion.`;
+        : noPerRequestToolsBlock;
     const capsBlock = caps
       ? `\n\n## Your Capabilities\nIf any capability you need to fulfill your role is missing, file a GOVERNANCE_EVENT requesting it.\n### GitHub\n- Commit files: ${caps.github.canCommit ? `YES (paths: ${caps.github.commitPaths.join(", ")})` : "NO"}\n- Comment on issues: ${caps.github.canCommentIssues ? "YES" : "NO"}\n- Create issues: ${caps.github.canCreateIssues ? "YES" : "NO"}\n- Label issues: ${caps.github.canLabelIssues ? "YES" : "NO"}${caps.cliTools.length > 0 ? `\n### CLI Tools\n${caps.cliTools.map((t) => `- ${t}`).join("\n")}` : ""}${caps.mcpServers.length > 0 ? `\n### MCP Servers\n${caps.mcpServers.map((s) => `- ${s}`).join("\n")}` : ""}\n### Signal Sources\n${caps.signalSources.map((s) => `- ${s}`).join("\n") || "- (none configured)"}${toolsBlock}`
       : toolsBlock;

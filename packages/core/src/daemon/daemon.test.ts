@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { AgentStateStore } from "../agents/index.js";
 import { makeAgentId, makeGroupId } from "../execution/index.js";
 import { SubprocessExecutor } from "../execution/subprocess.js";
 import { makeSecretKey, makeSecretValue } from "../secrets/index.js";
@@ -436,6 +437,109 @@ describe("Daemon", () => {
 
     daemon.start();
     await waitFor(() => logs.filter((l) => l.event === "daemon.heartbeat").length >= 2, 500);
+    await daemon.stop();
+  });
+
+  // -------------------------------------------------------------------
+  // Idle-wake skip — harness#297
+  //
+  // Verifies the daemon skips repeat wakes on identical context.
+  // Uses an interval trigger (kind: "scheduled") so the skip gate is
+  // active — delay-once and --now both produce kind: "manual" which
+  // is exempt by design (operator override).
+  // -------------------------------------------------------------------
+
+  it("skips a second cron-triggered wake when context hash matches the prior successful fire (harness#297)", async () => {
+    // Stable bundle — both interval ticks produce the same hash.
+    const stableAggregator: SignalAggregator = {
+      capabilities: (): SignalAggregatorCapabilities => ({
+        id: "stable-fake",
+        displayName: "Stable Aggregator",
+        version: "0.0.0-test",
+        activeSources: ["private-note"],
+        totalCap: 50,
+      }),
+      // eslint-disable-next-line @typescript-eslint/require-await -- async to match the interface
+      aggregate: async (ctx: SignalAggregationContext): Promise<SignalAggregationResult> => ({
+        ok: true,
+        bundle: {
+          wakeId: ctx.wakeId,
+          assembledAt: ctx.now,
+          signals: [
+            {
+              kind: "private-note",
+              id: "private-note:stable.md",
+              trust: "trusted",
+              fetchedAt: ctx.now,
+              path: "/stable/note.md",
+              summary: "stable summary",
+            },
+          ],
+          actionItems: [],
+          warnings: [],
+        },
+      }),
+    };
+
+    // Subprocess that exits success quickly so wake.completed fires
+    // and AgentStateStore.recordWakeOutcome runs.
+    const executor = new SubprocessExecutor({
+      resolveCommand: () => ({
+        command: "node",
+        args: ["-e", "process.stdout.write('::wake-summary:: stable\\n'); process.exit(0);"],
+      }),
+    });
+
+    const intervalAgent: RegisteredAgent = {
+      ...helloWorld,
+      // 250ms interval — second tick should arrive while we're watching.
+      // Interval kind => wakeReason.kind === "scheduled" (NOT manual).
+      trigger: { kind: "interval", intervalMs: 250 },
+    };
+
+    const stateStore = new AgentStateStore();
+    const { logger, logs } = makeCapturingLogger();
+    const daemon = new Daemon({
+      executor,
+      agents: [intervalAgent],
+      logger,
+      heartbeatMs: 60_000,
+      signalAggregator: stableAggregator,
+      agentStateStore: stateStore,
+    });
+
+    daemon.start();
+
+    // Wait for the FIRST wake to complete (no prior hash → fires).
+    await waitFor(() => logs.some((l) => l.event === "daemon.wake.completed"), 3000);
+
+    const firstFire = logs.find((l) => l.event === "daemon.wake.fire");
+    const firstCompleted = logs.find((l) => l.event === "daemon.wake.completed");
+    expect(firstFire).toBeDefined();
+    expect(firstCompleted?.data.outcome).toBe("completed");
+
+    // After completion, agent state should now have the context hash.
+    const recordAfterFire = stateStore.getAgent("hello-world");
+    expect(recordAfterFire?.lastFiredContextHash).toBeTruthy();
+    expect(recordAfterFire?.lastFiredContextHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(recordAfterFire?.idleSkipStreak).toBe(0);
+
+    // Wait for the SECOND interval tick to either fire or skip.
+    // Should skip — same context, same hash, last outcome was success.
+    await waitFor(() => logs.some((l) => l.event === "daemon.wake.skipped"), 3000);
+
+    const skipped = logs.find((l) => l.event === "daemon.wake.skipped");
+    expect(skipped).toBeDefined();
+    expect(skipped?.data.reason).toBe("idle");
+    expect(skipped?.data.agentId).toBe("hello-world");
+    expect(skipped?.data.contextHash).toBe(recordAfterFire?.lastFiredContextHash);
+
+    // The skip should have incremented idleSkipStreak but NOT changed
+    // the recorded hash — only actual fires update lastFiredContextHash.
+    const recordAfterSkip = stateStore.getAgent("hello-world");
+    expect(recordAfterSkip?.lastFiredContextHash).toBe(recordAfterFire?.lastFiredContextHash);
+    expect(recordAfterSkip?.idleSkipStreak).toBeGreaterThanOrEqual(1);
+
     await daemon.stop();
   });
 });

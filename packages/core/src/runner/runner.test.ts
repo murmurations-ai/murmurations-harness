@@ -253,6 +253,51 @@ describe("createDefaultRunner", () => {
     expect(llmCalls[0]?.maxSteps).toBeUndefined();
   });
 
+  it("prompt for supportsToolUse=false agent describes runtime-native tools, not '_None._' (live regression 2026-05-03)", async () => {
+    // Live run on EP (2026-05-03 18:46–18:56 PDT) saw 18 of 22
+    // completing claude-cli agents independently file convergent
+    // TENSION/PROPOSAL issues complaining the wake prompt said
+    // "Tools you can call this wake: None" while their declared
+    // capabilities said "Comment on issues: YES". The runner now
+    // tells subscription-CLI agents that their runtime provides
+    // tools natively (Bash, gh, file edit, MCP via --mcp-config)
+    // so they stop concluding they can't act.
+    const runner = createDefaultRunner("test-agent", [], {}, rootDir);
+    const llm = makeLlmClient("Got it.", { supportsToolUse: false });
+
+    await runner({
+      spawn: makeSpawn(), // no mcpServerConfigs
+      clients: { llm },
+    });
+
+    const llmCalls = (llm as unknown as { _calls: { messages?: { content: string }[] }[] })._calls;
+    const prompt = llmCalls[0]?.messages?.[0]?.content ?? "";
+
+    // The misleading "_None._" line must not be in the prompt for
+    // a client that runs its own tool loop.
+    expect(prompt).not.toMatch(/Tools you can call this wake\n_None\._/);
+    // The replacement must tell the agent it has runtime-native tools.
+    expect(prompt).toContain("runs its own tool loop");
+    expect(prompt).toMatch(/shell access|gh.*GitHub/i);
+    expect(prompt).toContain("Use them to act on issues");
+  });
+
+  it("prompt still says '_None._' for supportsToolUse=true clients with no tools loaded (preserves existing behavior)", async () => {
+    const runner = createDefaultRunner("test-agent", [], {}, rootDir);
+    const llm = makeLlmClient("Nothing to do.", { supportsToolUse: true });
+
+    await runner({
+      spawn: makeSpawn(), // no mcpServerConfigs
+      clients: { llm },
+    });
+
+    const llmCalls = (llm as unknown as { _calls: { messages?: { content: string }[] }[] })._calls;
+    const prompt = llmCalls[0]?.messages?.[0]?.content ?? "";
+
+    expect(prompt).toMatch(/Tools you can call this wake\n_None\._/);
+    expect(prompt).not.toContain("runs its own tool loop");
+  });
+
   it("does not load tools when no mcpServerConfigs", async () => {
     const runner = createDefaultRunner("test-agent", [], {}, rootDir);
     const llm = makeLlmClient("No tools needed.");
