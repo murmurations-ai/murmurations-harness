@@ -47,11 +47,14 @@ const DEFAULT_CONFIG: PersistentContextConfig = {
 
 export class ConversationStore {
   readonly #path: string;
+  readonly #sessionPath: string;
   #messages: ConversationMessage[] = [];
   #totalTokens = 0;
+  #sessionId: string | undefined;
 
   public constructor(agentDir: string) {
     this.#path = join(agentDir, "conversation.jsonl");
+    this.#sessionPath = join(agentDir, "session.json");
   }
 
   public get messages(): readonly ConversationMessage[] {
@@ -64,6 +67,28 @@ export class ConversationStore {
 
   public get isEmpty(): boolean {
     return this.#messages.length === 0;
+  }
+
+  /**
+   * v0.7.0 (harness#293 J2): the subscription-CLI session id captured
+   * on the most recent wake. Daemons pass this to the next wake's
+   * LLMRequest so the CLI keeps its prompt cache warm across wakes.
+   * Undefined when no wake has run yet or the previous wake's
+   * provider didn't surface one (direct API providers don't).
+   */
+  public get sessionId(): string | undefined {
+    return this.#sessionId;
+  }
+
+  /**
+   * Update the captured session id and persist immediately.
+   * Called by the executor after a wake completes; idempotent
+   * for repeated identical values.
+   */
+  public async setSessionId(sessionId: string | undefined): Promise<void> {
+    if (sessionId === this.#sessionId) return;
+    this.#sessionId = sessionId;
+    await this.#persistSession();
   }
 
   /** Load conversation history from disk. Returns false if no file exists. */
@@ -82,10 +107,24 @@ export class ConversationStore {
           /* skip malformed lines */
         }
       }
-      return this.#messages.length > 0;
     } catch {
-      return false;
+      // No conversation file — first wake. sessionId restoration
+      // below still proceeds in case session.json predates the
+      // conversation (uncommon but possible if file copying ran
+      // partially).
     }
+    // Best-effort restore of the captured session id. Absent file
+    // is normal (first wake or pre-v0.7.0 conversations).
+    try {
+      const raw = await readFile(this.#sessionPath, "utf8");
+      const parsed = JSON.parse(raw) as { sessionId?: unknown };
+      if (typeof parsed.sessionId === "string" && parsed.sessionId.length > 0) {
+        this.#sessionId = parsed.sessionId;
+      }
+    } catch {
+      // sibling file missing or malformed → leave sessionId undefined
+    }
+    return this.#messages.length > 0;
   }
 
   /** Append a message and persist to disk. */
@@ -130,6 +169,12 @@ export class ConversationStore {
     await mkdir(dirname(this.#path), { recursive: true });
     const lines = this.#messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
     await writeFile(this.#path, lines, "utf8");
+  }
+
+  async #persistSession(): Promise<void> {
+    await mkdir(dirname(this.#sessionPath), { recursive: true });
+    const payload = JSON.stringify({ sessionId: this.#sessionId ?? null });
+    await writeFile(this.#sessionPath, payload, "utf8");
   }
 }
 

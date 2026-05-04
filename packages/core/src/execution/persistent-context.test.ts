@@ -177,6 +177,74 @@ describe("ConversationStore", () => {
     expect(store.messages).toHaveLength(2); // skipped the bad line
   });
 
+  // -------------------------------------------------------------------
+  // v0.7.0 (harness#293 J2) — session-id persistence across reloads
+  // -------------------------------------------------------------------
+
+  it("sessionId is undefined on a fresh store", () => {
+    const store = new ConversationStore(tmpDir);
+    expect(store.sessionId).toBeUndefined();
+  });
+
+  it("setSessionId persists to a sibling session.json", async () => {
+    const store = new ConversationStore(tmpDir);
+    await store.setSessionId("sess-123");
+    expect(store.sessionId).toBe("sess-123");
+
+    const raw = readFileSync(join(tmpDir, "session.json"), "utf8");
+    expect(raw).toContain("sess-123");
+  });
+
+  it("load restores sessionId from disk", async () => {
+    const store1 = new ConversationStore(tmpDir);
+    await store1.setSessionId("sess-restore");
+    await store1.append({ role: "user", content: "hi", ts: "t1" });
+
+    const store2 = new ConversationStore(tmpDir);
+    await store2.load();
+    expect(store2.sessionId).toBe("sess-restore");
+  });
+
+  it("setSessionId(undefined) clears the captured id", async () => {
+    const store = new ConversationStore(tmpDir);
+    await store.setSessionId("sess-x");
+    expect(store.sessionId).toBe("sess-x");
+    await store.setSessionId(undefined);
+    expect(store.sessionId).toBeUndefined();
+
+    // File should reflect the cleared state.
+    const raw = readFileSync(join(tmpDir, "session.json"), "utf8");
+    const parsed = JSON.parse(raw) as { sessionId: unknown };
+    expect(parsed.sessionId).toBeNull();
+  });
+
+  it("load tolerates missing session.json (pre-v0.7.0 conversations)", async () => {
+    // Write only conversation.jsonl, no session.json — represents
+    // a conversation persisted before v0.7.0 added the sibling file.
+    const store1 = new ConversationStore(tmpDir);
+    await store1.append({ role: "user", content: "old", ts: "t1" });
+
+    const store2 = new ConversationStore(tmpDir);
+    expect(await store2.load()).toBe(true);
+    expect(store2.sessionId).toBeUndefined();
+  });
+
+  it("load tolerates malformed session.json", async () => {
+    const fs = await import("node:fs");
+    fs.writeFileSync(join(tmpDir, "session.json"), "not valid json", "utf8");
+
+    const store = new ConversationStore(tmpDir);
+    await store.load();
+    expect(store.sessionId).toBeUndefined();
+  });
+
+  it("setSessionId is idempotent — repeated identical values are no-ops", async () => {
+    const store = new ConversationStore(tmpDir);
+    await store.setSessionId("same");
+    await store.setSessionId("same");
+    expect(store.sessionId).toBe("same");
+  });
+
   it("token count recalculates exactly on compact", async () => {
     const store = new ConversationStore(tmpDir);
     await store.append({ role: "system", content: "soul", ts: "t0", tokenCount: 10 });
