@@ -215,6 +215,137 @@ const copyDefaultAgentTemplates = async (destDir: string): Promise<void> => {
 };
 
 // ---------------------------------------------------------------------------
+// v0.7.0 (Workstream I): facilitator-agent auto-include
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the shipped facilitator-agent template directory. Mirrors
+ * the dist/src resolution pattern used by default-agent and examples.
+ *
+ * Production CLI (`npm install`): `<dist>/facilitator-agent-template/`
+ * Source-tree dev (`pnpm -C ... run dev`): two possible roots — the
+ * compiled `packages/cli/dist/` will have it, or we fall back to the
+ * top-level `examples/facilitator-agent/agents/facilitator-agent/`
+ * which is the canonical authoring location.
+ */
+const resolveFacilitatorTemplateDir = (): string => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const shipped = join(here, "facilitator-agent-template");
+  if (existsSync(shipped)) return shipped;
+  // Source-tree fallback. From packages/cli/src/init.ts, walk up to
+  // the monorepo root and into examples/.
+  return join(
+    here,
+    "..",
+    "..",
+    "..",
+    "examples",
+    "facilitator-agent",
+    "agents",
+    "facilitator-agent",
+  );
+};
+
+/**
+ * Inline copy of the facilitation group context. Kept inline rather
+ * than copied from `examples/facilitator-agent/governance/groups/`
+ * because the group context file is stable + small + needs to land
+ * regardless of whether the template-dir resolution succeeds.
+ *
+ * IdentityLoader treats missing group files as a hard error
+ * (packages/core/src/identity/index.ts ~line 780), so this MUST be
+ * present whenever the facilitator role.md declares
+ * `group_memberships: ["facilitation"]`.
+ */
+const FACILITATION_GROUP_CONTEXT = `# Group: Facilitation
+
+The facilitator-agent's home group. In single-agent murmurations
+this group has one member; in multi-agent murmurations operators may
+assign additional facilitators (one per geography, time zone, or
+governance domain).
+
+## Domain
+
+- Daily reading of governance-typed issues across the murmuration
+- State-machine advancement via the active \`GovernancePlugin\`
+- Closure decisions per the harness closure rule table (ADR-0041 §Part 3)
+- Decision-log and agreement-registry maintenance
+- Daily \`[FACILITATOR LOG]\` synthesis
+
+## Authority surface
+
+- Read all governance-tagged issues across all repos in scope
+- Comment on any issue with structured close/transition messages
+- Apply/remove labels: \`awaiting:source-close\`, \`closed-stale\`,
+  \`closed-superseded\`, \`closed-resolved\`, \`verification-failed\`
+- Close issues when closure rule + verification both pass
+- Write under \`governance/decisions/\` and \`governance/agreements/\`
+- File the daily \`[FACILITATOR LOG]\` issue
+- Add \`assigned:\` labels on follow-up issues to queue work for other
+  agents
+
+## Bright lines
+
+- The facilitator does not file \`[TENSION]\` issues on behalf of other
+  agents. Tensions are the originating agent's voice; the facilitator
+  may close one (per closer-rule table) but never authors one.
+- The facilitator does not close \`[DIRECTIVE]\` issues. Those are
+  Source-only; the facilitator labels \`awaiting:source-close\` and
+  notifies Source via the daily log.
+- The facilitator does not vote, consent, object, or otherwise hold
+  a governance position. It is procedural, not deliberative.
+
+## Members
+
+- \`facilitator-agent\` (cron: 07:00 + 18:00 daily)
+`;
+
+/**
+ * Idempotently copy the facilitator-agent template into the target
+ * murmuration's `agents/facilitator-agent/` directory and ensure the
+ * facilitation group context file exists.
+ *
+ * Skip-if-present: if the operator has already initialized this
+ * murmuration once, or has hand-edited an existing facilitator-agent,
+ * we leave the directory alone and report "already present" so
+ * subsequent init runs don't clobber Source's edits. ADR-0041
+ * §Part 1: "Source can edit role.md, but facilitator-agent is
+ * always present."
+ *
+ * Exported for testing + for operators who want to add the
+ * facilitator-agent to an existing murmuration that was init'd
+ * before v0.7.0.
+ */
+export const copyFacilitatorAgent = async (
+  targetRootDir: string,
+): Promise<{ readonly action: "copied" | "skipped-existing" | "skipped-no-template" }> => {
+  const targetAgentsDir = join(targetRootDir, "agents");
+  const dest = join(targetAgentsDir, "facilitator-agent");
+  if (existsSync(dest)) return { action: "skipped-existing" };
+
+  const src = resolveFacilitatorTemplateDir();
+  if (!existsSync(src)) {
+    // Defensive: in unbuilt source trees with no top-level examples
+    // directory either (shouldn't happen in published CLI, may happen
+    // during incremental build). Don't fail init — just skip.
+    return { action: "skipped-no-template" };
+  }
+  await copyDirRecursive(src, dest);
+
+  // Group context file is required (IdentityLoader hard-errors on
+  // missing groups). Write only if it doesn't already exist so an
+  // operator who has edited the facilitation group's domain isn't
+  // overwritten on subsequent inits.
+  const groupsDir = join(targetRootDir, "governance", "groups");
+  await mkdir(groupsDir, { recursive: true });
+  const groupPath = join(groupsDir, "facilitation.md");
+  if (!existsSync(groupPath)) {
+    await writeFile(groupPath, FACILITATION_GROUP_CONTEXT, "utf8");
+  }
+  return { action: "copied" };
+};
+
+// ---------------------------------------------------------------------------
 // .gitignore preflight (#10)
 // ---------------------------------------------------------------------------
 
@@ -1037,6 +1168,13 @@ _Edit these tiers to match this agent's specific authority as it becomes clear._
     );
   }
 
+  // v0.7.0 (Workstream I, ADR-0041): every newly-init'd murmuration
+  // gets a facilitator-agent in the box. The default closure-authority
+  // agent is what makes the v0.7.0 effectiveness gains land for any
+  // operator without per-murmuration setup. Idempotent — never
+  // overwrites a Source-edited facilitator from a prior init.
+  const facilitatorResult = await copyFacilitatorAgent(targetDir);
+
   // Group docs
   for (const group of groups) {
     const members = agents.filter((a) => a.group === group).map((a) => a.dir);
@@ -1125,9 +1263,21 @@ ${members.map((m) => `- ${m}`).join("\n")}
       ? `\n  Governance plugin: ${governancePluginPath || governance} (configured in murmuration/harness.yaml)`
       : "";
 
+  // v0.7.0 (Workstream I): surface the facilitator-agent inclusion
+  // so operators know it's there. The agent is opt-in to use (cron
+  // is set in role.md); operators can disable by deleting the
+  // directory. The closure rules + decision-log writes only happen
+  // when the operator points the daemon at a governance plugin.
+  const facilitatorNote =
+    facilitatorResult.action === "copied"
+      ? `\n  ✓ Included facilitator-agent (closure authority — see agents/facilitator-agent/role.md)`
+      : facilitatorResult.action === "skipped-existing"
+        ? `\n  · facilitator-agent already present (preserved Source edits)`
+        : "";
+
   console.log(`
 ✓ Murmuration initialized at ${targetDir}
-  Registered as "${sessionName}".${governanceNote}
+  Registered as "${sessionName}".${governanceNote}${facilitatorNote}
 
 ${capturedHint}
 Try it now:
