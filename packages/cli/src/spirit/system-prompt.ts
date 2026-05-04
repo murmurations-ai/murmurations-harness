@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { SpiritMemory } from "./memory.js";
+import { SpiritSkillsOverlay } from "./skills.js";
 
 const BASE_PROMPT = `You are the Spirit of the Murmuration — the operator's companion for running this harness.
 
@@ -114,9 +115,20 @@ export const buildSpiritSystemPrompt = async (rootDir?: string): Promise<string>
   // Bundled skill index — always tries; tolerates missing.
   try {
     const index = await readFile(join(skillsDir, "SKILLS.md"), "utf8");
-    prompt += `\n\n---\n\n## Available skills\n\nYou can load any of these via \`load_skill(name)\`. The body loads on demand so it does not clutter this prompt.\n\n${index}`;
+    prompt += `\n\n---\n\n## Available skills (bundled)\n\nLoad any via \`load_skill(name)\`. Bodies load on demand.\n\n${index}`;
   } catch {
     /* no skill index — base prompt only */
+  }
+
+  // Per-murmuration skill overlay (v0.7.0 [R]). Index only — bodies
+  // load on demand. Per-murmuration skills shadow bundled skills with
+  // the same name. Absent index → no section.
+  if (rootDir !== undefined) {
+    const overlay = new SpiritSkillsOverlay(rootDir);
+    const overlayIndex = await overlay.readIndex();
+    if (overlayIndex.trim().length > 0) {
+      prompt += `\n\n---\n\n## Operator-installed skills (this murmuration)\n\nThese shadow any bundled skill with the same name when loaded.\n\n${overlayIndex.trim()}`;
+    }
   }
 
   // Per-murmuration memory index (v0.7.0 [O]). Only when rootDir provided

@@ -401,6 +401,84 @@ describe("Spirit tools — memory (Workstream O)", () => {
   });
 });
 
+describe("Spirit tools — install_skill / load_skill overlay (Workstream R)", () => {
+  let root = "";
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), `spirit-skill-overlay-${randomUUID().slice(0, 8)}-`));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const getTool = (name: string) => {
+    const tools = buildSpiritTools({ rootDir: root, send: noopSend });
+    const tool = tools.find((t) => t.name === name);
+    if (!tool) throw new Error(`tool ${name} not found`);
+    return tool;
+  };
+
+  it("install_skill writes a per-murmuration skill", async () => {
+    const install = getTool("install_skill");
+    const out = (await install.execute({
+      name: "pricing-context",
+      description: "Reference proposal-2026-05-04 when discussing pricing",
+      body: "# Pricing context\n\nAlways cross-link the bundle decision.",
+    })) as string;
+    expect(out).toContain("Installed skill");
+    expect(out).toContain("pricing-context");
+  });
+
+  it("load_skill returns the per-murmuration body with [per-murmuration] tag", async () => {
+    const install = getTool("install_skill");
+    await install.execute({
+      name: "pricing-context",
+      description: "d",
+      body: "# Per-murmuration body\n",
+    });
+
+    const load = getTool("load_skill");
+    const out = (await load.execute({ name: "pricing-context" })) as string;
+    expect(out).toContain("[per-murmuration]");
+    expect(out).toContain("# Per-murmuration body");
+  });
+
+  it("load_skill falls back to bundled when not installed in overlay", async () => {
+    const load = getTool("load_skill");
+    // 'governance-models' is a bundled skill that ships with the harness.
+    const out = (await load.execute({ name: "governance-models" })) as string;
+    // Either we got the bundled body (in dev environment with src copy) or
+    // a not-found error if the bundled dir isn't reachable from this test.
+    // In both cases we should NOT see [per-murmuration].
+    expect(out).not.toContain("[per-murmuration]");
+  });
+
+  it("per-murmuration skill shadows a bundled skill with the same name", async () => {
+    const install = getTool("install_skill");
+    await install.execute({
+      name: "governance-models",
+      description: "operator-specific governance notes",
+      body: "OPERATOR-CUSTOM GOVERNANCE BODY",
+    });
+
+    const load = getTool("load_skill");
+    const out = (await load.execute({ name: "governance-models" })) as string;
+    expect(out).toContain("[per-murmuration]");
+    expect(out).toContain("OPERATOR-CUSTOM");
+  });
+
+  it("install_skill rejects invalid names with a clear error", async () => {
+    const install = getTool("install_skill");
+    const out = (await install.execute({
+      name: "Invalid Name",
+      description: "x",
+      body: "y",
+    })) as string;
+    expect(out).toMatch(/install_skill error.*invalid skill name/);
+  });
+});
+
 describe("Spirit tools — close_issue (K3)", () => {
   it("returns a gh issue close command for the operator to run", async () => {
     const tools = buildSpiritTools({ rootDir: "/", send: noopSend });

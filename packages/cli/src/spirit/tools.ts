@@ -20,6 +20,7 @@ import { z } from "zod";
 
 import { SpiritMemory, type MemoryType } from "./memory.js";
 import { describeMurmuration } from "./overview.js";
+import { SpiritSkillsOverlay } from "./skills.js";
 import {
   buildAttentionQueue,
   buildReport,
@@ -207,10 +208,15 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     },
   };
 
+  // v0.7.0 [R]: per-murmuration skill overlay. Operator-installed skills
+  // shadow bundled skills with the same name; absent from the overlay,
+  // we fall back to the bundled `spiritSkillsDir()`.
+  const skillsOverlay = new SpiritSkillsOverlay(rootDir);
+
   const loadSkillTool: SpiritTool = {
     name: "load_skill",
     description:
-      "Load a Spirit skill file by name (e.g. 'agent-anatomy', 'governance-models'). See the skills index in the system prompt for what's available.",
+      "Load a Spirit skill file by name (e.g. 'agent-anatomy', 'governance-models'). Per-murmuration skills installed at .murmuration/spirit/skills/ are checked first; bundled skills are the fallback. The response prefixes [per-murmuration] or [bundled] so you know which body you got.",
     parameters: z.object({
       name: z.string().describe("Skill name without the .md extension."),
     }),
@@ -219,10 +225,39 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
       if (!/^[a-z0-9-]+$/.test(name)) {
         return `load_skill error: invalid skill name "${name}" (expected kebab-case)`;
       }
+      const overlay = await skillsOverlay.read(name);
+      if (overlay !== null) return `[per-murmuration]\n\n${overlay}`;
       try {
-        return await readFile(join(spiritSkillsDir(), `${name}.md`), "utf8");
+        const bundled = await readFile(join(spiritSkillsDir(), `${name}.md`), "utf8");
+        return `[bundled]\n\n${bundled}`;
       } catch {
         return `load_skill error: skill "${name}" not found`;
+      }
+    },
+  };
+
+  const installSkillTool: SpiritTool = {
+    name: "install_skill",
+    description:
+      "Install a Spirit skill at .murmuration/spirit/skills/<name>.md and register it in SKILLS.md. Body is markdown — no runtime, no sandbox. Per-murmuration skills shadow bundled skills with the same name. Use to teach this Spirit operator-specific patterns (e.g. 'pricing-context') without forking the harness.",
+    parameters: z.object({
+      name: z.string().describe("Skill name (kebab-case, no extension)."),
+      description: z
+        .string()
+        .describe("One-line summary used in the per-murmuration SKILLS.md index."),
+      body: z.string().describe("Skill body (markdown)."),
+    }),
+    execute: async (input) => {
+      const { name, description, body } = input as {
+        name: string;
+        description: string;
+        body: string;
+      };
+      try {
+        await skillsOverlay.install({ name, description, body });
+        return `Installed skill "${name}" at ${skillsOverlay.dir}/${name}.md. Loadable via load_skill on next attach (also visible right now to the same Spirit instance).`;
+      } catch (err) {
+        return `install_skill error: ${err instanceof Error ? err.message : String(err)}`;
       }
     },
   };
@@ -604,6 +639,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     listDirTool,
     writeFileTool,
     loadSkillTool,
+    installSkillTool,
     wakeTool,
     directiveTool,
     conveneTool,
