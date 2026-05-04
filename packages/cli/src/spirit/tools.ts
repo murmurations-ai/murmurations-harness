@@ -20,6 +20,14 @@ import { z } from "zod";
 
 import { SpiritMemory, type MemoryType } from "./memory.js";
 import { describeMurmuration } from "./overview.js";
+import {
+  buildAttentionQueue,
+  buildReport,
+  fetchMetrics,
+  renderAttentionMarkdown,
+  renderMetricsMarkdown,
+  type ReportScope,
+} from "./reports.js";
 import { spiritSkillsDir } from "./system-prompt.js";
 
 // ---------------------------------------------------------------------------
@@ -403,6 +411,72 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
   };
 
   // ------------------------------------------------------------------------
+  // Reporting surfaces (Workstream Q)
+  //
+  // metrics — wraps K1's computeMetricsFromDisk
+  // attention_queue — failing agents + low met-rate + awaiting-close, ranked
+  // report(scope) — synthesizes status + metrics + activity + governance
+  // ------------------------------------------------------------------------
+  const metricsTool: SpiritTool = {
+    name: "metrics",
+    description:
+      "Effectiveness metrics for the last N days (default 30): wake completion rate, total spend, per-accountability met-rate. Same numbers as `murmuration metrics --json`. No daemon required — reads runs/ and observation logs.",
+    parameters: z.object({
+      since: z
+        .number()
+        .int()
+        .positive()
+        .max(365)
+        .optional()
+        .describe("Window size in days. Default: 30."),
+    }),
+    execute: async (input) => {
+      const { since } = input as { since?: number };
+      try {
+        const m = await fetchMetrics(rootDir, since ?? 30);
+        return renderMetricsMarkdown(m);
+      } catch (err) {
+        return `metrics error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  const attentionQueueTool: SpiritTool = {
+    name: "attention_queue",
+    description:
+      "Ranked list of items needing Source attention: agents with consecutive failures, accountabilities with low met-rate (<60% over 30d), and issues the facilitator marked awaiting-source-close. Best-effort across daemon RPCs and disk; works with or without a running daemon.",
+    parameters: z.object({}),
+    execute: async () => {
+      try {
+        const items = await buildAttentionQueue({ rootDir, send });
+        return renderAttentionMarkdown(items);
+      } catch (err) {
+        return `attention_queue error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  const reportTool: SpiritTool = {
+    name: "report",
+    description:
+      "One-call murmuration report. Scope 'health' = metrics; 'activity' = recent daemon events or last digests; 'attention' = the attention queue; 'all' = everything. Defaults to 'all'.",
+    parameters: z.object({
+      scope: z
+        .enum(["health", "activity", "attention", "all"])
+        .optional()
+        .describe("Report scope. Default: all."),
+    }),
+    execute: async (input) => {
+      const { scope } = input as { scope?: ReportScope };
+      try {
+        return await buildReport({ rootDir, send, scope: scope ?? "all" });
+      } catch (err) {
+        return `report error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  // ------------------------------------------------------------------------
   // Murmuration overview (Workstream P)
   //
   // describe_murmuration walks harness.yaml + soul.md + agents/* + groups/*
@@ -537,6 +611,9 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     forgetTool,
     recallTool,
     describeMurmurationTool,
+    metricsTool,
+    attentionQueueTool,
+    reportTool,
     getFacilitatorLogTool,
     getAgreementTool,
     listAwaitingSourceCloseTool,

@@ -536,6 +536,7 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
           ":bye",
           ":remember",
           ":forget",
+          ":report",
         ];
         return finalize(
           commands.filter((c) => c.startsWith(cmd)),
@@ -888,6 +889,28 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     rl.prompt();
   };
 
+  const handleSpiritReport = async (scopeRaw: string): Promise<void> => {
+    const scope = scopeRaw.length > 0 ? scopeRaw : "all";
+    const validScopes = ["health", "activity", "attention", "all"];
+    if (!validScopes.includes(scope)) {
+      console.log(`Usage: :report [${validScopes.join(" | ")}]`);
+      rl.prompt();
+      return;
+    }
+    const { buildReport } = await import("./spirit/reports.js");
+    try {
+      const out = await buildReport({
+        rootDir,
+        send,
+        scope: scope as "health" | "activity" | "attention" | "all",
+      });
+      console.log(out);
+    } catch (err) {
+      console.log(`(report error: ${err instanceof Error ? err.message : String(err)})`);
+    }
+    rl.prompt();
+  };
+
   // Eagerly initialise the Spirit on attach so we can show a "resumed"
   // greeting before the operator types anything. Failures are silent
   // (fall through to the lazy path on first turn — same as before).
@@ -952,6 +975,14 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
     if (input.startsWith(":forget ")) {
       const name = input.slice(":forget ".length).trim();
       void handleSpiritForget(name);
+      return;
+    }
+    // v0.7.0 [Q] — `:report [scope]` synthesizes status + metrics +
+    // activity + attention queue. Bypasses the LLM entirely (it's a
+    // direct call into reports.ts).
+    if (input === ":report" || input.startsWith(":report ")) {
+      const scope = input.slice(":report".length).trim();
+      void handleSpiritReport(scope);
       return;
     }
 
@@ -1638,6 +1669,7 @@ const handleCommand = async (
   :reset memory                     Clear Spirit's per-murmuration memory
   :remember <name>                  Save a Source-authored memory (interactive)
   :forget <name>                    Remove a memory (with confirmation)
+  :report [scope]                   One-call murmuration report (health|activity|attention|all)
   :bye                              Detach with a Spirit-context-preserved farewell
   :quit (q)                         Detach from daemon
   :help (?)                         Show this help
