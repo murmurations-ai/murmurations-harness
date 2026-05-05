@@ -12,6 +12,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { scrubValuePatterns } from "@murmurations-ai/core";
+
 import type { LLMRequest, LLMResponse, Result } from "../../../types.js";
 
 import type {
@@ -78,8 +80,10 @@ const normalizeModel = (raw: string | undefined): string => {
   return raw.replace(/-\d{8}$/, "");
 };
 
-const truncateForError = (raw: string): string =>
-  raw.length > 2000 ? `${raw.slice(0, 2000)}…[truncated]` : raw;
+const truncateForError = (raw: string): string => {
+  const truncated = raw.length > 2000 ? `${raw.slice(0, 2000)}…[truncated]` : raw;
+  return scrubValuePatterns(truncated);
+};
 
 // ---------------------------------------------------------------------------
 // Adapter

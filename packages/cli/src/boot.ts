@@ -21,7 +21,7 @@
  */
 
 import { existsSync, unlinkSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -1709,43 +1709,64 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
   await mkdir(resolve(exampleRoot, ".murmuration"), { recursive: true });
   if (!once) {
-    // Guard against same-machine collision (#219): if a pidfile exists and its
-    // process is still alive, refuse to start rather than silently clobbering it.
+    // Guard against same-machine collision (#219): atomically create the pidfile
+    // with O_CREAT|O_EXCL ("wx" flag). If another process created it first we get
+    // EEXIST — then we read the stored PID and probe liveness.
+    //
+    // The atomic O_CREAT|O_EXCL create closes the TOCTOU race that the previous
+    // read-then-write had: two concurrent `murmuration start` calls could both
+    // observe ENOENT and both fall through to write, ending up with two daemons
+    // running against the same root (violating Engineering Standard #3).
+    const alreadyRunningError = (existingPid: number): Error => {
+      const lines = [
+        `murmuration: a daemon is already running for this murmuration.`,
+        `  root:   ${exampleRoot}`,
+        `  pid:    ${String(existingPid)}`,
+        `  socket: ${socketPath}`,
+        `  attach: murmuration attach ${runningSessionName}`,
+        `  stop:   murmuration stop --root ${exampleRoot}`,
+        ``,
+        `If you believe this is wrong (e.g. the process crashed without`,
+        `cleaning up), remove the stale pidfile manually:`,
+        `  rm ${pidfilePath}`,
+      ];
+      return new Error(lines.join("\n"));
+    };
+
     try {
-      const rawPid = await readFile(pidfilePath, "utf8");
+      // Atomic exclusive create: succeeds only if the file does not already exist.
+      const fh = await open(pidfilePath, "wx");
+      await fh.writeFile(String(process.pid), "utf8");
+      await fh.close();
+    } catch (createErr) {
+      const code = (createErr as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST") throw createErr;
+
+      // Pidfile already exists — check whether the recorded process is still alive.
+      const rawPid = await readFile(pidfilePath, "utf8").catch(() => "");
       const existingPid = Number(rawPid.trim());
       if (Number.isFinite(existingPid) && existingPid > 0) {
         try {
           process.kill(existingPid, 0); // signal 0 = probe only, doesn't kill
-          // Process is alive — refuse to start.
-          const lines = [
-            `murmuration: a daemon is already running for this murmuration.`,
-            `  root:   ${exampleRoot}`,
-            `  pid:    ${String(existingPid)}`,
-            `  socket: ${socketPath}`,
-            `  attach: murmuration attach ${runningSessionName}`,
-            `  stop:   murmuration stop --root ${exampleRoot}`,
-            ``,
-            `If you believe this is wrong (e.g. the process crashed without`,
-            `cleaning up), remove the stale pidfile manually:`,
-            `  rm ${pidfilePath}`,
-          ];
-          throw new Error(lines.join("\n"));
+          // No throw → process is alive.
+          throw alreadyRunningError(existingPid);
         } catch (killErr) {
-          // kill(pid, 0) throws when the process doesn't exist — stale pidfile.
-          if ((killErr as NodeJS.ErrnoException).code === "ESRCH") {
+          const killCode = (killErr as NodeJS.ErrnoException).code;
+          if (killCode === "ESRCH") {
+            // Process is gone — stale pidfile. Overwrite it.
             logger.info("daemon.pidfile.stale", { existingPid, pidfilePath });
-            // fall through to overwrite
+            const fh = await open(pidfilePath, "w");
+            await fh.writeFile(String(process.pid), "utf8");
+            await fh.close();
+          } else if (killCode === "EPERM") {
+            // Process exists but is owned by a different OS user — treat as alive.
+            throw alreadyRunningError(existingPid);
           } else {
-            throw killErr; // re-throw the "already running" error from above
+            throw killErr;
           }
         }
       }
-    } catch (readErr) {
-      if ((readErr as NodeJS.ErrnoException).code !== "ENOENT") throw readErr;
-      // ENOENT = no pidfile yet, normal first start
     }
-    await writeFile(pidfilePath, String(process.pid), "utf8");
   }
 
   // Start daemon control socket
