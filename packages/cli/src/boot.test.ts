@@ -2,11 +2,23 @@
  * Tests for boot.ts exported helpers. Today this file only covers
  * `makeDaemonHook` — the rest of `boot.ts` is exercised through the
  * daemon test suite and integration paths.
+ *
+ * Also covers the daemon→aggregator wiring: verifies that
+ * `registeredAgentFromLoadedIdentity` derives the correct membership-aware
+ * `anyLabel` routing set (QA #2, harness#338).
  */
 
 import { describe, it, expect } from "vitest";
 
-import { makeAgentId, makeWakeId, WakeCostBuilder } from "@murmurations-ai/core";
+import {
+  makeAgentId,
+  makeWakeId,
+  registeredAgentFromLoadedIdentity,
+  roleFrontmatterSchema,
+  WakeCostBuilder,
+  type IdentityChain,
+  type LoadedAgentIdentity,
+} from "@murmurations-ai/core";
 
 import { makeDaemonHook } from "./boot.js";
 
@@ -115,5 +127,93 @@ describe("makeDaemonHook", () => {
     expect(record.llm.inputTokens).toBe(7_000);
     expect(record.llm.outputTokens).toBe(1_500);
     expect(record.llm.costMicros.value).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QA #2 (harness#338): daemon→aggregator routing-label wiring
+//
+// Verifies that registeredAgentFromLoadedIdentity derives the correct
+// membership-aware anyLabel OR-set so that a future boot.ts refactor that
+// drops the derivation step is caught by CI rather than silently regressing
+// to the harness#331 bug class.
+// ---------------------------------------------------------------------------
+
+const makeMinimalChain = (agentId: string): IdentityChain => ({
+  agentId: makeAgentId(agentId),
+  layers: [],
+  frontmatter: {
+    agentId: makeAgentId(agentId),
+    name: agentId,
+    modelTier: "balanced",
+    groupMemberships: [],
+  },
+});
+
+const makeLoadedIdentity = (
+  agentId: string,
+  groups: readonly string[],
+  anyLabelOverride?: readonly string[],
+): LoadedAgentIdentity => ({
+  agentId: makeAgentId(agentId),
+  chain: makeMinimalChain(agentId),
+  frontmatter: roleFrontmatterSchema.parse({
+    agent_id: agentId,
+    name: agentId,
+    model_tier: "balanced",
+    group_memberships: groups,
+    signals: {
+      sources: ["github-issue"],
+      github_scopes: [
+        {
+          owner: "acme",
+          repo: "signals",
+          filter: {
+            state: "all",
+            ...(anyLabelOverride !== undefined ? { any_label: anyLabelOverride } : {}),
+          },
+        },
+      ],
+    },
+  }),
+});
+
+const INTERVAL_TRIGGER = { kind: "interval" as const, intervalMs: 60_000 };
+
+describe("registeredAgentFromLoadedIdentity — routing label wiring (QA #2, harness#338)", () => {
+  it("agent with group membership receives derived anyLabel including group scope", () => {
+    const loaded = makeLoadedIdentity("agent-a", ["partnership"]);
+    const registered = registeredAgentFromLoadedIdentity(loaded, INTERVAL_TRIGGER);
+
+    const anyLabel = registered.signalScopes?.githubScopes?.[0]?.filter.anyLabel;
+    expect(anyLabel).toBeDefined();
+    expect(anyLabel).toContain("assigned:agent-a");
+    expect(anyLabel).toContain("scope:agent:agent-a");
+    expect(anyLabel).toContain("scope:group:partnership");
+    expect(anyLabel).toContain("scope:all");
+  });
+
+  it("agent without group memberships receives derived anyLabel without group scopes", () => {
+    const loaded = makeLoadedIdentity("agent-b", []);
+    const registered = registeredAgentFromLoadedIdentity(loaded, INTERVAL_TRIGGER);
+
+    const anyLabel = registered.signalScopes?.githubScopes?.[0]?.filter.anyLabel;
+    expect(anyLabel).toBeDefined();
+    expect(anyLabel).toContain("assigned:agent-b");
+    expect(anyLabel).toContain("scope:agent:agent-b");
+    expect(anyLabel).toContain("scope:all");
+    expect(anyLabel?.some((l) => l.startsWith("scope:group:"))).toBe(false);
+  });
+
+  it("operator-supplied any_label in role.md overrides the daemon-derived default", () => {
+    const customLabels = ["custom-label", "my-special-routing"];
+    const loaded = makeLoadedIdentity("agent-c", ["engineering"], customLabels);
+    const registered = registeredAgentFromLoadedIdentity(loaded, INTERVAL_TRIGGER);
+
+    const anyLabel = registered.signalScopes?.githubScopes?.[0]?.filter.anyLabel;
+    expect(anyLabel).toEqual(customLabels);
+    // derived labels should NOT be present when operator overrides
+    expect(anyLabel).not.toContain("scope:group:engineering");
+    expect(anyLabel).not.toContain("assigned:agent-c");
   });
 });
