@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # for gh release create
+
+jobs:
+  publish:
+    name: verify + publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify package versions match tag
+        run: |
+          set -e
+          TAG="${GITHUB_REF_NAME}"          # e.g. v0.7.1
+          VERSION="${TAG#v}"                 # strip leading v
+          echo "Tag: $TAG  →  expected version: $VERSION"
+
+          MISMATCHES=0
+          for pkg in packages/*/package.json package.json; do
+            PKG_VERSION=$(node -p "require('./$pkg').version" 2>/dev/null || true)
+            if [ -z "$PKG_VERSION" ]; then continue; fi
+            if [ "$PKG_VERSION" != "$VERSION" ]; then
+              echo "MISMATCH: $pkg has version $PKG_VERSION, expected $VERSION"
+              MISMATCHES=$((MISMATCHES + 1))
+            fi
+          done
+          if [ "$MISMATCHES" -gt 0 ]; then
+            echo "Version check failed — bump all package.json files to $VERSION before tagging."
+            exit 1
+          fi
+          echo "All package.json versions match $VERSION ✓"
+
+      - name: Build
+        run: pnpm build
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Test
+        run: pnpm test
+
+      - name: Publish to npm
+        run: pnpm -r publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="${GITHUB_REF_NAME}"
+          # Find the previous tag to generate a changelog range
+          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -1 || true)
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log --oneline "${PREV_TAG}..${TAG}" 2>/dev/null || true)
+          else
+            NOTES=$(git log --oneline "${TAG}" 2>/dev/null || true)
+          fi
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists — skipping creation."
+          else
+            echo "$NOTES" | gh release create "$TAG" \
+              --title "Release $TAG" \
+              --notes-file - \
+              --verify-tag
+          fi
