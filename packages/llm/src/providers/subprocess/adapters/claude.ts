@@ -192,10 +192,32 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
       };
     }
 
-    // Most-recent assistant event carries the model id and (BU-1) any tool_use blocks.
+    // Accumulate tool_use blocks from ALL assistant events — not just the last.
+    // In multi-turn agentic sessions claude-cli emits one assistant event per
+    // turn; tool calls in early turns would be invisible if we only scanned
+    // lastAssistant (harness#295).
     let lastAssistant: ClaudeJsonEvent | undefined;
+    const toolCalls: { name: string; args: Record<string, unknown>; result: unknown }[] = [];
+    let assistantEventCount = 0;
     for (const e of events) {
-      if (e.type === "assistant") lastAssistant = e;
+      if (e.type === "assistant") {
+        lastAssistant = e;
+        assistantEventCount++;
+        if (e.message?.content) {
+          for (const block of e.message.content) {
+            if (block.type === "tool_use" && typeof block.name === "string") {
+              toolCalls.push({
+                name: block.name,
+                args:
+                  typeof block.input === "object" && block.input !== null
+                    ? (block.input as Record<string, unknown>)
+                    : {},
+                result: null,
+              });
+            }
+          }
+        }
+      }
     }
 
     // v0.7.0 (harness#293): capture session_id for resume. Claude CLI
@@ -207,22 +229,6 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
         ? resultEvent.session_id
         : (events.find((e) => e.type === "system" && typeof e.session_id === "string")
             ?.session_id ?? undefined);
-
-    const toolCalls: { name: string; args: Record<string, unknown>; result: unknown }[] = [];
-    if (lastAssistant?.message?.content) {
-      for (const block of lastAssistant.message.content) {
-        if (block.type === "tool_use" && typeof block.name === "string") {
-          toolCalls.push({
-            name: block.name,
-            args:
-              typeof block.input === "object" && block.input !== null
-                ? (block.input as Record<string, unknown>)
-                : {},
-            result: null,
-          });
-        }
-      }
-    }
 
     const response: LLMResponse = {
       content: resultEvent.result ?? "",
@@ -238,7 +244,7 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
       modelUsed: normalizeModel(lastAssistant?.message?.model),
       providerUsed: this.providerId,
       toolCalls,
-      steps: 1,
+      steps: Math.max(1, assistantEventCount),
       ...(sessionId !== undefined ? { sessionId } : {}),
     };
     return { ok: true, value: response };

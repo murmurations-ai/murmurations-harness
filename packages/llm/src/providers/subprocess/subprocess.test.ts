@@ -262,7 +262,7 @@ ${JSON.stringify({ type: "result", result: "ok", usage: { input_tokens: 1, outpu
     expect(out.ok).toBe(true);
   });
 
-  it("extracts tool_use blocks from the most recent assistant event (BU-1)", () => {
+  it("extracts tool_use blocks from ALL assistant events (harness#295)", () => {
     const withTools = [
       JSON.stringify({
         type: "assistant",
@@ -271,6 +271,13 @@ ${JSON.stringify({ type: "result", result: "ok", usage: { input_tokens: 1, outpu
             { type: "text", text: "thinking…" },
             { type: "tool_use", id: "t1", name: "read_file", input: { path: "x.ts" } },
           ],
+          model: "claude-sonnet-4-6",
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", id: "t2", name: "write_file", input: { path: "y.ts" } }],
           model: "claude-sonnet-4-6",
         },
       }),
@@ -285,7 +292,9 @@ ${JSON.stringify({ type: "result", result: "ok", usage: { input_tokens: 1, outpu
     if (!out.ok) return;
     expect(out.value.toolCalls).toEqual([
       { name: "read_file", args: { path: "x.ts" }, result: null },
+      { name: "write_file", args: { path: "y.ts" }, result: null },
     ]);
+    expect(out.value.steps).toBe(2);
   });
 
   it("preserves cache token fields when present", () => {
