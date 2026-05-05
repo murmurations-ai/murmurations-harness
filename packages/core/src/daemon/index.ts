@@ -28,6 +28,7 @@ import {
   makeAgentId,
   makeGroupId,
   makeWakeId,
+  SpawnError,
   type AgentExecutor,
   type AgentResult,
   type AgentSpawnContext,
@@ -1014,13 +1015,17 @@ export class Daemon {
         }
       }
     } catch (error) {
-      this.#agentStateStore?.recordWakeOutcome(event.wakeId.value, "failure", {
+      const isSpawnFailure = error instanceof SpawnError;
+      const outcome = isSpawnFailure ? "spawn-failed" : "failure";
+      this.#agentStateStore?.recordWakeOutcome(event.wakeId.value, outcome, {
         errorMessage: error instanceof Error ? error.message : String(error),
       });
-      this.#logger.error("daemon.wake.error", {
+      const logEvent = isSpawnFailure ? "daemon.wake.spawn-failed" : "daemon.wake.error";
+      this.#logger.error(logEvent, {
         agentId: agent.agentId,
         wakeId: event.wakeId.value,
         error: error instanceof Error ? error.message : String(error),
+        ...(isSpawnFailure ? { hint: "verify the agent CLI binary is installed and on PATH" } : {}),
       });
     }
   }

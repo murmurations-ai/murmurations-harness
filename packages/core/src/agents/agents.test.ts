@@ -63,6 +63,28 @@ describe("AgentStateStore", () => {
     expect(store.getAgent("test")?.consecutiveFailures).toBe(0);
   });
 
+  it("spawn-failed outcome increments consecutiveFailures and records on wake (#329)", () => {
+    const store = new AgentStateStore();
+    store.register("agent-x", 120000);
+    store.transition("agent-x", "idle");
+
+    // Spawn fails before running state — agent stays in waking
+    store.transition("agent-x", "waking", "w-sf");
+    store.recordWakeOutcome("w-sf", "spawn-failed", {
+      errorMessage: "ENOENT: binary not found",
+    });
+
+    expect(store.getAgent("agent-x")?.consecutiveFailures).toBe(1);
+    expect(store.getAgent("agent-x")?.lastOutcome).toBe("spawn-failed");
+    expect(store.getAgent("agent-x")?.currentState).toBe("idle");
+
+    const wakes = store.getRecentWakes("agent-x");
+    const wake = wakes.find((w) => w.wakeId === "w-sf");
+    expect(wake?.outcome).toBe("spawn-failed");
+    expect(wake?.state).toBe("failed");
+    expect(wake?.errorMessage).toBe("ENOENT: binary not found");
+  });
+
   it("getStalledAgents detects agents stuck in running state", () => {
     let now = new Date("2026-04-11T12:00:00Z");
     const store = new AgentStateStore({ now: () => now });

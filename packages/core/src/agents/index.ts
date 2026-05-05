@@ -29,7 +29,7 @@ export type AgentLifecycleState =
   | "failed"
   | "timed-out";
 
-export type WakeOutcome = "success" | "failure" | "timeout" | "killed";
+export type WakeOutcome = "success" | "failure" | "timeout" | "killed" | "spawn-failed";
 
 export interface AgentWakeInstance {
   readonly wakeId: string;

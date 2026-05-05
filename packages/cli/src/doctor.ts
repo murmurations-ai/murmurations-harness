@@ -30,6 +30,15 @@ import { loadHarnessConfig, validateHarnessYaml, type HarnessConfig } from "./ha
 
 const execFileP = promisify(execFile);
 
+const which = (bin: string): boolean => {
+  try {
+    execFileSync("which", [bin], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -187,6 +196,19 @@ const runLayoutChecks = async (ctx: CheckContext): Promise<void> => {
         autoFixLabel: `append ${missing.join(", ")} to .gitignore`,
       });
     }
+  }
+
+  // murmuration CLI binary — if not on PATH, subprocess spawn will fail (#329)
+  if (!which("murmuration")) {
+    findings.push({
+      checkId: "layout.murmuration-binary.missing",
+      category: "layout",
+      severity: "warning",
+      title: "`murmuration` binary not found on PATH",
+      detail:
+        "Agents that use a subprocess executor will fail with spawn-failed. This is expected in development (run via `pnpm exec murmuration`), but in production the binary must be globally installed.",
+      remediation: `Run \`npm install -g @murmurations-ai/cli\` or ensure \`node_modules/.bin\` is on PATH.`,
+    });
   }
 
   // .env permissions
