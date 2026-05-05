@@ -96,6 +96,41 @@ export const isAssignedLabel = (label: string): boolean => label.startsWith("ass
 /** True if the label is any kind of `scope:<...>` directive routing label. */
 export const isScopeLabel = (label: string): boolean => label.startsWith("scope:");
 
+/**
+ * True if the label is reserved for Source / harness-internal use and
+ * MUST NOT be written by an agent action.
+ *
+ * Reserved set:
+ *   - `source-directive` — promotes an issue to directive trust at every
+ *     downstream agent in the routing OR-set. Only Source (via the
+ *     `murmuration directive` CLI) writes this.
+ *   - `kickoff` — onboarding workflow trigger; only Source / Spirit writes.
+ *   - `scope:*` — routing labels for directive distribution. Combined with
+ *     `source-directive` they form the lateral-movement channel; agents
+ *     route work via `assigned:<id>` / `action-item` instead.
+ *
+ * Allowed for agent writes (NOT reserved):
+ *   - `assigned:<id>` and `action-item` — the legitimate work-routing
+ *     vocabulary used by group facilitators and the closure ladder.
+ *   - `awaiting:source-close`, `verification-failed` — written by the
+ *     closure verification ladder during normal agent operation.
+ *
+ * Lateral-movement defense (security review H1, harness#331 follow-up):
+ * the membership-aware aggregator now actively listens for `scope:*`
+ * labels, so the write-side must refuse agent-originated writes of those
+ * labels to prevent agent-to-agent directive forgery.
+ */
+export const isReservedLabel = (label: string): boolean =>
+  label === SOURCE_DIRECTIVE_LABEL || label === KICKOFF_LABEL || isScopeLabel(label);
+
+/**
+ * Returns the subset of `labels` that are reserved per `isReservedLabel`.
+ * Used by WakeAction / MeetingAction dispatchers to reject agent-originated
+ * writes of routing labels.
+ */
+export const findReservedLabels = (labels: readonly string[]): readonly string[] =>
+  labels.filter(isReservedLabel);
+
 /** Returns the agent-id from `assigned:<agent-id>`, or null if not a match. */
 export const parseAssignedLabel = (label: string): string | null =>
   label.startsWith("assigned:") ? label.slice("assigned:".length) : null;

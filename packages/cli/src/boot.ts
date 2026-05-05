@@ -30,6 +30,7 @@ import {
   buildAgentRoutingLabels,
   Daemon,
   DispatchExecutor,
+  findReservedLabels,
   GitHubCollaborationProvider,
   GovernanceGitHubSync,
   DaemonHttp,
@@ -1492,7 +1493,29 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               receipts.push({ action, success: false, error: "missing fields" });
               break;
             }
+            // Security H1: agents MUST NOT write Source-reserved routing
+            // labels (`source-directive`, `kickoff`, `scope:*`). Refusing
+            // here closes the lateral-movement channel opened when the
+            // aggregator started listening for `scope:*` (harness#331).
+            const reservedLabel = findReservedLabels([action.label]);
+            if (reservedLabel.length > 0) {
+              receipts.push({
+                action,
+                success: false,
+                error: `reserved-label:${reservedLabel.join(",")}`,
+              });
+              break;
+            }
             if (action.removeLabel) {
+              const reservedRemove = findReservedLabels([action.removeLabel]);
+              if (reservedRemove.length > 0) {
+                receipts.push({
+                  action,
+                  success: false,
+                  error: `reserved-label:${reservedRemove.join(",")}`,
+                });
+                break;
+              }
               await gh.removeLabel(repo, makeIssueNumber(action.issueNumber), action.removeLabel);
             }
             const r = await gh.addLabels(repo, makeIssueNumber(action.issueNumber), [action.label]);
@@ -1503,6 +1526,18 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
             if (!action.title) {
               receipts.push({ action, success: false, error: "missing title" });
               break;
+            }
+            // Security H1: see label-issue case above.
+            if (action.labels && action.labels.length > 0) {
+              const reserved = findReservedLabels(action.labels);
+              if (reserved.length > 0) {
+                receipts.push({
+                  action,
+                  success: false,
+                  error: `reserved-label:${reserved.join(",")}`,
+                });
+                break;
+              }
             }
             const input: Record<string, unknown> = { title: action.title };
             if (action.body) input.body = action.body;

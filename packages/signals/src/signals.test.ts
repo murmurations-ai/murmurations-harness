@@ -590,10 +590,13 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       // 2 critical + low fills budget. The order in the emitted
-      // bundle should put critical first.
+      // bundle should put a critical-tier item first (regardless of
+      // which one — the github-source pre-sort by updatedAt may
+      // permute order within a tier when timestamps tie).
       const first = result.bundle.signals[0];
+      expect(first?.kind).toBe("github-issue");
       if (first?.kind === "github-issue") {
-        expect(first.number).toBe(1);
+        expect([1, 2]).toContain(first.number);
       }
     }
   });
@@ -789,6 +792,150 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       (s) => s.kind === "github-issue" && s.number === 200,
     );
     expect(matching).toHaveLength(1);
+  });
+  /* eslint-enable @typescript-eslint/require-await */
+
+  /* eslint-disable @typescript-eslint/require-await -- fake clients mimic the async interface */
+  it("multi-query anyLabel: cap keeps newest issues even when they came from a later fan-out query (QA #1)", async () => {
+    // QA review of harness#331: the original fan-out collected in
+    // collection order — `assigned:` query first, then `scope:agent:`,
+    // etc. With a small cap and many older `assigned:` items, a freshly
+    // filed `scope:agent:<self>` directive could be silently dropped.
+    // After the fix, sort by updatedAt DESC means the newest-N survive.
+    const recentDirective = fakeIssue({
+      n: 999,
+      title: "[DIRECTIVE] urgent",
+      labels: ["source-directive", "scope:agent:rentals-agent"],
+      // Most recent — must survive the cap.
+      updatedAt: new Date("2026-05-05T12:00:00Z"),
+    });
+    const olderActionItems = Array.from({ length: 5 }, (_, i) =>
+      fakeIssue({
+        n: 100 + i,
+        title: `Old action ${String(i)}`,
+        labels: ["assigned:rentals-agent", "action-item"],
+        // All older than the directive.
+        updatedAt: new Date(`2026-05-0${String(i + 1)}T08:00:00Z`),
+      }),
+    );
+    const fakeClient: GithubClient = {
+      async getIssue() {
+        return { ok: false, error: { code: "not-found" } as unknown as GithubClientError };
+      },
+      async listIssues(_repo, filter): Promise<Result<readonly GithubIssue[], GithubClientError>> {
+        const wantsAssigned = filter?.labels?.includes("assigned:rentals-agent") ?? false;
+        const wantsScopeAgent = filter?.labels?.includes("scope:agent:rentals-agent") ?? false;
+        if (wantsAssigned) return { ok: true, value: olderActionItems };
+        if (wantsScopeAgent) return { ok: true, value: [recentDirective] };
+        return { ok: true, value: [] };
+      },
+      async listIssueComments() {
+        return { ok: true, value: [] };
+      },
+      async listIssueLabels() {
+        return { ok: true, value: [] };
+      },
+      getRef: notFound,
+      getPullRequest: notFound,
+      listPullRequests: notFound,
+      getPullRequestFiles: notFound,
+      getCommit: notFound,
+      getFileAtRef: notFound,
+      createIssueComment: mutationDenied,
+      createIssue: mutationDenied,
+      createCommitOnBranch: mutationDenied,
+      addLabels: mutationDenied,
+      removeLabel: mutationDenied,
+      updateIssueState: mutationDenied,
+      lastRateLimit: () => null,
+    };
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: fakeClient,
+      githubScopes: [
+        {
+          repo: REPO,
+          anyLabel: ["assigned:rentals-agent", "scope:agent:rentals-agent", "scope:all"],
+        },
+      ],
+      // Cap of 3 — would have dropped the directive under collection-order
+      // truncation (older `assigned:` items came first).
+      caps: { githubIssue: 3, total: 50 },
+    });
+    const result = await agg.aggregate(mkContext("rentals-agent"));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const directive = result.bundle.signals.find(
+      (s) => s.kind === "github-issue" && s.number === 999,
+    );
+    expect(directive, "newest directive must survive the per-source cap").toBeDefined();
+    // Cap respected.
+    const ghIssues = result.bundle.signals.filter((s) => s.kind === "github-issue");
+    expect(ghIssues).toHaveLength(3);
+  });
+
+  it("multi-query anyLabel: surfaces structured partialFailures when a sub-query fails (QA #3)", async () => {
+    // QA review of harness#331: a single failed sub-query used to push
+    // a string into `warnings` and silently lose data. Now also pushes
+    // a structured entry to `partialFailures` so callers can distinguish
+    // "no signals matched" from "1 of 4 fan-out queries failed".
+    const fakeClient: GithubClient = {
+      async getIssue() {
+        return { ok: false, error: { code: "not-found" } as unknown as GithubClientError };
+      },
+      async listIssues(_repo, filter): Promise<Result<readonly GithubIssue[], GithubClientError>> {
+        const failOn = "scope:agent:rentals-agent";
+        if (filter?.labels?.includes(failOn) ?? false) {
+          return {
+            ok: false,
+            error: {
+              code: "rate-limited",
+              message: "secondary rate limit",
+            } as unknown as GithubClientError,
+          };
+        }
+        return { ok: true, value: [] };
+      },
+      async listIssueComments() {
+        return { ok: true, value: [] };
+      },
+      async listIssueLabels() {
+        return { ok: true, value: [] };
+      },
+      getRef: notFound,
+      getPullRequest: notFound,
+      listPullRequests: notFound,
+      getPullRequestFiles: notFound,
+      getCommit: notFound,
+      getFileAtRef: notFound,
+      createIssueComment: mutationDenied,
+      createIssue: mutationDenied,
+      createCommitOnBranch: mutationDenied,
+      addLabels: mutationDenied,
+      removeLabel: mutationDenied,
+      updateIssueState: mutationDenied,
+      lastRateLimit: () => null,
+    };
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: fakeClient,
+      githubScopes: [
+        {
+          repo: REPO,
+          anyLabel: ["assigned:rentals-agent", "scope:agent:rentals-agent", "scope:all"],
+        },
+      ],
+    });
+    const result = await agg.aggregate(mkContext("rentals-agent"));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const failures = result.bundle.partialFailures ?? [];
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.source).toBe("github");
+    expect(failures[0]?.anyLabel).toBe("scope:agent:rentals-agent");
+    expect(failures[0]?.code).toBe("rate-limited");
+    // The string warning is still there too — same info, both surfaces.
+    expect(result.bundle.warnings.some((w) => w.includes("rate-limited"))).toBe(true);
   });
   /* eslint-enable @typescript-eslint/require-await */
 

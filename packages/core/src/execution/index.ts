@@ -340,6 +340,45 @@ export interface SignalBundle {
    * and gives the agent a chance to reason about signal incompleteness.
    */
   readonly warnings: readonly string[];
+  /**
+   * Structured per-query failures from multi-query fan-out (e.g. one of
+   * four `anyLabel` queries failed while the other three succeeded). The
+   * caller can distinguish "no signals match" from "signals may have been
+   * dropped by a sub-query failure." Absent or empty array when every
+   * query succeeded; populated alongside `warnings` (which carry the
+   * same info as a human-readable string) for callers that want
+   * structured access. Added in v0.7.1 (QA review of harness#331).
+   *
+   * Optional so existing callers / fixtures aren't forced to update — the
+   * aggregator always populates it; manual SignalBundle construction
+   * (tests, daemon hello-world path) may omit it.
+   */
+  readonly partialFailures?: readonly SignalAggregationFailure[];
+}
+
+/**
+ * One failed sub-query during signal aggregation. Surfaced on
+ * {@link SignalBundle.partialFailures} so the bundle's `signals` array
+ * cannot be misread as "complete and authoritative" when fan-out lost
+ * data.
+ */
+export interface SignalAggregationFailure {
+  /** Logical source name, e.g. `"github"`. */
+  readonly source: string;
+  /**
+   * Repo coordinate as `"owner/repo"` for github sources, or undefined
+   * for sources that are not repo-scoped.
+   */
+  readonly repo?: string;
+  /**
+   * The OR-label that was being filtered when the query failed (one of
+   * the values in `anyLabel`). Undefined for non-fan-out failures.
+   */
+  readonly anyLabel?: string;
+  /** Stable error code for caller pattern-matching (e.g. `"http-500"`). */
+  readonly code: string;
+  /** Human-readable detail. */
+  readonly detail: string;
 }
 
 // ---------------------------------------------------------------------------

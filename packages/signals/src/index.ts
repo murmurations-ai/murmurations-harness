@@ -15,6 +15,7 @@ import {
   makeAgentId,
   type AgentId,
   type Signal,
+  type SignalAggregationFailure,
   type SignalTrustLevel,
 } from "@murmurations-ai/core";
 import type {
@@ -185,10 +186,11 @@ export class DefaultSignalAggregator implements SignalAggregator {
 
   public async aggregate(context: SignalAggregationContext): Promise<SignalAggregationResult> {
     const warnings: string[] = [];
+    const partialFailures: SignalAggregationFailure[] = [];
     const signals: Signal[] = [];
 
     const results = await Promise.allSettled([
-      this.#collectGithub(context, warnings),
+      this.#collectGithub(context, warnings, partialFailures),
       this.#collectPrivateNotes(context, warnings),
       this.#collectInboxMessages(context, warnings),
       this.#collectCollaborationItems(),
@@ -274,6 +276,7 @@ export class DefaultSignalAggregator implements SignalAggregator {
         signals: finalSignals,
         actionItems,
         warnings,
+        partialFailures,
       },
     };
   }
@@ -285,6 +288,7 @@ export class DefaultSignalAggregator implements SignalAggregator {
   async #collectGithub(
     context: SignalAggregationContext,
     warnings: string[],
+    partialFailures: SignalAggregationFailure[],
   ): Promise<readonly Signal[]> {
     const client = this.#config.github;
     const scopes = this.#config.githubScopes ?? [];
@@ -294,9 +298,14 @@ export class DefaultSignalAggregator implements SignalAggregator {
     // match multiple `anyLabel` queries on the same scope (e.g. an
     // issue labeled both `assigned:foo` AND `scope:all` shows up in
     // both queries). Key by repo+number so multi-repo scopes don't
-    // collide.
+    // collide. We collect the *raw* issue + its trust level so we can
+    // sort the merged set by `updatedAt` (deterministic, recency-first)
+    // before applying the per-source cap — older `assigned:` items
+    // would otherwise crowd out newer `scope:agent:<self>` directives
+    // because fan-out queries returned them in collection order
+    // (QA review of harness#331).
     const seen = new Set<string>();
-    const collected: Signal[] = [];
+    const raw: { readonly issue: GithubIssue; readonly trust: SignalTrustLevel }[] = [];
     const baseFilter = (scope: GithubSignalScope): ListIssuesFilter => ({
       perPage: Math.min(this.#caps.githubIssue + 5, 30),
       ...(scope.filter ?? {}),
@@ -304,12 +313,19 @@ export class DefaultSignalAggregator implements SignalAggregator {
     const recordIssues = async (
       scope: GithubSignalScope,
       filter: ListIssuesFilter,
+      anyLabel: string | undefined,
     ): Promise<void> => {
       const result = await client.listIssues(scope.repo, filter);
+      const repoCoord = `${scope.repo.owner.value}/${scope.repo.name.value}`;
       if (!result.ok) {
-        warnings.push(
-          `github source: ${scope.repo.owner.value}/${scope.repo.name.value} failed (${result.error.code})`,
-        );
+        warnings.push(`github source: ${repoCoord} failed (${result.error.code})`);
+        partialFailures.push({
+          source: "github",
+          repo: repoCoord,
+          ...(anyLabel !== undefined ? { anyLabel } : {}),
+          code: result.error.code,
+          detail: result.error.message,
+        });
         return;
       }
       const baseTrust: SignalTrustLevel = scope.trusted === true ? "trusted" : "semi-trusted";
@@ -317,7 +333,7 @@ export class DefaultSignalAggregator implements SignalAggregator {
         const key = `${issue.repo.owner.value}/${issue.repo.name.value}#${String(issue.number.value)}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        collected.push(issueToSignal(issue, baseTrust, context.now));
+        raw.push({ issue, trust: baseTrust });
       }
     };
 
@@ -325,7 +341,7 @@ export class DefaultSignalAggregator implements SignalAggregator {
       const baseFilterForScope = baseFilter(scope);
       if (scope.anyLabel === undefined || scope.anyLabel.length === 0) {
         // Single-query fast path — no OR semantics needed.
-        await recordIssues(scope, baseFilterForScope);
+        await recordIssues(scope, baseFilterForScope, undefined);
         continue;
       }
       // Fan-out: one query per anyLabel value. Each query AND-combines
@@ -336,18 +352,32 @@ export class DefaultSignalAggregator implements SignalAggregator {
           ...baseFilterForScope,
           labels: [...baseLabels, orLabel],
         };
-        await recordIssues(scope, filter);
+        await recordIssues(scope, filter, orLabel);
       }
     }
 
-    if (collected.length > this.#caps.githubIssue) {
-      const total = collected.length;
-      collected.length = this.#caps.githubIssue;
+    // Sort by recency before applying the cap so the most-recent-N is
+    // what survives, regardless of which fan-out query produced them.
+    // Tie-breaker on `(repo, number)` keeps the order stable across
+    // ties so two runs with identical input produce identical output.
+    raw.sort((a, b) => {
+      const ta = a.issue.updatedAt.getTime();
+      const tb = b.issue.updatedAt.getTime();
+      if (ta !== tb) return tb - ta; // DESC by updatedAt
+      const repoA = `${a.issue.repo.owner.value}/${a.issue.repo.name.value}`;
+      const repoB = `${b.issue.repo.owner.value}/${b.issue.repo.name.value}`;
+      if (repoA !== repoB) return repoA.localeCompare(repoB);
+      return b.issue.number.value - a.issue.number.value; // DESC by issue number
+    });
+
+    let kept: typeof raw = raw;
+    if (raw.length > this.#caps.githubIssue) {
+      kept = raw.slice(0, this.#caps.githubIssue);
       warnings.push(
-        `github-issue source truncated to ${String(this.#caps.githubIssue)} of ${String(total)} matches (cap)`,
+        `github-issue source truncated to ${String(this.#caps.githubIssue)} of ${String(raw.length)} matches (cap, sorted by updatedAt desc)`,
       );
     }
-    return collected;
+    return kept.map(({ issue, trust }) => issueToSignal(issue, trust, context.now));
   }
 
   // ---------------------------------------------------------------------

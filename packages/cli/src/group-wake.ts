@@ -13,6 +13,7 @@ import { readFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 
 import {
+  findReservedLabels,
   makeSecretKey,
   IdentityLoader,
   IdentityFileMissingError,
@@ -266,6 +267,23 @@ const executeActions = async (
             receipts.push({ action, success: false, error: "missing issueNumber or label" });
             break;
           }
+          // Security H1: agents (including meeting facilitators) MUST NOT
+          // write Source-reserved routing labels. See packages/core/src/labels.
+          const reservedLabel = findReservedLabels([
+            action.label,
+            ...(action.removeLabel !== undefined ? [action.removeLabel] : []),
+          ]);
+          if (reservedLabel.length > 0) {
+            console.log(
+              `    \x1b[31m✗\x1b[0m label-issue #${String(action.issueNumber)}: reserved-label ${reservedLabel.join(",")}`,
+            );
+            receipts.push({
+              action,
+              success: false,
+              error: `reserved-label:${reservedLabel.join(",")}`,
+            });
+            break;
+          }
           const ref = { id: String(action.issueNumber) };
           if (action.removeLabel) {
             await provider.removeLabel(ref, action.removeLabel);
@@ -293,6 +311,21 @@ const executeActions = async (
           if (!action.title) {
             receipts.push({ action, success: false, error: "missing title" });
             break;
+          }
+          // Security H1: see label-issue case above.
+          if (action.labels && action.labels.length > 0) {
+            const reserved = findReservedLabels(action.labels);
+            if (reserved.length > 0) {
+              console.log(
+                `    \x1b[31m✗\x1b[0m create-issue: reserved-label ${reserved.join(",")}`,
+              );
+              receipts.push({
+                action,
+                success: false,
+                error: `reserved-label:${reserved.join(",")}`,
+              });
+              break;
+            }
           }
           const input: { title: string; body: string; labels?: readonly string[] } = {
             title: action.title,
