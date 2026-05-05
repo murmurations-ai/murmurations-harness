@@ -15,7 +15,8 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { readFile, writeFile, chmod, readdir } from "node:fs/promises";
+import { access, constants, readFile, writeFile, chmod, readdir } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 import {
@@ -86,7 +87,7 @@ interface CheckContext {
 // ---------------------------------------------------------------------------
 
 const runLayoutChecks = async (ctx: CheckContext): Promise<void> => {
-  const { rootDir, findings } = ctx;
+  const { rootDir, findings, harness } = ctx;
 
   const requireDir = (relPath: string, severity: DoctorSeverity, reason: string): void => {
     const full = join(rootDir, relPath);
@@ -206,6 +207,71 @@ const runLayoutChecks = async (ctx: CheckContext): Promise<void> => {
         "Agents that use a subprocess executor will fail with spawn-failed. This is expected in development (run via `pnpm exec murmuration`), but in production the binary must be globally installed.",
       remediation: `Run \`npm install -g @murmurations-ai/cli\` or ensure \`node_modules/.bin\` is on PATH.`,
     });
+  }
+
+  // subscription-CLI binary reachability (harness#XXX)
+  // launchd / cron start daemons with a minimal PATH that may omit ~/.local/bin,
+  // causing ENOENT on every cron wake. Doctor catches this at setup time.
+  if (harness.llm.provider === "subscription-cli" && harness.llm.cli) {
+    const cliName = harness.llm.cli;
+    const fallbackPaths: readonly string[] =
+      cliName === "claude"
+        ? [
+            join(homedir(), ".local", "bin", "claude"),
+            "/usr/local/bin/claude",
+            "/opt/homebrew/bin/claude",
+            join(homedir(), ".npm", "bin", "claude"),
+          ]
+        : cliName === "gemini"
+          ? [
+              join(homedir(), ".local", "bin", "gemini"),
+              "/usr/local/bin/gemini",
+              "/opt/homebrew/bin/gemini",
+            ]
+          : [
+              join(homedir(), ".local", "bin", "codex"),
+              "/usr/local/bin/codex",
+              "/opt/homebrew/bin/codex",
+            ];
+
+    let absoluteCliPath: string | undefined;
+    try {
+      absoluteCliPath = execFileSync("which", [cliName], { encoding: "utf8" }).trim() || undefined;
+    } catch {
+      /* not in PATH — try fallback locations */
+    }
+    const inPath = absoluteCliPath !== undefined;
+    if (!inPath) {
+      for (const p of fallbackPaths) {
+        try {
+          await access(p, constants.X_OK);
+          absoluteCliPath = p;
+          break;
+        } catch {
+          /* try next */
+        }
+      }
+    }
+
+    if (!absoluteCliPath) {
+      findings.push({
+        checkId: `layout.cli-binary.${cliName}.missing`,
+        category: "layout",
+        severity: "error",
+        title: `CLI binary "${cliName}" not found`,
+        detail: `harness.yaml configures provider: subscription-cli / cli: ${cliName}, but the binary was not found on PATH or in common install locations (${fallbackPaths.join(", ")}). Every agent wake will fail with spawn ENOENT.`,
+        remediation: `Install the CLI: e.g. \`npm install -g @anthropic-ai/claude-code\` for claude. After installing, run \`doctor\` again to confirm.`,
+      });
+    } else if (!inPath) {
+      findings.push({
+        checkId: `layout.cli-binary.${cliName}.not-in-path`,
+        category: "layout",
+        severity: "warning",
+        title: `CLI binary "${cliName}" found at ${absoluteCliPath} but not on PATH`,
+        detail: `The daemon will resolve "${cliName}" to "${absoluteCliPath}" via its fallback search, but launchd / cron environments may not have this path in PATH. The harness resolves the binary at boot time, so daemon wakes will work — but interactive \`${cliName}\` commands from the terminal may fail if PATH is not set correctly.`,
+        remediation: `Add the directory containing "${cliName}" to your shell PATH (e.g. add \`export PATH="$HOME/.local/bin:$PATH"\` to ~/.zshrc).`,
+      });
+    }
   }
 
   // .env permissions

@@ -100,16 +100,25 @@ export interface ClaudeCliAdapterConfig {
   readonly mcpConfigPath?: string;
   /** ADR-0036: only `trusted` emits Claude's native auto-approve flag. */
   readonly permissionMode?: SubscriptionCliPermissionMode;
+  /**
+   * Absolute path to the `claude` binary. When set, used verbatim in
+   * spawn() instead of relying on PATH resolution. Critical for launchd /
+   * cron environments where PATH is minimal and doesn't include
+   * user-specific install locations (e.g. ~/.local/bin). Resolved at
+   * daemon boot via `resolveCliBinaryPath()` in boot.ts (harness#XXX).
+   */
+  readonly cliPath?: string;
 }
 
 export class ClaudeCliAdapter implements SubprocessLLMAdapter {
-  public readonly command = "claude";
+  public readonly command: string;
   public readonly providerId = "claude-cli";
 
   readonly #mcpConfigPath: string | undefined;
   readonly #permissionMode: SubscriptionCliPermissionMode;
 
   public constructor(config: ClaudeCliAdapterConfig = {}) {
+    this.command = config.cliPath ?? "claude";
     this.#mcpConfigPath = config.mcpConfigPath;
     this.#permissionMode = config.permissionMode ?? "restricted";
   }

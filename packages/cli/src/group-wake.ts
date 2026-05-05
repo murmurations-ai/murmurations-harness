@@ -9,7 +9,8 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { access, constants, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { resolve, join } from "node:path";
 
 import {
@@ -77,6 +78,48 @@ type ResolveLLMResult =
       readonly issues: readonly string[];
     }
   | { readonly ok: false; readonly reason: "other"; readonly message: string };
+
+/** Shared fallback paths for subscription-CLI binaries (see boot.ts). */
+const CLI_FALLBACK_PATHS_GW: Record<string, readonly string[]> = {
+  claude: [
+    join(homedir(), ".local", "bin", "claude"),
+    "/usr/local/bin/claude",
+    "/opt/homebrew/bin/claude",
+    join(homedir(), ".npm", "bin", "claude"),
+  ],
+  gemini: [
+    join(homedir(), ".local", "bin", "gemini"),
+    "/usr/local/bin/gemini",
+    "/opt/homebrew/bin/gemini",
+  ],
+  codex: [
+    join(homedir(), ".local", "bin", "codex"),
+    "/usr/local/bin/codex",
+    "/opt/homebrew/bin/codex",
+  ],
+};
+
+const resolveGroupWakeCliBinaryPath = async (cli: string): Promise<string | undefined> => {
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const ef = promisify(execFile);
+    const { stdout } = await ef("which", [cli], { timeout: 5000 });
+    const p = stdout.trim();
+    if (p.length > 0) return p;
+  } catch {
+    /* not in PATH */
+  }
+  for (const p of CLI_FALLBACK_PATHS_GW[cli] ?? []) {
+    try {
+      await access(p, constants.X_OK);
+      return p;
+    } catch {
+      /* try next */
+    }
+  }
+  return undefined;
+};
 
 /**
  * Resolve LLM provider + model from the facilitator's role.md.
@@ -510,6 +553,9 @@ export const runGroupWakeCommand = async (
         `murmuration convene: facilitator "${config.facilitator}" has provider "subscription-cli" but llm.cli must be one of claude | codex | gemini`,
       );
     }
+    // Resolve CLI binary to absolute path so launchd / cron environments
+    // (minimal PATH, no ~/.local/bin) can still find it (harness#XXX).
+    const cliPath = await resolveGroupWakeCliBinaryPath(llmConfig.cli);
     llmClient = createSubscriptionCliClient({
       cli: llmConfig.cli,
       model: llmConfig.model,
@@ -517,6 +563,7 @@ export const runGroupWakeCommand = async (
       ...(llmConfig.permissionMode !== undefined
         ? { permissionMode: llmConfig.permissionMode }
         : {}),
+      ...(cliPath !== undefined ? { cliPath } : {}),
     });
   } else {
     const envKeyName = providerRegistry.envKeyName(llmConfig.provider);

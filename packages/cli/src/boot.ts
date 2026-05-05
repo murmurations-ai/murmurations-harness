@@ -21,7 +21,8 @@
  */
 
 import { existsSync, unlinkSync } from "node:fs";
-import { mkdir, open, readFile } from "node:fs/promises";
+import { access, constants, mkdir, open, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -91,6 +92,76 @@ import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js"
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 import { registerRunningSocket, unregisterRunningSocket } from "./running-sessions.js";
 import { writeSpiritMcpConfig } from "./spirit/mcp-config.js";
+
+// ---------------------------------------------------------------------------
+// CLI binary resolution — launchd / cron safe (harness#XXX)
+//
+// macOS launchd and Linux systemd/cron start processes with a minimal PATH
+// that doesn't include user-specific install directories (e.g. ~/.local/bin,
+// ~/.npm/bin). When the daemon runs via launchd (io.murmurations.*), a plain
+// `spawn("claude")` fails with ENOENT even though `claude` is installed.
+//
+// Fix: resolve to an absolute path at daemon boot time. Try PATH first (works
+// in interactive sessions), then fall back to the common install locations
+// each CLI vendor uses on macOS/Linux. The resolved path is immune to PATH
+// changes after boot.
+// ---------------------------------------------------------------------------
+
+/** Common install locations per CLI binary, most-likely first. */
+const CLI_FALLBACK_PATHS: Record<string, readonly string[]> = {
+  claude: [
+    join(homedir(), ".local", "bin", "claude"),
+    "/usr/local/bin/claude",
+    "/opt/homebrew/bin/claude",
+    join(homedir(), ".npm", "bin", "claude"),
+    join(homedir(), "node_modules", ".bin", "claude"),
+  ],
+  gemini: [
+    join(homedir(), ".local", "bin", "gemini"),
+    "/usr/local/bin/gemini",
+    "/opt/homebrew/bin/gemini",
+    join(homedir(), ".npm", "bin", "gemini"),
+  ],
+  codex: [
+    join(homedir(), ".local", "bin", "codex"),
+    "/usr/local/bin/codex",
+    "/opt/homebrew/bin/codex",
+    join(homedir(), ".npm", "bin", "codex"),
+    join(homedir(), ".openai", "bin", "codex"),
+  ],
+};
+
+/**
+ * Resolve the absolute path for a CLI binary.
+ *
+ * Returns the first reachable executable found, or null if nothing is found.
+ * Tries `which` first (inherits current PATH), then probes common install
+ * locations so launchd / cron environments can still locate the binary.
+ */
+const resolveCliBinaryPath = async (cli: string): Promise<string | null> => {
+  // Try PATH resolution via `which` first.
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+    const { stdout } = await execFileAsync("which", [cli], { timeout: 5000 });
+    const p = stdout.trim();
+    if (p.length > 0) return p;
+  } catch {
+    // which failed — PATH doesn't include the binary; try fallback paths.
+  }
+  // Probe well-known install locations.
+  const candidates = CLI_FALLBACK_PATHS[cli] ?? [];
+  for (const p of candidates) {
+    try {
+      await access(p, constants.X_OK);
+      return p;
+    } catch {
+      // not found or not executable
+    }
+  }
+  return null;
+};
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
@@ -370,6 +441,13 @@ interface BuildAgentClientsArgs {
   /** Optional logger so the cost hook can emit `daemon.cost.pricing.unknown`
    *  warns when a model isn't in the pricing catalog (harness#251). */
   readonly logger?: { warn: (event: string, fields?: Record<string, unknown>) => void };
+  /**
+   * Absolute path to the subscription-CLI binary, pre-resolved at boot by
+   * `resolveCliBinaryPath()`. When set, passed to `createSubscriptionCliClient`
+   * so `spawn()` uses the absolute path rather than relying on PATH resolution.
+   * Fixes ENOENT failures in launchd / cron environments (harness#XXX).
+   */
+  readonly resolvedCliPath?: string;
 }
 
 interface BuildAgentClientsResult {
@@ -387,6 +465,7 @@ interface BuildAgentClientsResult {
  * builder) so the cost hook lands on the right record.
  */
 const buildAgentClients = ({
+  resolvedCliPath,
   agent,
   provider,
   providerRegistry,
@@ -452,6 +531,7 @@ const buildAgentClients = ({
             : {}),
           ...(mcpConfigPath !== undefined ? { mcpConfigPath } : {}),
           ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+          ...(resolvedCliPath !== undefined ? { cliPath: resolvedCliPath } : {}),
         });
       }
     } else {
@@ -1247,6 +1327,25 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const ollamaBaseUrl = process.env.OLLAMA_BASE_URL;
   const executorMap = new Map<string, AgentExecutor>();
 
+  // Resolve subscription-CLI binary path once at boot. launchd / cron / systemd
+  // start daemons with a minimal PATH that may omit user-install locations
+  // (e.g. ~/.local/bin). Resolving here — before the agent loop — lets every
+  // agent reuse the cached absolute path rather than re-running PATH lookups
+  // per wake. Uses `which` first (works in interactive shells), then probes
+  // common install locations as a fallback.
+  const harnessCliName = config.llm.provider === "subscription-cli" ? config.llm.cli : undefined;
+  const resolvedCliPath: string | undefined = harnessCliName
+    ? ((await resolveCliBinaryPath(harnessCliName)) ?? undefined)
+    : undefined;
+  if (harnessCliName && resolvedCliPath) {
+    logger.info("daemon.cli.resolved", { cli: harnessCliName, path: resolvedCliPath });
+  } else if (harnessCliName && !resolvedCliPath) {
+    logger.warn("daemon.cli.not-found", {
+      cli: harnessCliName,
+      message: `"${harnessCliName}" not found via PATH or common install locations; wakes will fail with ENOENT`,
+    });
+  }
+
   for (const agent of allRegistered) {
     // Boot-time validation pass: build a throw-away client bag with
     // NO cost builder so we just verify everything can be wired.
@@ -1258,6 +1357,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       ollamaBaseUrl,
       harnessLlm: config.llm,
       rootDir: exampleRoot,
+      ...(resolvedCliPath !== undefined ? { resolvedCliPath } : {}),
     });
 
     if (agent.llm && validation.llmSkipReason) {
@@ -1414,6 +1514,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               harnessLlm: config.llm,
               rootDir: exampleRoot,
               logger,
+              ...(resolvedCliPath !== undefined ? { resolvedCliPath } : {}),
             });
             const firstBranchScope = capturedAgent.githubWriteScopes.branchCommits[0];
             const targetRepo = firstBranchScope ? parseRepoKey(firstBranchScope.repo) : undefined;
