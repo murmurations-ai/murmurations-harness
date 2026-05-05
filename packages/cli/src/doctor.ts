@@ -13,11 +13,10 @@
  * legacy repo, run `doctor --fix`.
  */
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { copyFile, readFile, writeFile, chmod, readdir } from "node:fs/promises";
+import { readFile, writeFile, chmod, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 
 import {
   FrontmatterInvalidError,
@@ -27,8 +26,6 @@ import {
 
 import { listBundledPluginAliases, probeGovernancePlugin } from "./governance-plugin-resolver.js";
 import { loadHarnessConfig, validateHarnessYaml, type HarnessConfig } from "./harness-config.js";
-
-const execFileP = promisify(execFile);
 
 const which = (bin: string): boolean => {
   try {
@@ -908,10 +905,3 @@ export const runDoctorCli = async (options: DoctorOptions): Promise<number> => {
 
   return exitCodeFor(report);
 };
-
-// Suppress unused-import warnings for Node-only helpers that might not
-// be needed on every code path; `copyFile`/`execFileP` are reserved for
-// future auto-fix strategies (backup-then-rename). TODO: tighten if
-// still unused when the PR lands.
-void copyFile;
-void execFileP;

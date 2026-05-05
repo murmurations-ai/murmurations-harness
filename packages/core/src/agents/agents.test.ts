@@ -81,7 +81,7 @@ describe("AgentStateStore", () => {
     const wakes = store.getRecentWakes("agent-x");
     const wake = wakes.find((w) => w.wakeId === "w-sf");
     expect(wake?.outcome).toBe("spawn-failed");
-    expect(wake?.state).toBe("failed");
+    expect(wake?.state).toBe("spawn-failed");
     expect(wake?.errorMessage).toBe("ENOENT: binary not found");
   });
 
