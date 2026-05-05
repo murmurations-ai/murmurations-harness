@@ -1706,13 +1706,50 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   // Write pidfile — skip for --once/--now wakes (child processes shouldn't clobber the daemon's pid)
   const pidfilePath = resolve(exampleRoot, ".murmuration", "daemon.pid");
+  const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
   await mkdir(resolve(exampleRoot, ".murmuration"), { recursive: true });
   if (!once) {
+    // Guard against same-machine collision (#219): if a pidfile exists and its
+    // process is still alive, refuse to start rather than silently clobbering it.
+    try {
+      const rawPid = await readFile(pidfilePath, "utf8");
+      const existingPid = Number(rawPid.trim());
+      if (Number.isFinite(existingPid) && existingPid > 0) {
+        try {
+          process.kill(existingPid, 0); // signal 0 = probe only, doesn't kill
+          // Process is alive — refuse to start.
+          const lines = [
+            `murmuration: a daemon is already running for this murmuration.`,
+            `  root:   ${exampleRoot}`,
+            `  pid:    ${String(existingPid)}`,
+            `  socket: ${socketPath}`,
+            `  attach: murmuration attach ${runningSessionName}`,
+            `  stop:   murmuration stop --root ${exampleRoot}`,
+            ``,
+            `If you believe this is wrong (e.g. the process crashed without`,
+            `cleaning up), remove the stale pidfile manually:`,
+            `  rm ${pidfilePath}`,
+          ];
+          throw new Error(lines.join("\n"));
+        } catch (killErr) {
+          // kill(pid, 0) throws when the process doesn't exist — stale pidfile.
+          if ((killErr as NodeJS.ErrnoException).code === "ESRCH") {
+            logger.info("daemon.pidfile.stale", { existingPid, pidfilePath });
+            // fall through to overwrite
+          } else {
+            throw killErr; // re-throw the "already running" error from above
+          }
+        }
+      }
+    } catch (readErr) {
+      if ((readErr as NodeJS.ErrnoException).code !== "ENOENT") throw readErr;
+      // ENOENT = no pidfile yet, normal first start
+    }
     await writeFile(pidfilePath, String(process.pid), "utf8");
   }
 
   // Start daemon control socket
-  const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
+  // socketPath declared above alongside pidfilePath (collision check needs it)
   // ~/.murmuration/sockets/ directory so `murmuration list` can find it.
   if (!once) {
     registerRunningSocket(runningSessionName, socketPath);
