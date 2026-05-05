@@ -864,6 +864,27 @@ export interface GovernancePlugin {
   closerFor?(issueType: string): CloserRole | undefined;
 
   /**
+   * v0.7.1 — Declare the label strings owned by this governance plugin.
+   * The harness uses this to let plugins participate in the label
+   * vocabulary without hardcoding plugin-specific labels in core.
+   *
+   * Returns a flat list of label strings the plugin writes to (or reads
+   * from) GitHub issues. Examples: S3 returns `["tier:autonomous",
+   * "tier:notify", "tier:consent"]`; chain-of-command might return
+   * `["decision:approved", "decision:rejected"]`.
+   *
+   * The daemon logs the vocabulary at startup. Future tooling will
+   * enforce that these strings don't appear as literals in core.
+   *
+   * Return an empty array (or omit the method) when the plugin writes
+   * no plugin-specific labels.
+   *
+   * @see packages/core/src/labels/index.ts — S3 labels currently live
+   *      there pending v0.8.0 migration to the S3 plugin
+   */
+  labelVocabulary?(): readonly string[];
+
+  /**
    * Optional hook called once when the daemon starts. Unlike
    * {@link onEventsEmitted} and {@link evaluateAction}, this receives the
    * full mutable store so the plugin can register state graphs via
@@ -893,6 +914,10 @@ export class NoOpGovernancePlugin implements GovernancePlugin {
   public readonly version = "1.0.0";
 
   public stateGraphs(): readonly GovernanceStateGraph[] {
+    return [];
+  }
+
+  public labelVocabulary(): readonly string[] {
     return [];
   }
 

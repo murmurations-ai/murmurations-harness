@@ -27,9 +27,9 @@
  * every murmuration regardless of governance plugin. Plugin-specific
  * labels (e.g. S3's `tier:autonomous`/`tier:notify`/`tier:consent`)
  * are exposed here for now because they're written by enough call
- * sites that drift was a real risk; long-term they should migrate
- * to a `GovernancePlugin.labelVocabulary()` interface so plugins
- * own their own label namespace. Tracked as a follow-up.
+ * sites that drift was a real risk; v0.8.0 will migrate them into the
+ * S3 plugin via `GovernancePlugin.labelVocabulary()` (added v0.7.1,
+ * harness#337).
  */
 
 // ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ export const buildAgentRoutingLabels = (
 // live here for now even though they're S3-specific (`tier:*` is an
 // S3 vocabulary; other governance plugins use their own decision
 // taxonomies). Plugin-owned label vocabularies are a v0.8.0+ design
-// item — see `GovernancePlugin.labelVocabulary()` follow-up issue.
+// item — they will migrate to the S3 plugin's `labelVocabulary()` in v0.8.0.
 // ---------------------------------------------------------------------------
 
 /** S3 decision tier: agent acts without notifying Source. */

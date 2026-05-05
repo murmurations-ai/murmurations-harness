@@ -783,6 +783,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       process.exit(78);
     }
     governancePlugin = candidate as import("@murmurations-ai/core").GovernancePlugin;
+    const pluginVocabulary = governancePlugin.labelVocabulary?.() ?? [];
     process.stdout.write(
       `${JSON.stringify({
         ts: new Date().toISOString(),
@@ -790,6 +791,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         event: "daemon.governance.loaded",
         plugin: governancePlugin.name,
         version: governancePlugin.version,
+        ...(pluginVocabulary.length > 0 ? { labelVocabulary: pluginVocabulary } : {}),
       })}\n`,
     );
   }
