@@ -41,6 +41,7 @@ import {
   amendWakeSummaryWithValidation,
 } from "../execution/index.js";
 import type { LoadedAgentIdentity } from "../identity/index.js";
+import { buildAgentRoutingLabels } from "../labels/index.js";
 import {
   makeSecretKey,
   REDACT,
@@ -283,6 +284,22 @@ export const registeredAgentFromLoadedIdentity = (
       }
     : undefined;
 
+  // Auto-derive the membership-aware OR-set of routing labels (harness#331
+  // fix, with derivation moved here from boot.ts per Engineering Standard
+  // #8 — keep the composition root thin). The aggregator listens for any
+  // of these to deliver assigned items, scoped directives, group
+  // directives, and broadcast directives.
+  //
+  // Operator precedence: if `signals.github_scopes[].filter.any_label` is
+  // explicitly set in role.md, that wins; otherwise the daemon's
+  // membership-aware default applies. This makes "what labels does
+  // agent X listen on?" a property of the loaded identity rather than
+  // a daemon-boot concern, so dashboards / `agents` CLI / signals tests
+  // all read from the same single source of truth.
+  const derivedAnyLabel = buildAgentRoutingLabels(
+    frontmatter.agent_id,
+    frontmatter.group_memberships,
+  );
   const signalScopes =
     frontmatter.signals.github_scopes !== undefined
       ? {
@@ -294,7 +311,7 @@ export const registeredAgentFromLoadedIdentity = (
               state: s.filter.state,
               ...(s.filter.since_days !== undefined ? { sinceDays: s.filter.since_days } : {}),
               ...(s.filter.labels !== undefined ? { labels: s.filter.labels } : {}),
-              ...(s.filter.any_label !== undefined ? { anyLabel: s.filter.any_label } : {}),
+              anyLabel: s.filter.any_label ?? derivedAnyLabel,
             },
           })),
         }

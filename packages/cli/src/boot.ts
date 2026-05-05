@@ -27,7 +27,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   AgentStateStore,
-  buildAgentRoutingLabels,
   Daemon,
   DispatchExecutor,
   findReservedLabels,
@@ -1421,33 +1420,23 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   // is the hello-world / no-token path.
   // Merge signal scopes from ALL agents into a single aggregator
   // config. Duplicate repos are OK — the aggregator deduplicates by
-  // issue id at the fetch level.
-  //
-  // harness#331 fix: per-agent membership-aware routing labels are
-  // injected here as the scope's `anyLabel` (OR-semantics). Without
-  // them, scoped source-directives (`scope:agent:<id>`, `scope:group:<g>`,
-  // `scope:all`) silently disappear because the aggregator's existing
-  // `labels` filter is AND-only and only matches `assigned:<id>`. The
-  // operator can override by setting `signals.github_scopes[].filter.any_label`
-  // explicitly in role.md — the daemon-injected default applies only
-  // when the operator hasn't.
+  // issue id at the fetch level. The membership-aware `anyLabel`
+  // routing set is already derived inside `registeredAgentFromLoadedIdentity`
+  // (harness#343 — composition root stays thin, Engineering Standard #8),
+  // so this site only translates DTO shapes.
   const githubSignalScopes = allRegistered.flatMap(
     (agent) =>
-      agent.signalScopes?.githubScopes?.map((scope) => {
-        const operatorAnyLabel = scope.filter.anyLabel;
-        const derivedAnyLabel = buildAgentRoutingLabels(agent.agentId, agent.groupMemberships);
-        return {
-          repo: makeRepoCoordinate(scope.owner, scope.repo),
-          filter: {
-            state: scope.filter.state,
-            ...(scope.filter.labels !== undefined ? { labels: scope.filter.labels } : {}),
-            ...(scope.filter.sinceDays !== undefined
-              ? { since: new Date(Date.now() - scope.filter.sinceDays * 86_400_000) }
-              : {}),
-          },
-          anyLabel: operatorAnyLabel ?? derivedAnyLabel,
-        };
-      }) ?? [],
+      agent.signalScopes?.githubScopes?.map((scope) => ({
+        repo: makeRepoCoordinate(scope.owner, scope.repo),
+        filter: {
+          state: scope.filter.state,
+          ...(scope.filter.labels !== undefined ? { labels: scope.filter.labels } : {}),
+          ...(scope.filter.sinceDays !== undefined
+            ? { since: new Date(Date.now() - scope.filter.sinceDays * 86_400_000) }
+            : {}),
+        },
+        ...(scope.filter.anyLabel !== undefined ? { anyLabel: scope.filter.anyLabel } : {}),
+      })) ?? [],
   );
 
   // Construct governance sync via CollaborationProvider (ADR-0021).
