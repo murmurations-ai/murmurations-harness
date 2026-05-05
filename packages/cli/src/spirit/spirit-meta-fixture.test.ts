@@ -106,7 +106,7 @@ describe("Spirit meta-agent fixture — Workstream O (memory)", () => {
 
 describe("Spirit meta-agent fixture — Workstream P (describe_murmuration)", () => {
   it("walks the synthetic murmuration and returns the expected shape", async () => {
-    const { overview } = await describeMurmuration(root, { refresh: true });
+    const { overview } = await describeMurmuration(root);
     expect(overview.governanceModel).toBe("sociocracy-3.0");
     expect(overview.llmProvider).toBe("subscription-cli");
     expect(overview.agents.map((a) => a.agentId).sort()).toEqual([

@@ -24,6 +24,14 @@ import { join } from "node:path";
 
 const SKILL_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 
+/** Collapse newlines + control chars in a single-line index entry so the
+ *  description can't break out of the SKILLS.md row or the
+ *  &lt;operator_skill_index&gt; container in Spirit's system prompt. Mirrors
+ *  the same helper in memory.ts. */
+const sanitizeDescription = (input: string): string =>
+  // eslint-disable-next-line no-control-regex
+  input.replace(/[\x00-\x1f]+/g, " ").trim();
+
 const skillsDirOf = (rootDir: string): string => join(rootDir, ".murmuration", "spirit", "skills");
 const indexPathOf = (rootDir: string): string => join(skillsDirOf(rootDir), "SKILLS.md");
 
@@ -103,7 +111,7 @@ export class SpiritSkillsOverlay {
   }
 
   async #updateIndexEntry(name: string, description: string): Promise<void> {
-    const entry = `- \`${name}\` — ${description.replace(/\n.*/s, "")}`;
+    const entry = `- \`${name}\` — ${sanitizeDescription(description)}`;
     let lines: string[] = [];
     try {
       const existing = await readFile(this.indexPath, "utf8");

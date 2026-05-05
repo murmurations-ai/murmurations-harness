@@ -11,22 +11,22 @@
  *   <root>/agents/<slug>/role.md             — frontmatter only
  *   <root>/governance/groups/<id>.md         — first line + Members section
  *
- * Result is auto-cached at:
- *   <root>/.murmuration/spirit/memory/project_murmuration_overview.md
- *
- * Cache invalidates when any source file's mtime is newer than the
- * cache file's mtime. Force re-walk via { refresh: true }.
+ * No caching: the walk is single-digit ms on a typical murmuration and
+ * the prior mtime-cache layer didn't actually short-circuit the walk
+ * (the structured overview was rebuilt from disk on every "cache hit").
  *
  * @see docs/specs/0002-spirit-meta-agent.md §5 Workstream P
  */
 
-import { existsSync } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { parse as parseYaml } from "yaml";
 
-import { SpiritMemory } from "./memory.js";
+// Pre-v0.7.0 release builds wrote an auto-cache memory file. The cache
+// has been removed; sweep the stale file once on each describe call so
+// upgrading operators don't see it lingering in `recall`. Idempotent.
+const STALE_CACHE_BASENAME = "project_murmuration_overview.md";
 
 export interface AgentSummary {
   readonly agentId: string;
@@ -53,118 +53,28 @@ export interface MurmurationOverview {
   readonly agents: readonly AgentSummary[];
   readonly groups: readonly GroupSummary[];
   readonly generatedAt: string;
-  readonly fromCache: boolean;
-}
-
-const CACHE_NAME = "project_murmuration_overview";
-
-export interface DescribeOptions {
-  readonly refresh?: boolean;
 }
 
 /**
- * Build a structured + markdown overview of the murmuration. Reads
- * cached result when available + still fresh; otherwise walks the
- * source files and writes a new cache entry.
+ * Build a structured + markdown overview of the murmuration by walking
+ * the canonical source files. Cheap enough to call on every request.
  */
 export const describeMurmuration = async (
   rootDir: string,
-  options: DescribeOptions = {},
 ): Promise<{ readonly overview: MurmurationOverview; readonly markdown: string }> => {
-  const memory = new SpiritMemory(rootDir);
-  const cachePath = join(memory.dir, `${CACHE_NAME}.md`);
-  const refresh = options.refresh === true;
-
-  // Try cache first.
-  if (!refresh) {
-    const cached = await tryReadCache(rootDir, cachePath);
-    if (cached) return cached;
-  }
-
-  // Fresh walk.
+  await sweepStaleCacheFile(rootDir);
   const overview = await walkMurmuration(rootDir);
   const markdown = renderMarkdown(overview);
-  await memory.remember({
-    type: "project",
-    name: CACHE_NAME,
-    description:
-      "Auto-generated murmuration overview (governance, agents, groups). Refreshed when source files change.",
-    body: markdown,
-  });
   return { overview, markdown };
 };
 
-// ---------------------------------------------------------------------------
-// Cache check
-// ---------------------------------------------------------------------------
-
-const tryReadCache = async (
-  rootDir: string,
-  cachePath: string,
-): Promise<{ readonly overview: MurmurationOverview; readonly markdown: string } | null> => {
-  if (!existsSync(cachePath)) return null;
-
-  let cacheStat: Awaited<ReturnType<typeof stat>>;
+const sweepStaleCacheFile = async (rootDir: string): Promise<void> => {
+  const stale = join(rootDir, ".murmuration", "spirit", "memory", STALE_CACHE_BASENAME);
   try {
-    cacheStat = await stat(cachePath);
+    await rm(stale, { force: true });
   } catch {
-    return null;
+    /* best-effort */
   }
-
-  // Check if any source file is newer than cache.
-  const sourcePaths = await collectSourcePaths(rootDir);
-  for (const p of sourcePaths) {
-    try {
-      const s = await stat(p);
-      if (s.mtimeMs > cacheStat.mtimeMs) return null;
-    } catch {
-      /* missing source — skip */
-    }
-  }
-
-  // Cache is fresh — read + parse it back. The cache is the rendered
-  // markdown plus a frontmatter; we re-walk to rebuild the structured
-  // overview because the markdown is lossy. Walking is cheap.
-  const overview = await walkMurmuration(rootDir);
-  let cacheBody: string;
-  try {
-    cacheBody = await readFile(cachePath, "utf8");
-  } catch {
-    return null;
-  }
-  const fm = /^---\n[\s\S]*?\n---\n?/m.exec(cacheBody);
-  const markdown = fm ? cacheBody.slice(fm[0].length).trim() : cacheBody.trim();
-  return { overview: { ...overview, fromCache: true }, markdown };
-};
-
-const collectSourcePaths = async (rootDir: string): Promise<readonly string[]> => {
-  const paths: string[] = [
-    join(rootDir, "murmuration", "harness.yaml"),
-    join(rootDir, "murmuration", "soul.md"),
-  ];
-  // agents/*/role.md
-  try {
-    const agentEntries = await readdir(join(rootDir, "agents"), { withFileTypes: true });
-    for (const e of agentEntries) {
-      if (e.isDirectory()) paths.push(join(rootDir, "agents", e.name, "role.md"));
-    }
-  } catch {
-    /* no agents/ */
-  }
-  // governance/groups/*.md
-  try {
-    const groupEntries = await readdir(join(rootDir, "governance", "groups"), {
-      withFileTypes: true,
-    });
-    for (const e of groupEntries) {
-      if (e.isFile() && e.name.endsWith(".md")) {
-        paths.push(join(rootDir, "governance", "groups", e.name));
-      }
-    }
-  } catch {
-    /* no groups */
-  }
-  return paths;
 };
 
 // ---------------------------------------------------------------------------
@@ -186,7 +96,6 @@ const walkMurmuration = async (rootDir: string): Promise<MurmurationOverview> =>
     agents,
     groups,
     generatedAt: new Date().toISOString(),
-    fromCache: false,
   };
 };
 
@@ -412,6 +321,6 @@ const renderMarkdown = (o: MurmurationOverview): string => {
     }
   }
 
-  lines.push("", `_(generated ${o.generatedAt}${o.fromCache ? "; cached" : ""})_`);
+  lines.push("", `_(generated ${o.generatedAt})_`);
   return lines.join("\n");
 };

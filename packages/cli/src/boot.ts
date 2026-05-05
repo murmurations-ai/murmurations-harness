@@ -399,22 +399,30 @@ const buildAgentClients = ({
     githubSkipReason?: string;
   } = {};
 
-  if (agent.llm) {
+  // Note: harness-level LLM inheritance is already wired in
+  // packages/core/src/identity/index.ts (the loader injects
+  // roleDefaults.llm into base.llm when role.md omits the `llm:`
+  // block). So `agent.llm` here reflects the merged value. We
+  // alias to `effectiveLlm` for readability; both refer to the
+  // same already-merged config.
+  const effectiveLlm = agent.llm;
+
+  if (effectiveLlm) {
     // ADR-0034: subscription-CLI provider family bypasses the registry
     // because it spawns a subprocess, not a Vercel LanguageModel.
-    if (agent.llm.provider === "subscription-cli") {
+    if (effectiveLlm.provider === "subscription-cli") {
       // harness#271: agent's role.md cli takes precedence; fall back to
       // harness.yaml's llm.cli when the agent doesn't pin one. Without
       // this fallback, an operator who sets `llm.cli: claude` at the
       // harness level and inherits it across all agents would see every
       // agent silently downgrade to the placeholder stub.
-      const cli = agent.llm.cli ?? harnessLlm.cli;
+      const cli = effectiveLlm.cli ?? harnessLlm.cli;
       if (cli !== "claude" && cli !== "gemini" && cli !== "codex") {
         result.llmSkipReason = `provider "subscription-cli" requires llm.cli: claude | gemini | codex (set on agent role.md llm.cli, or fall back via harness.yaml llm.cli)`;
       } else {
         const costHook = costBuilder ? makeDaemonHook(costBuilder, logger) : undefined;
         // Same fallback shape for model: agent override → harness default → empty
-        const model = agent.llm.model ?? harnessLlm.model ?? "";
+        const model = effectiveLlm.model ?? harnessLlm.model ?? "";
         // harness#291: wire Spirit MCP config so daemon-spawned claude-cli
         // agents can call harness-internal tools (status, agents, wake, ...)
         // through the same MCP bridge the interactive REPL uses (ADR-0038
@@ -423,34 +431,41 @@ const buildAgentClients = ({
         // posting to GitHub. Codex/gemini fall through (no `--mcp-config`
         // analogue today) and remain text-only until per-CLI MCP support
         // lands.
-        const mcpConfigPath = cli === "claude" ? writeSpiritMcpConfig(rootDir) : undefined;
+        // Escape hatch: setting MURMURATION_DISABLE_AGENT_MCP=1 falls back
+        // to text-only wakes (no `--mcp-config`). Useful if a future CLI
+        // version regresses MCP startup or to isolate provider-side bugs.
+        const mcpConfigPath =
+          cli === "claude" && process.env.MURMURATION_DISABLE_AGENT_MCP !== "1"
+            ? writeSpiritMcpConfig(rootDir)
+            : undefined;
         result.llm = createSubscriptionCliClient({
           cli,
           model,
-          ...(agent.llm.timeoutMs !== undefined ? { timeoutMs: agent.llm.timeoutMs } : {}),
-          ...(agent.llm.permissionMode !== undefined
-            ? { permissionMode: agent.llm.permissionMode }
+          ...(effectiveLlm.timeoutMs !== undefined ? { timeoutMs: effectiveLlm.timeoutMs } : {}),
+          ...(effectiveLlm.permissionMode !== undefined
+            ? { permissionMode: effectiveLlm.permissionMode }
             : {}),
           ...(mcpConfigPath !== undefined ? { mcpConfigPath } : {}),
           ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
         });
       }
     } else {
-      const providerDef = providerRegistry.get(agent.llm.provider);
+      const providerDef = providerRegistry.get(effectiveLlm.provider);
       if (!providerDef) {
-        result.llmSkipReason = `provider "${agent.llm.provider}" is not registered`;
+        result.llmSkipReason = `provider "${effectiveLlm.provider}" is not registered`;
       } else {
         const resolvedModel =
-          agent.llm.model ?? providerRegistry.resolveModelForTier(agent.llm.provider, "balanced");
+          effectiveLlm.model ??
+          providerRegistry.resolveModelForTier(effectiveLlm.provider, "balanced");
         if (!resolvedModel) {
-          result.llmSkipReason = `no model for provider "${agent.llm.provider}" (pin role.md llm.model)`;
+          result.llmSkipReason = `no model for provider "${effectiveLlm.provider}" (pin role.md llm.model)`;
         } else {
           const costHook = costBuilder ? makeDaemonHook(costBuilder, logger) : undefined;
           if (providerDef.envKeyName === null) {
             // Keyless provider (e.g. local Ollama).
             result.llm = createLLMClient({
               registry: providerRegistry,
-              provider: agent.llm.provider,
+              provider: effectiveLlm.provider,
               model: resolvedModel,
               token: null,
               ...(ollamaBaseUrl !== undefined ? { baseUrl: ollamaBaseUrl } : {}),
@@ -460,7 +475,7 @@ const buildAgentClients = ({
             const token = provider.get(makeSecretKey(providerDef.envKeyName));
             result.llm = createLLMClient({
               registry: providerRegistry,
-              provider: agent.llm.provider,
+              provider: effectiveLlm.provider,
               model: resolvedModel,
               token,
               ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
@@ -1855,37 +1870,56 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   }
 
   if (once) {
-    // --once mode: wait for ANY agent's first wake to produce a run
-    // artifact, then stop the daemon and exit. We detect completion by
-    // polling each agent's index.jsonl.
+    // --once mode: wait for ANY agent to produce a NEW run artifact
+    // since the daemon started, then stop the daemon and exit.
+    //
+    // Bug fix 2026-05-04: previously this checked "any agent's
+    // index.jsonl has any content" — which fired immediately when
+    // prior wakes had already populated the file, shutting the
+    // daemon down 2s into the new wake. The in-flight subscription-
+    // CLI subprocess (claude) needed the daemon's MCP socket; the
+    // daemon shutdown closed the socket; claude hung waiting for
+    // tool responses that never came; wake timed out at 120s with
+    // empty content. We now snapshot each file's byte count at
+    // start and wait for growth.
     const indexPaths = allRegistered.map((a) =>
       resolve(exampleRoot, "runs", a.agentId, "index.jsonl"),
     );
+    const baselineBytes = new Map<string, number>();
+    for (const p of indexPaths) {
+      try {
+        const contents = await readFile(p, "utf8");
+        baselineBytes.set(p, contents.length);
+      } catch {
+        baselineBytes.set(p, 0);
+      }
+    }
     const pollIntervalMs = 2000;
     const maxWaitMs = 300_000; // 5 minutes hard ceiling
     const startedAt = Date.now();
     while (Date.now() - startedAt < maxWaitMs) {
       await new Promise((r) => setTimeout(r, pollIntervalMs));
-      let anyArtifact = false;
+      let anyNewArtifact = false;
       for (const p of indexPaths) {
         try {
           const contents = await readFile(p, "utf8");
-          if (contents.trim().length > 0) {
-            anyArtifact = true;
+          const baseline = baselineBytes.get(p) ?? 0;
+          if (contents.length > baseline) {
+            anyNewArtifact = true;
             break;
           }
         } catch {
-          // file not written yet
+          // file not written yet — also counts as no new artifact
         }
       }
-      if (anyArtifact) break;
+      if (anyNewArtifact) break;
     }
     process.stdout.write(
       `${JSON.stringify({
         ts: new Date().toISOString(),
         level: "info",
         event: "daemon.once.stopping",
-        reason: "first wake artifact detected (or 5-minute ceiling reached)",
+        reason: "new wake artifact detected since daemon start (or 5-minute ceiling reached)",
       })}\n`,
     );
     await effectiveDaemon.stop();

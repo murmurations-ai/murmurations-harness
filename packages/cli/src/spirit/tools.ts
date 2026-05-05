@@ -21,14 +21,7 @@ import { z } from "zod";
 import { SpiritMemory, type MemoryType } from "./memory.js";
 import { describeMurmuration } from "./overview.js";
 import { SpiritSkillsOverlay } from "./skills.js";
-import {
-  buildAttentionQueue,
-  buildReport,
-  fetchMetrics,
-  renderAttentionMarkdown,
-  renderMetricsMarkdown,
-  type ReportScope,
-} from "./reports.js";
+import { buildReport, type ReportScope } from "./reports.js";
 import { spiritSkillsDir } from "./system-prompt.js";
 
 // ---------------------------------------------------------------------------
@@ -69,7 +62,9 @@ interface ToolContext {
 // Path safety
 // ---------------------------------------------------------------------------
 
-const BLOCKED_PATH_PATTERNS = [/\.env$/i, /\.env\./i, /(^|\/)\.env$/i];
+// Filenames Spirit refuses to touch via either read_file or write_file.
+// `basename`-tested, so directory parts are not considered.
+const BLOCKED_BASENAME_PATTERNS = [/\.env$/i, /\.env\./i];
 
 class PathSafetyError extends Error {
   public constructor(message: string) {
@@ -79,19 +74,34 @@ class PathSafetyError extends Error {
 }
 
 /**
- * Resolve `path` under `rootDir` and refuse any escape. Also refuses
- * reads of `.env*` files. Returns the absolute path safe to open.
+ * Resolve `path` under `rootDir` and refuse any escape. Refuses any
+ * `.env*` file in either direction. For writes, additionally refuses
+ * anything under `.murmuration/` — that subtree is daemon-authored
+ * runtime state; Spirit may read it but never write into it.
  */
-const safePath = (rootDir: string, path: string): string => {
+const safePath = (rootDir: string, path: string, mode: "read" | "write" = "read"): string => {
   const abs = resolve(rootDir, path);
   const rel = relative(rootDir, abs);
   if (rel.startsWith("..") || rel === "..") {
     throw new PathSafetyError(`path "${path}" escapes the murmuration root`);
   }
   const base = basename(abs);
-  for (const pattern of BLOCKED_PATH_PATTERNS) {
+  for (const pattern of BLOCKED_BASENAME_PATTERNS) {
     if (pattern.test(base)) {
-      throw new PathSafetyError(`reading "${path}" is not allowed (contains secrets)`);
+      throw new PathSafetyError(`access to "${path}" is not allowed (contains secrets)`);
+    }
+  }
+  if (mode === "write") {
+    // Use platform-correct separator handling: relative() on POSIX returns
+    // forward slashes; the leading-segment check works either way.
+    if (
+      rel === ".murmuration" ||
+      rel.startsWith(".murmuration/") ||
+      rel.startsWith(".murmuration\\")
+    ) {
+      throw new PathSafetyError(
+        `writing under ".murmuration/" is not allowed — that subtree is daemon-authored runtime state`,
+      );
     }
   }
   return abs;
@@ -339,7 +349,7 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     execute: async (input) => {
       const { path, content } = input as { path: string; content: string };
       try {
-        const abs = safePath(rootDir, path);
+        const abs = safePath(rootDir, path, "write");
         await mkdir(dirname(abs), { recursive: true });
         await writeFile(abs, content, "utf8");
         return `Successfully wrote file ${path}`;
@@ -446,51 +456,14 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
   };
 
   // ------------------------------------------------------------------------
-  // Reporting surfaces (Workstream Q)
+  // Reporting surface (Workstream Q)
   //
-  // metrics — wraps K1's computeMetricsFromDisk
-  // attention_queue — failing agents + low met-rate + awaiting-close, ranked
-  // report(scope) — synthesizes status + metrics + activity + governance
+  // report(scope) is the only LLM-facing surface — `health`, `activity`,
+  // `attention`, or `all`. The standalone `metrics` and `attention_queue`
+  // tools collapsed into this one (review feedback #10): fewer tool
+  // descriptions = cheaper turns, and `report(scope: "health")` /
+  // `report(scope: "attention")` already cover the same ground.
   // ------------------------------------------------------------------------
-  const metricsTool: SpiritTool = {
-    name: "metrics",
-    description:
-      "Effectiveness metrics for the last N days (default 30): wake completion rate, total spend, per-accountability met-rate. Same numbers as `murmuration metrics --json`. No daemon required — reads runs/ and observation logs.",
-    parameters: z.object({
-      since: z
-        .number()
-        .int()
-        .positive()
-        .max(365)
-        .optional()
-        .describe("Window size in days. Default: 30."),
-    }),
-    execute: async (input) => {
-      const { since } = input as { since?: number };
-      try {
-        const m = await fetchMetrics(rootDir, since ?? 30);
-        return renderMetricsMarkdown(m);
-      } catch (err) {
-        return `metrics error: ${err instanceof Error ? err.message : String(err)}`;
-      }
-    },
-  };
-
-  const attentionQueueTool: SpiritTool = {
-    name: "attention_queue",
-    description:
-      "Ranked list of items needing Source attention: agents with consecutive failures, accountabilities with low met-rate (<60% over 30d), and issues the facilitator marked awaiting-source-close. Best-effort across daemon RPCs and disk; works with or without a running daemon.",
-    parameters: z.object({}),
-    execute: async () => {
-      try {
-        const items = await buildAttentionQueue({ rootDir, send });
-        return renderAttentionMarkdown(items);
-      } catch (err) {
-        return `attention_queue error: ${err instanceof Error ? err.message : String(err)}`;
-      }
-    },
-  };
-
   const reportTool: SpiritTool = {
     name: "report",
     description:
@@ -521,21 +494,12 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
   const describeMurmurationTool: SpiritTool = {
     name: "describe_murmuration",
     description:
-      "Return a structured overview of this murmuration: governance model, agents (with tier + wake schedule + group membership), groups (with members + facilitator), and the murmuration's purpose. Cached in Spirit memory; cache invalidates when source files change. Pass --refresh (refresh: true) to force a re-walk.",
-    parameters: z.object({
-      refresh: z
-        .boolean()
-        .optional()
-        .describe(
-          "When true, re-walk source files even if the cache is fresh. Use sparingly — the cache is already mtime-checked.",
-        ),
-    }),
-    execute: async (input) => {
-      const { refresh } = input as { refresh?: boolean };
+      "Return a structured overview of this murmuration: governance model, agents (with tier + wake schedule + group membership), groups (with members + facilitator), and the murmuration's purpose. Walks the source files on every call — cheap enough to use freely.",
+    parameters: z.object({}),
+    execute: async () => {
       try {
-        const result = await describeMurmuration(rootDir, { refresh: refresh ?? false });
-        const cacheTag = result.overview.fromCache ? " (from cache)" : "";
-        return `${result.markdown}\n\n_Source: ${result.overview.fromCache ? "cached overview" : "fresh walk"}${cacheTag}._`;
+        const result = await describeMurmuration(rootDir);
+        return result.markdown;
       } catch (err) {
         return `describe_murmuration error: ${err instanceof Error ? err.message : String(err)}`;
       }
@@ -621,6 +585,11 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     }),
     execute: (input) => {
       const { number, reason, repo } = input as { number: number; reason: string; repo?: string };
+      if (repo !== undefined && !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo)) {
+        return Promise.resolve(
+          `close_issue error: invalid repo "${repo}" — expected owner/repo (alphanumerics + . _ - only).`,
+        );
+      }
       const escaped = reason.replace(/'/g, "'\\''");
       const repoArg = repo ? ` --repo ${repo}` : "";
       const cmd = `gh issue close ${String(number)}${repoArg} --comment '${escaped}'`;
@@ -647,8 +616,6 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     forgetTool,
     recallTool,
     describeMurmurationTool,
-    metricsTool,
-    attentionQueueTool,
     reportTool,
     getFacilitatorLogTool,
     getAgreementTool,

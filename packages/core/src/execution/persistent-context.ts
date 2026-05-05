@@ -202,13 +202,17 @@ export class ConversationStore {
   async #persist(): Promise<void> {
     await mkdir(dirname(this.#path), { recursive: true });
     const lines = this.#messages.map((m) => JSON.stringify(m)).join("\n") + "\n";
-    await writeFile(this.#path, lines, "utf8");
+    // 0o600 — owner read/write only. The conversation file may include
+    // captured prompt content; on shared boxes / synced dirs other users
+    // shouldn't read it. Matches the .env convention.
+    await writeFile(this.#path, lines, { encoding: "utf8", mode: 0o600 });
   }
 
   async #persistSession(): Promise<void> {
     await mkdir(dirname(this.#sessionPath), { recursive: true });
     const payload = JSON.stringify({ sessionId: this.#sessionId ?? null });
-    await writeFile(this.#sessionPath, payload, "utf8");
+    // 0o600 — sessionId is a CLI-resume token; treat as quasi-secret.
+    await writeFile(this.#sessionPath, payload, { encoding: "utf8", mode: 0o600 });
   }
 }
 

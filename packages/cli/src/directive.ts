@@ -116,8 +116,8 @@ export const runDirective = async (args: readonly string[], rootDir: string): Pr
 
     // edit
     const editor = process.env.EDITOR ?? "vi";
-    const { execSync } = await import("node:child_process");
-    execSync(`${editor} ${path}`, { stdio: "inherit" });
+    const cp = await import("node:child_process");
+    cp.spawnSync(editor, [path], { stdio: "inherit" });
     return;
   }
 

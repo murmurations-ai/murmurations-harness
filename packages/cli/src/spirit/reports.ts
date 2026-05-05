@@ -87,6 +87,10 @@ export const buildAttentionQueue = async (input: {
   readonly send: Send;
   readonly sinceDays?: number;
   readonly metRateThreshold?: number; // default 0.6 — accountabilities below this are flagged
+  /** When provided, skip the internal metrics fetch — used by buildReport
+   *  so the same `fetchMetrics` call serves both renderMetricsMarkdown and
+   *  the attention queue. */
+  readonly metrics?: DiskMetricsSnapshot;
 }): Promise<readonly AttentionItem[]> => {
   const sinceDays = input.sinceDays ?? 30;
   const metRateThreshold = input.metRateThreshold ?? 0.6;
@@ -112,7 +116,7 @@ export const buildAttentionQueue = async (input: {
 
   // Low met-rate accountabilities (requires observations on disk).
   try {
-    const m = await fetchMetrics(input.rootDir, sinceDays);
+    const m = input.metrics ?? (await fetchMetrics(input.rootDir, sinceDays));
     for (const r of m.accountabilityMetRates) {
       if (r.observations >= 3 && r.rate < metRateThreshold) {
         const pct = (r.rate * 100).toFixed(0);
@@ -171,9 +175,15 @@ export const buildReport = async (input: {
 }): Promise<string> => {
   const sections: string[] = ["# Murmuration report", ""];
 
-  if (input.scope === "health" || input.scope === "all") {
-    const m = await fetchMetrics(input.rootDir, 30);
-    sections.push(renderMetricsMarkdown(m));
+  // Fetch metrics once when any section needs them. `attention` reuses
+  // accountabilityMetRates from the same snapshot via the `metrics` arg
+  // below, so the two sections always reflect a single point-in-time view.
+  const needsMetrics =
+    input.scope === "health" || input.scope === "attention" || input.scope === "all";
+  const metrics = needsMetrics ? await fetchMetrics(input.rootDir, 30) : undefined;
+
+  if ((input.scope === "health" || input.scope === "all") && metrics) {
+    sections.push(renderMetricsMarkdown(metrics));
     sections.push("");
   }
 
@@ -184,7 +194,11 @@ export const buildReport = async (input: {
   }
 
   if (input.scope === "attention" || input.scope === "all") {
-    const items = await buildAttentionQueue({ rootDir: input.rootDir, send: input.send });
+    const items = await buildAttentionQueue({
+      rootDir: input.rootDir,
+      send: input.send,
+      ...(metrics ? { metrics } : {}),
+    });
     sections.push(renderAttentionMarkdown(items));
     sections.push("");
   }

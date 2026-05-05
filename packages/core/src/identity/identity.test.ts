@@ -445,7 +445,7 @@ model_tier: fast
     const loaded = await loader.load("14-defaults");
 
     expect(loaded.frontmatter.group_memberships).toEqual([]);
-    expect(loaded.frontmatter.max_wall_clock_ms).toBe(15_000);
+    expect(loaded.frontmatter.max_wall_clock_ms).toBe(120_000);
   });
 });
 

@@ -129,6 +129,7 @@ describe("SpiritMemory", () => {
 
     const result = await mem.resetAll();
     expect(result.cleared).toBeGreaterThanOrEqual(2);
+    expect(result.failed).toEqual([]);
     expect(await mem.readIndex()).toBe("");
     expect(await mem.recall()).toEqual([]);
   });

@@ -191,6 +191,13 @@ On `murmuration attach`, Spirit hydrates prior conversation + sessionId. On ever
 
 Several tunables are still hardcoded and tracked in [issue #152](https://github.com/murmurations-ai/murmurations-harness/issues/152): daemon circuit-breaker threshold, LLM retry policy, signal aggregator caps, meeting-prompt context caps, and group-meeting LLM params. Each moves to `harness.yaml` in subsequent PRs following the `spirit.maxSteps` pattern.
 
+## Environment variables
+
+- `EDITOR` — used by REPL commands that open a file (`:directive edit`, agent role/spirit edit). Must be a **single binary path** (e.g. `/usr/bin/vim`, `code`, `nano`). Spirit invokes it via `spawnSync` with no shell, so `EDITOR="vim --some-flag"` will fail to launch. Falls back to `vi`.
+- `MURMURATION_DISABLE_AGENT_MCP` — set to `1` to fall back to text-only wakes for the `claude-cli` subscription provider (skips `--mcp-config`). Escape hatch for diagnosing provider-side regressions; agents lose access to harness-internal tools (status, agents, wake, ...) when set.
+- `LANGFUSE_SECRET_KEY` / `LANGFUSE_PUBLIC_KEY` — observability (silent no-op when unset). See [docs/OBSERVABILITY.md](./OBSERVABILITY.md).
+- LLM keys — `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` etc., read by providers themselves. Use `.env` not `harness.yaml`.
+
 ## What never goes in `harness.yaml`
 
 - **Secrets** — API keys, tokens, passphrases. Use `.env` (see `secrets-dotenv` provider) or a platform secrets manager.

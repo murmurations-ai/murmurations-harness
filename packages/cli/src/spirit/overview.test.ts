@@ -2,7 +2,7 @@
  * describeMurmuration tests — Workstream P.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -160,32 +160,14 @@ group_memberships: []
     expect(markdown).toContain("| a |");
   });
 
-  it("caches the result in spirit memory and reuses it on second call", async () => {
+  it("walks the source files on every call (no cache)", async () => {
     writeMurmurationFile("murmuration/harness.yaml", "governance:\n  model: s3\n");
     const first = await describeMurmuration(root);
-    expect(first.overview.fromCache).toBe(false);
+    expect(first.overview.governanceModel).toBe("s3");
 
+    // Mutate harness.yaml; the next call should reflect it immediately.
+    writeMurmurationFile("murmuration/harness.yaml", "governance:\n  model: consensus\n");
     const second = await describeMurmuration(root);
-    expect(second.overview.fromCache).toBe(true);
-  });
-
-  it("invalidates the cache when a source file mtime moves forward", async () => {
-    writeMurmurationFile("murmuration/harness.yaml", "governance:\n  model: s3\n");
-    const first = await describeMurmuration(root);
-    expect(first.overview.fromCache).toBe(false);
-
-    // Touch harness.yaml to a future mtime so it appears newer than cache.
-    const future = new Date(Date.now() + 60_000);
-    utimesSync(join(root, "murmuration", "harness.yaml"), future, future);
-
-    const second = await describeMurmuration(root);
-    expect(second.overview.fromCache).toBe(false);
-  });
-
-  it("--refresh forces a re-walk even when cache is fresh", async () => {
-    writeMurmurationFile("murmuration/harness.yaml", "governance:\n  model: s3\n");
-    await describeMurmuration(root);
-    const refreshed = await describeMurmuration(root, { refresh: true });
-    expect(refreshed.overview.fromCache).toBe(false);
+    expect(second.overview.governanceModel).toBe("consensus");
   });
 });

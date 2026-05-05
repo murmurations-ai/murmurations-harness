@@ -536,6 +536,14 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
     // building stage could honor the same gate. Reused here for the
     // request-side spread.
     const passToolsOnRequest = supportsRequestTools && tools !== undefined && tools.length > 0;
+    // Diagnostic logging for v0.7.0 live-test 2026-05-04: wakes were
+    // stalling between "fire" and "timeout" with no visibility into
+    // whether the LLM call started, hung, or returned. These three
+    // log lines give every phase a stderr breadcrumb so future
+    // hangs are pinpointable from the wake log alone.
+    process.stderr.write(
+      `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "runner.llm.complete.begin", wakeId, agentId, provider: llmCaps.provider ?? null, supportsToolUse: llmCaps.supportsToolUse, toolCount: tools?.length ?? 0, promptBytes: userPrompt.length, systemPromptBytes: systemPrompt.length })}\n`,
+    );
     let result: Awaited<ReturnType<NonNullable<DefaultRunnerClients["llm"]>["complete"]>>;
     try {
       result = await clients.llm.complete(
@@ -547,6 +555,9 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
           ...(passToolsOnRequest ? { tools, maxSteps: options.maxSteps ?? 256 } : {}),
         },
         ...(signal ? [{ signal }] : []),
+      );
+      process.stderr.write(
+        `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "runner.llm.complete.end", wakeId, agentId, ok: result.ok, ...(result.ok ? { inputTokens: result.value.inputTokens, outputTokens: result.value.outputTokens, contentBytes: result.value.content.length } : { errorCode: result.error.code, errorMessage: result.error.message }) })}\n`,
       );
     } finally {
       // Always close MCP connections after LLM call

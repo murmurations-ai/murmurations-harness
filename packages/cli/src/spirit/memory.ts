@@ -40,8 +40,41 @@ export interface RecallHit {
   readonly snippet: string;
 }
 
-const MEMORY_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/i;
+const MEMORY_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
+const RESERVED_NAMES = new Set([
+  "con",
+  "aux",
+  "nul",
+  "prn",
+  "com1",
+  "com2",
+  "com3",
+  "com4",
+  "com5",
+  "com6",
+  "com7",
+  "com8",
+  "com9",
+  "lpt1",
+  "lpt2",
+  "lpt3",
+  "lpt4",
+  "lpt5",
+  "lpt6",
+  "lpt7",
+  "lpt8",
+  "lpt9",
+]);
 const MAX_INDEX_LINES = 200;
+
+const isValidName = (name: string): boolean =>
+  MEMORY_NAME_RE.test(name) && !RESERVED_NAMES.has(name);
+
+/** Collapse newlines + control chars in a single-line YAML scalar so the
+ *  description can't break out of frontmatter or inject extra keys. */
+const sanitizeDescription = (input: string): string =>
+  // eslint-disable-next-line no-control-regex
+  input.replace(/[\x00-\x1f]+/g, " ").trim();
 
 const memoryDirOf = (rootDir: string): string => join(rootDir, ".murmuration", "spirit", "memory");
 const indexPathOf = (rootDir: string): string => join(memoryDirOf(rootDir), "MEMORY.md");
@@ -87,23 +120,24 @@ export class SpiritMemory {
     readonly description: string;
     readonly body: string;
   }): Promise<void> {
-    if (!MEMORY_NAME_RE.test(input.name)) {
+    if (!isValidName(input.name)) {
       throw new Error(
-        `invalid memory name "${input.name}" — use lowercase letters, digits, hyphens, underscores`,
+        `invalid memory name "${input.name}" — use lowercase letters, digits, hyphens, underscores; reserved names are rejected`,
       );
     }
+    const description = sanitizeDescription(input.description);
     await mkdir(this.dir, { recursive: true });
     const filePath = join(this.dir, fileNameOf(input.name));
     const content = `---
 name: ${input.name}
-description: ${input.description}
+description: ${description}
 type: ${input.type}
 ---
 
 ${input.body.trimEnd()}
 `;
     await writeFile(filePath, content, "utf8");
-    await this.#updateIndexEntry(input.name, input.description);
+    await this.#updateIndexEntry(input.name, description);
   }
 
   /**
@@ -111,7 +145,7 @@ ${input.body.trimEnd()}
    * file doesn't exist.
    */
   public async forget(name: string): Promise<{ readonly removed: boolean }> {
-    if (!MEMORY_NAME_RE.test(name)) {
+    if (!isValidName(name)) {
       throw new Error(`invalid memory name "${name}"`);
     }
     const filePath = join(this.dir, fileNameOf(name));
@@ -125,7 +159,7 @@ ${input.body.trimEnd()}
    * Read one memory file by name. Returns null when missing.
    */
   public async read(name: string): Promise<MemoryFile | null> {
-    if (!MEMORY_NAME_RE.test(name)) return null;
+    if (!isValidName(name)) return null;
     const filePath = join(this.dir, fileNameOf(name));
     let content: string;
     try {
@@ -181,26 +215,35 @@ ${input.body.trimEnd()}
 
   /**
    * Remove every memory file and the index. Used by `:reset memory`.
-   * Idempotent on a missing/empty directory.
+   * Idempotent on a missing/empty directory. Returns per-file failures
+   * so the REPL can surface partial-reset state instead of silently
+   * reporting an inflated count.
    */
-  public async resetAll(): Promise<{ readonly cleared: number }> {
-    if (!existsSync(this.dir)) return { cleared: 0 };
+  public async resetAll(): Promise<{
+    readonly cleared: number;
+    readonly failed: readonly string[];
+  }> {
+    if (!existsSync(this.dir)) return { cleared: 0, failed: [] };
     let files: string[];
     try {
       files = await readdir(this.dir);
-    } catch {
-      return { cleared: 0 };
+    } catch (err) {
+      return {
+        cleared: 0,
+        failed: [`<readdir>: ${err instanceof Error ? err.message : String(err)}`],
+      };
     }
     let cleared = 0;
+    const failed: string[] = [];
     for (const f of files) {
       try {
         await rm(join(this.dir, f), { force: true });
         cleared++;
-      } catch {
-        /* best-effort */
+      } catch (err) {
+        failed.push(`${f}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    return { cleared };
+    return { cleared, failed };
   }
 
   // ---------------------------------------------------------------------------

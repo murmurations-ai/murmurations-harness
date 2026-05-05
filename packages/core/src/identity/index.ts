@@ -413,7 +413,12 @@ export const roleFrontmatterSchema = z.object({
   model_tier: modelTierSchema,
   wake_schedule: wakeScheduleSchema.optional(),
   group_memberships: z.array(identifierSchema).default([]),
-  max_wall_clock_ms: z.number().int().positive().default(15_000),
+  // Default 2 minutes. A single LLM wake with a few tool calls takes
+  // 30–90s on Sonnet/GPT-class models; the prior 15s default killed
+  // realistic wakes mid-thought. Agents that need longer (research
+  // wakes that walk a full repo, multi-step reasoning) override
+  // explicitly — see examples/research-agent (10 min).
+  max_wall_clock_ms: z.number().int().positive().default(120_000),
 
   // new in ADR-0016 (Phase 2C)
   llm: llmSchema.optional(), // schema-optional; daemon enforces for LLM agents
@@ -873,7 +878,7 @@ const buildBuiltinRoleDocument = (agentDir: string): string =>
     `agent_id: "${agentDir}"`,
     `name: "Generic Helper (${agentDir})"`,
     `model_tier: "balanced"`,
-    `max_wall_clock_ms: 60000`,
+    `max_wall_clock_ms: 120000`,
     "",
     "group_memberships: []",
     "",

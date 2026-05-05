@@ -801,13 +801,27 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
   // conversation.jsonl + session.json only).
   const handleSpiritReset = async (input: string): Promise<void> => {
     if (input === ":reset memory") {
+      console.log(
+        "About to remove every file under .murmuration/spirit/memory/. This cannot be undone.",
+      );
+      const ok = await question(rl, "  Type 'yes' to confirm: ");
+      if (ok.trim() !== "yes") {
+        console.log("(cancelled)");
+        rl.prompt();
+        return;
+      }
       const { SpiritMemory } = await import("./spirit/memory.js");
       const mem = new SpiritMemory(rootDir);
       try {
         const result = await mem.resetAll();
-        console.log(
-          `Spirit memory cleared (${String(result.cleared)} files removed). This cannot be undone.`,
-        );
+        if (result.failed.length === 0) {
+          console.log(`Spirit memory cleared (${String(result.cleared)} files removed).`);
+        } else {
+          console.log(
+            `Spirit memory partially cleared: ${String(result.cleared)} removed, ${String(result.failed.length)} failed.`,
+          );
+          for (const f of result.failed) console.log(`  - ${f}`);
+        }
       } catch (err) {
         console.log(`(reset memory error: ${err instanceof Error ? err.message : String(err)})`);
       }
@@ -820,11 +834,18 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
       rl.prompt();
       return;
     }
+    console.log(
+      "About to clear conversation.jsonl + session.json. The next turn starts fresh. This cannot be undone.",
+    );
+    const ok = await question(rl, "  Type 'yes' to confirm: ");
+    if (ok.trim() !== "yes") {
+      console.log("(cancelled)");
+      rl.prompt();
+      return;
+    }
     try {
       await session.reset();
-      console.log(
-        "Spirit conversation context cleared. The next turn will start fresh (this cannot be undone).",
-      );
+      console.log("Spirit conversation context cleared.");
     } catch (err) {
       console.log(`(reset error: ${err instanceof Error ? err.message : String(err)})`);
     }
@@ -1210,8 +1231,8 @@ const handleCommand = async (
             console.log("  Error: no file path (edit only works with local provider)");
           } else {
             const editor = process.env.EDITOR ?? "vi";
-            const { execSync } = await import("node:child_process");
-            execSync(`${editor} ${filePath}`, { stdio: "inherit" });
+            const cp = await import("node:child_process");
+            cp.spawnSync(editor, [filePath], { stdio: "inherit" });
           }
         }
       }

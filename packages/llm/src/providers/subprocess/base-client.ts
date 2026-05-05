@@ -170,6 +170,11 @@ export class SubprocessAdapter implements LLMAdapter {
         resolve(result);
       };
 
+      // Diagnostic: log every flag the subprocess receives so future
+      // hangs can be diagnosed from the log alone (live-test 2026-05-04).
+      process.stderr.write(
+        `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "subprocess.spawn", command: this.#cli.command, flags: [...flags], promptBytes: prompt.length })}\n`,
+      );
       let child: ReturnType<typeof spawn>;
       try {
         // Array argv only. Never shell:true. Prompt is NOT in flags (D1).
@@ -224,7 +229,14 @@ export class SubprocessAdapter implements LLMAdapter {
         stdout += chunk.toString("utf8");
       });
       childStderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8");
+        const s = chunk.toString("utf8");
+        stderr += s;
+        // Live-test 2026-05-04: stream subprocess stderr to daemon log
+        // immediately so MCP startup errors / auth prompts / hang causes
+        // surface in the wake log even when the subprocess never exits.
+        process.stderr.write(
+          `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "subprocess.stderr.chunk", bytes: s.length, text: s.slice(0, 800) })}\n`,
+        );
       });
 
       // killTree(): signal the entire process group, not just the
@@ -281,6 +293,9 @@ export class SubprocessAdapter implements LLMAdapter {
       child.on("close", (code) => {
         clearTimeout(termTimer);
         if (abort) abort.removeEventListener("abort", onAbort);
+        process.stderr.write(
+          `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "subprocess.close", exitCode: code, timedOut, stdoutBytes: stdout.length, stderrBytes: stderr.length, stderrSnippet: stderr.slice(0, 500) })}\n`,
+        );
 
         if (timedOut) {
           settle({ ok: false, error: { kind: "timeout-error", timeoutMs: this.#timeoutMs } });

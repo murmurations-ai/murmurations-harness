@@ -125,15 +125,14 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 
 ### 4.4 Tool additions
 
-| Tool                         | Purpose                                                                                                                        |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `remember(type, name, body)` | Write a memory file + update index                                                                                             |
-| `forget(name)`               | Remove a memory file + update index                                                                                            |
-| `recall(query?)`             | Search memory; default returns the index                                                                                       |
-| `metrics(--since <days>)`    | Wraps `computeMetricsFromDisk` from K1                                                                                         |
-| `report(scope?)`             | Synthesizes status + metrics + recent events + governance into prose; `scope` ∈ `health` \| `activity` \| `attention` \| `all` |
-| `describe_murmuration`       | Walks `harness.yaml`, `soul.md`, `agents/*`, `groups/*`; caches summary in `project_murmuration_overview.md`                   |
-| `install_skill(name, body)`  | Writes per-murmuration skill + updates index                                                                                   |
+| Tool                         | Purpose                                                                                                                    |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `remember(type, name, body)` | Write a memory file + update index                                                                                         |
+| `forget(name)`               | Remove a memory file + update index                                                                                        |
+| `recall(query?)`             | Search memory; default returns the index                                                                                   |
+| `report(scope?)`             | Synthesizes metrics + recent events + attention queue into prose; `scope` ∈ `health` \| `activity` \| `attention` \| `all` |
+| `describe_murmuration`       | Walks `harness.yaml`, `soul.md`, `agents/*`, `groups/*` on every call (no caching — single-digit ms walk)                  |
+| `install_skill(name, body)`  | Writes per-murmuration skill + updates index                                                                               |
 
 ### 4.5 REPL command additions
 
@@ -201,15 +200,13 @@ Mirrors Claude Code's auto-memory taxonomy verbatim (proven, well-trodden):
 
 - New `describe_murmuration` Spirit tool that walks `harness.yaml`, `murmuration/soul.md`, `agents/*/role.md` (frontmatter only), `governance/groups/*.md`
 - Output is structured: governance model, agent count + roles, group structure, wake schedule summary, write scopes summary
-- Result auto-written to `project_murmuration_overview.md` in Spirit memory; future calls return the cached version unless `--refresh` is passed
-- Cache invalidates if any sourced file's mtime is newer than the cache's mtime
+- No caching: the walk is single-digit ms in practice and a prior cache layer was removed in v0.7.0 review (the cache also walked the source files on hit, so it short-circuited nothing). Operators upgrading from a tip-of-trunk that wrote `project_murmuration_overview.md` see it swept on first call.
 
-**Dependencies:** Workstream O (writes to memory).
+**Dependencies:** Workstream O (memory directory exists; the sweep targets a stale entry there).
 
 **Acceptance:**
 
-- Test: first call walks files and writes overview; second call reads from cache.
-- Test: editing `harness.yaml` invalidates the cache; next call rewrites.
+- Test: walk reflects current disk state on every call (mutating `harness.yaml` and re-calling shows the change immediately).
 - Test: overview includes every agent dir under `agents/` (no silent skips).
 
 ### Workstream Q — Reporting surfaces

@@ -25,6 +25,9 @@
  * MCP server is a transport adapter, not a logic re-implementation.
  */
 
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join as joinPath } from "node:path";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
@@ -45,6 +48,34 @@ interface SocketResponse {
  * settle). Errors are normalized to the SocketResponse shape that
  * `tools.ts` already handles.
  */
+// Log to BOTH stderr (in case claude propagates) AND a dedicated
+// file (in case claude swallows it). MURMURATION_ROOT is set via the
+// spawn env (see writeSpiritMcpConfig), so we can write under
+// .murmuration/logs/mcp-<pid>.log without coupling to anything.
+const dbgLogPath = ((): string | null => {
+  const root = process.env.MURMURATION_ROOT;
+  if (!root) return null;
+  const dir = joinPath(root, ".murmuration", "logs");
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    /* best-effort */
+  }
+  return joinPath(dir, `mcp-${String(process.pid)}.log`);
+})();
+
+const dbg = (event: string, fields: Record<string, unknown> = {}): void => {
+  const line = `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: `mcp.${event}`, pid: process.pid, ...fields })}\n`;
+  process.stderr.write(line);
+  if (dbgLogPath) {
+    try {
+      appendFileSync(dbgLogPath, line);
+    } catch {
+      /* best-effort */
+    }
+  }
+};
+
 const buildMcpSend = (
   rootDir: string,
 ): ((method: string, params?: Record<string, unknown>) => Promise<SocketResponse>) => {
@@ -52,10 +83,20 @@ const buildMcpSend = (
   return async (method, params) => {
     counter += 1;
     const id = `mcp-${String(counter)}`;
+    dbg("rpc.begin", { id, method });
+    const startedAt = Date.now();
     try {
       const result = await daemonRpc(rootDir, method, params);
+      dbg("rpc.end", { id, method, ok: true, ms: Date.now() - startedAt });
       return { id, result };
     } catch (err) {
+      dbg("rpc.end", {
+        id,
+        method,
+        ok: false,
+        ms: Date.now() - startedAt,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return { id, error: err instanceof Error ? err.message : String(err) };
     }
   };
@@ -67,8 +108,10 @@ const buildMcpSend = (
  * when the transport closes (parent kills the subprocess).
  */
 export const runSpiritMcpServer = async (config: { readonly rootDir: string }): Promise<void> => {
+  dbg("startup", { rootDir: config.rootDir });
   const send = buildMcpSend(config.rootDir);
   const tools = buildSpiritTools({ rootDir: config.rootDir, send });
+  dbg("tools.built", { count: tools.length });
 
   const server = new McpServer(
     { name: "spirit", version: "0.1.0" },
@@ -76,10 +119,6 @@ export const runSpiritMcpServer = async (config: { readonly rootDir: string }): 
   );
 
   for (const tool of tools) {
-    // `buildSpiritTools()` returns `readonly SpiritTool[]` (CF-D, harness#283),
-    // where `parameters` is statically typed `z.ZodObject<z.ZodRawShape>`.
-    // The MCP SDK's registerTool wants the raw shape; we read it directly.
-    // Non-object schemas are a compile error at the tool definition site.
     const shape = tool.parameters.shape;
 
     server.registerTool(
@@ -89,19 +128,41 @@ export const runSpiritMcpServer = async (config: { readonly rootDir: string }): 
         inputSchema: shape,
       },
       async (input: unknown): Promise<{ content: { type: "text"; text: string }[] }> => {
-        const result = await tool.execute(input as Record<string, unknown>);
-        const text = typeof result === "string" ? result : JSON.stringify(result);
-        return { content: [{ type: "text", text }] };
+        dbg("tool.invoke.begin", { tool: tool.name });
+        const startedAt = Date.now();
+        try {
+          const result = await tool.execute(input as Record<string, unknown>);
+          dbg("tool.invoke.end", {
+            tool: tool.name,
+            ok: true,
+            ms: Date.now() - startedAt,
+            bytes: typeof result === "string" ? result.length : 0,
+          });
+          const text = typeof result === "string" ? result : JSON.stringify(result);
+          return { content: [{ type: "text", text }] };
+        } catch (err) {
+          dbg("tool.invoke.end", {
+            tool: tool.name,
+            ok: false,
+            ms: Date.now() - startedAt,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          throw err;
+        }
       },
     );
   }
+  dbg("tools.registered", { count: tools.length });
 
   const transport = new StdioServerTransport();
+  dbg("transport.connecting");
   await server.connect(transport);
+  dbg("transport.connected");
 
-  // The transport runs until the parent closes stdin; we keep this
-  // promise pending until then so the caller can `await` cleanup.
   await new Promise<void>((resolve) => {
-    transport.onclose = (): void => resolve();
+    transport.onclose = (): void => {
+      dbg("transport.closed");
+      resolve();
+    };
   });
 };
