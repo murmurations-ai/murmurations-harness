@@ -23,6 +23,7 @@ import { join, resolve, dirname } from "node:path";
 
 import { runsDirForAgent } from "../daemon/runs-path.js";
 import { parseSelfReflection } from "../execution/index.js";
+import { SOURCE_DIRECTIVE_LABEL } from "../labels/index.js";
 import type {
   AgentOutputArtifact,
   AgentSpawnContext,
@@ -185,7 +186,7 @@ const renderSignal = (s: Signal): string => {
       const data = custom.data as
         | { id?: string; title?: string; body?: string; labels?: string[] }
         | undefined;
-      const isDirective = data?.labels?.includes("source-directive") === true;
+      const isDirective = data?.labels?.includes(SOURCE_DIRECTIVE_LABEL) === true;
       const tag = isDirective ? "SOURCE DIRECTIVE" : "item";
       return `- [${tag} #${data?.id ?? "?"}] ${data?.title ?? "(no title)"}\n  labels: ${data?.labels?.join(", ") ?? "(none)"}\n\n${data?.body ?? ""}\n`;
     }

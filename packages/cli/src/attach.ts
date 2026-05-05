@@ -19,6 +19,8 @@ import { dirname, join, resolve } from "node:path";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 
+import { isScopeLabel } from "@murmurations-ai/core";
+
 import { initSpiritSession, SpiritUnavailableError, type SpiritSession } from "./spirit/index.js";
 
 interface SocketResponse {
@@ -1170,7 +1172,7 @@ const handleCommand = async (
           console.log("  No directives found.");
         } else {
           for (const item of items) {
-            const scope = item.labels.find((l: string) => l.startsWith("scope:")) ?? "";
+            const scope = item.labels.find((l: string) => isScopeLabel(l)) ?? "";
             console.log(
               `  ${item.id.padEnd(10)} ${item.state.padEnd(8)} ${scope.padEnd(20)} ${item.title.slice(0, 60)}`,
             );

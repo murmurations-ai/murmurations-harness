@@ -1,4 +1,5 @@
 import type { WakeCostRecord } from "../cost/record.js";
+import { SOURCE_DIRECTIVE_LABEL } from "../labels/index.js";
 
 /**
  * Agent execution — the pluggable boundary between the harness daemon and
@@ -568,8 +569,6 @@ export interface WakeValidationResult {
   /** If not productive, why. */
   readonly reason?: string;
 }
-
-const SOURCE_DIRECTIVE_LABEL = "source-directive";
 
 type GithubIssueSignal = Extract<Signal, { kind: "github-issue" }>;
 

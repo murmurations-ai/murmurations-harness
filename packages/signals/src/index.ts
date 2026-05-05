@@ -10,6 +10,8 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
 import {
+  ACTION_ITEM_LABEL,
+  assignedLabel,
   makeAgentId,
   type AgentId,
   type Signal,
@@ -249,7 +251,7 @@ export class DefaultSignalAggregator implements SignalAggregator {
     const actionItems = finalSignals.filter((s) => {
       if (s.kind !== "github-issue") return false;
       const labels = (s as unknown as { labels: readonly string[] }).labels;
-      return labels.includes("action-item") && labels.some((l) => l === `assigned:${agentIdValue}`);
+      return labels.includes(ACTION_ITEM_LABEL) && labels.includes(assignedLabel(agentIdValue));
     });
 
     return {

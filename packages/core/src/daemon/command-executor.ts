@@ -15,6 +15,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { HARNESS_VERSION } from "../index.js";
+import { SOURCE_DIRECTIVE_LABEL } from "../labels/index.js";
 import { PROTOCOL_SCHEMA_VERSION } from "./protocol.js";
 import { runsDirForAgent, runsDir as canonicalRunsDir } from "./runs-path.js";
 import { GovernanceStateStore } from "../governance/index.js";
@@ -983,7 +984,7 @@ export class DaemonCommandExecutor {
   async #assertIsDirective(id: string, action: "close" | "delete"): Promise<"open" | "closed"> {
     if (!this.#deps.collaborationProvider) return "open";
     const result = await this.#deps.collaborationProvider.listItems({
-      labels: ["source-directive"],
+      labels: [SOURCE_DIRECTIVE_LABEL],
       state: "all",
     });
     if (!result.ok) {
@@ -1005,7 +1006,7 @@ export class DaemonCommandExecutor {
       throw new Error("No collaboration provider configured");
     }
     const result = await this.#deps.collaborationProvider.listItems({
-      labels: ["source-directive"],
+      labels: [SOURCE_DIRECTIVE_LABEL],
       state: "open",
     });
     if (!result.ok) throw new Error(result.error.message);

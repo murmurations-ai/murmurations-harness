@@ -38,6 +38,12 @@
  * @see docs/specs/0001-agent-effectiveness.md §4.2
  */
 
+import {
+  AWAITING_SOURCE_CLOSE_LABEL,
+  SOURCE_DIRECTIVE_LABEL,
+  TIER_CONSENT_LABEL,
+  assignedLabel,
+} from "@murmurations-ai/core";
 import type { Signal } from "@murmurations-ai/core";
 
 // ---------------------------------------------------------------------------
@@ -98,13 +104,12 @@ export interface ClassifierContext {
 // Label parsing
 // ---------------------------------------------------------------------------
 
+// Labels owned by the canonical labels library (`@murmurations-ai/core`).
+// `priority:critical` and `priority:low` are signal-package-specific
+// (priority tiering is a packages/signals concern, not harness-universal),
+// so they stay local.
 const PRIORITY_CRITICAL_LABEL = "priority:critical";
 const PRIORITY_LOW_LABEL = "priority:low";
-const SOURCE_DIRECTIVE_LABEL = "source-directive";
-const TIER_CONSENT_LABEL = "tier:consent";
-const AWAITING_SOURCE_CLOSE_LABEL = "awaiting:source-close";
-
-const ASSIGNED_SELF = (agentId: string): string => `assigned:${agentId}`;
 
 const hasLabel = (signal: Signal, label: string): boolean =>
   signal.kind === "github-issue" && signal.labels.includes(label);
@@ -177,7 +182,7 @@ export const classifyTier = (signal: Signal, ctx: ClassifierContext): PriorityTi
   // [DIRECTIVE] assigned:<self> filed in last 7d
   if (
     issueType === "[DIRECTIVE]" &&
-    hasLabel(signal, ASSIGNED_SELF(ctx.selfAgentId)) &&
+    hasLabel(signal, assignedLabel(ctx.selfAgentId)) &&
     ageDays <= 7
   ) {
     return "high";
@@ -186,7 +191,7 @@ export const classifyTier = (signal: Signal, ctx: ClassifierContext): PriorityTi
   // [*MEETING] with the agent in scope. The harness can't easily
   // detect "on the agenda" without parsing the issue body; the
   // proxy is "assigned:<self> on a meeting issue."
-  if (isMeetingType(issueType) && hasLabel(signal, ASSIGNED_SELF(ctx.selfAgentId))) {
+  if (isMeetingType(issueType) && hasLabel(signal, assignedLabel(ctx.selfAgentId))) {
     return "high";
   }
 

@@ -29,6 +29,8 @@
  * @see docs/specs/0001-agent-effectiveness.md §4.2 (closure rules)
  */
 
+import { VERIFICATION_FAILED_LABEL } from "../labels/index.js";
+
 import type {
   ClosureEvidence,
   ClosureVerificationResult,
@@ -36,6 +38,10 @@ import type {
   GovernancePlugin,
   IssueSnapshot,
 } from "./index.js";
+
+// Re-export for callers that previously imported from this module.
+// New callers should import directly from "@murmurations-ai/core".
+export { AWAITING_SOURCE_CLOSE_LABEL, VERIFICATION_FAILED_LABEL } from "../labels/index.js";
 
 // ---------------------------------------------------------------------------
 // Issue-type closer table
@@ -149,10 +155,6 @@ export const verifyClosure = (
 // ---------------------------------------------------------------------------
 // Verification-failure ladder
 // ---------------------------------------------------------------------------
-
-/** Labels the facilitator applies in the verification ladder. */
-export const VERIFICATION_FAILED_LABEL = "verification-failed";
-export const AWAITING_SOURCE_CLOSE_LABEL = "awaiting:source-close";
 
 /**
  * Outcome of a closure attempt — what the facilitator should do next.
