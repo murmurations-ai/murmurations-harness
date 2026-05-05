@@ -280,9 +280,46 @@ const runSchemaChecks = async (ctx: CheckContext): Promise<void> => {
     return;
   }
 
+  // agentDeclaredGroups collects each agent's self-declared group_memberships
+  // for the bidirectional membership consistency check (#238).
+  const agentDeclaredGroups = new Map<string, readonly string[]>();
+
   for (const slug of agentDirs) {
     try {
-      await loader.load(slug);
+      const identity = await loader.load(slug);
+      // Operational completeness checks (#236): flag configuration that is
+      // syntactically valid but operationally hollow.
+      const fm = identity.frontmatter;
+      const sources = fm.signals.sources;
+      const githubScopes = fm.signals.github_scopes ?? [];
+      agentDeclaredGroups.set(slug, fm.group_memberships);
+      // Only flag the github-issue-without-scopes gap when the harness
+      // collaboration provider is "github" — a local-provider setup has no
+      // GitHub signals regardless of the sources default, so it's not a bug.
+      if (
+        harness.collaboration.provider === "github" &&
+        sources.includes("github-issue") &&
+        githubScopes.length === 0
+      ) {
+        findings.push({
+          checkId: `schema.role.${slug}.github-issue-source-without-scopes`,
+          category: "schema",
+          severity: "error",
+          title: `agents/${slug}: signals.sources includes "github-issue" but signals.github_scopes is empty`,
+          detail: `Agent will be wake-blind to GitHub — signal aggregator will return [] on every wake.`,
+          remediation: `Add signals.github_scopes in agents/${slug}/role.md with owner, repo, and filter to route GitHub issues to this agent.`,
+        });
+      }
+      if (sources.length === 0) {
+        findings.push({
+          checkId: `schema.role.${slug}.no-signal-sources`,
+          category: "schema",
+          severity: "warning",
+          title: `agents/${slug}: signals.sources is empty — agent will receive no signals`,
+          detail: `Agent will wake on its cron schedule but see no action items.`,
+          remediation: `Add signals.sources (e.g. "github-issue", "private-note") in agents/${slug}/role.md.`,
+        });
+      }
     } catch (err) {
       if (err instanceof FrontmatterInvalidError) {
         for (const issue of err.issues) {
@@ -366,6 +403,38 @@ const runSchemaChecks = async (ctx: CheckContext): Promise<void> => {
             remediation: `Either create agents/${member}/role.md or remove "${member}" from the Members list.`,
           });
         }
+      }
+    }
+
+    // Bidirectional membership consistency (#238): each member listed here
+    // must also declare this group in their role.md group_memberships.
+    const groupId = groupFile.replace(/\.md$/, "");
+    for (const member of members) {
+      if (!agentDirs.includes(member)) continue; // already flagged above
+      const declaredGroups = agentDeclaredGroups.get(member);
+      if (declaredGroups !== undefined && !declaredGroups.includes(groupId)) {
+        findings.push({
+          checkId: `schema.group.${groupFile}.membership-consistency.${member}`,
+          category: "schema",
+          severity: "error",
+          title: `governance/groups/${groupFile}: member "${member}" is not in their role.md group_memberships`,
+          detail: `"${member}" is listed in the group file's ## Members but their role.md declares group_memberships: [${declaredGroups.join(", ")}].`,
+          remediation: `Add "${groupId}" to agents/${member}/role.md group_memberships, or remove "${member}" from governance/groups/${groupFile}.`,
+        });
+      }
+    }
+
+    // Reverse direction: agents claiming this group in role.md but not listed here.
+    for (const [agentSlug, groups] of agentDeclaredGroups) {
+      if (groups.includes(groupId) && !members.includes(agentSlug)) {
+        findings.push({
+          checkId: `schema.group.${groupFile}.membership-consistency.missing-${agentSlug}`,
+          category: "schema",
+          severity: "error",
+          title: `agents/${agentSlug} declares group_memberships includes "${groupId}" but is not listed in governance/groups/${groupFile}`,
+          detail: `"${agentSlug}" will receive ${groupId}-routed signals but won't be invited to group-wake meetings.`,
+          remediation: `Add "${agentSlug}" to the ## Members list in governance/groups/${groupFile}, or remove "${groupId}" from agents/${agentSlug}/role.md group_memberships.`,
+        });
       }
     }
 
