@@ -303,7 +303,21 @@ const githubFilterSchema = z
   .object({
     state: z.enum(["open", "closed", "all"]).default("all"),
     since_days: z.number().int().positive().optional(),
+    /**
+     * AND-semantics: every label in this list must be present on the
+     * issue. GitHub's listIssues API enforces this at query time.
+     */
     labels: z.array(z.string().min(1)).optional(),
+    /**
+     * OR-semantics: any one of these labels matching is sufficient.
+     * Implemented as multiple listIssues queries (one per label) with
+     * client-side deduplication by issue number — GitHub's API doesn't
+     * support OR natively. Used by the daemon to inject membership-aware
+     * routing (assigned:<self>, scope:agent:<self>, scope:group:<g>...,
+     * scope:all) automatically; operators can override if their
+     * routing vocabulary differs.
+     */
+    any_label: z.array(z.string().min(1)).optional(),
   })
   .strict();
 

@@ -40,6 +40,18 @@ import { composeBundle, filterDoneItems, type ClassifierContext } from "./priori
 export interface GithubSignalScope {
   readonly repo: RepoCoordinate;
   readonly filter?: ListIssuesFilter;
+  /**
+   * Labels with OR-semantics: an issue matches if any one of these
+   * labels is present (combined with the AND-set in `filter.labels`).
+   * Implemented as multiple `listIssues` queries client-side because
+   * GitHub's API only supports AND. Used by the daemon to inject
+   * membership-aware routing labels (assigned, scope:agent, scope:group,
+   * scope:all) per agent — see `buildAgentRoutingLabels` in
+   * `@murmurations-ai/core`.
+   *
+   * When unset, falls through to a single query with `filter.labels`.
+   */
+  readonly anyLabel?: readonly string[];
   /** If true, signals start at "trusted". Otherwise "semi-trusted". */
   readonly trusted?: boolean;
 }
@@ -278,22 +290,53 @@ export class DefaultSignalAggregator implements SignalAggregator {
     const scopes = this.#config.githubScopes ?? [];
     if (!client || scopes.length === 0) return [];
 
+    // Per-issue dedup across multi-query fan-out: a single issue may
+    // match multiple `anyLabel` queries on the same scope (e.g. an
+    // issue labeled both `assigned:foo` AND `scope:all` shows up in
+    // both queries). Key by repo+number so multi-repo scopes don't
+    // collide.
+    const seen = new Set<string>();
     const collected: Signal[] = [];
-    for (const scope of scopes) {
-      const filter: ListIssuesFilter = {
-        perPage: Math.min(this.#caps.githubIssue + 5, 30),
-        ...(scope.filter ?? {}),
-      };
+    const baseFilter = (scope: GithubSignalScope): ListIssuesFilter => ({
+      perPage: Math.min(this.#caps.githubIssue + 5, 30),
+      ...(scope.filter ?? {}),
+    });
+    const recordIssues = async (
+      scope: GithubSignalScope,
+      filter: ListIssuesFilter,
+    ): Promise<void> => {
       const result = await client.listIssues(scope.repo, filter);
       if (!result.ok) {
         warnings.push(
           `github source: ${scope.repo.owner.value}/${scope.repo.name.value} failed (${result.error.code})`,
         );
-        continue;
+        return;
       }
       const baseTrust: SignalTrustLevel = scope.trusted === true ? "trusted" : "semi-trusted";
       for (const issue of result.value) {
+        const key = `${issue.repo.owner.value}/${issue.repo.name.value}#${String(issue.number.value)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
         collected.push(issueToSignal(issue, baseTrust, context.now));
+      }
+    };
+
+    for (const scope of scopes) {
+      const baseFilterForScope = baseFilter(scope);
+      if (scope.anyLabel === undefined || scope.anyLabel.length === 0) {
+        // Single-query fast path — no OR semantics needed.
+        await recordIssues(scope, baseFilterForScope);
+        continue;
+      }
+      // Fan-out: one query per anyLabel value. Each query AND-combines
+      // the existing labels filter (if any) with the OR-label.
+      const baseLabels = baseFilterForScope.labels ?? [];
+      for (const orLabel of scope.anyLabel) {
+        const filter: ListIssuesFilter = {
+          ...baseFilterForScope,
+          labels: [...baseLabels, orLabel],
+        };
+        await recordIssues(scope, filter);
       }
     }
 

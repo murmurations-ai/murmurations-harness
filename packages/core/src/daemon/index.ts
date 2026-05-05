@@ -170,7 +170,14 @@ export interface RegisteredAgent {
       readonly filter: {
         readonly state: "open" | "closed" | "all";
         readonly sinceDays?: number;
+        /** AND-semantics — every label must be present. */
         readonly labels?: readonly string[];
+        /**
+         * OR-semantics — any one label matching is sufficient.
+         * Daemon auto-derives membership-aware routing labels here
+         * unless operator overrides via `signals.github_scopes[].filter.any_label`.
+         */
+        readonly anyLabel?: readonly string[];
       };
     }[];
   };
@@ -287,6 +294,7 @@ export const registeredAgentFromLoadedIdentity = (
               state: s.filter.state,
               ...(s.filter.since_days !== undefined ? { sinceDays: s.filter.since_days } : {}),
               ...(s.filter.labels !== undefined ? { labels: s.filter.labels } : {}),
+              ...(s.filter.any_label !== undefined ? { anyLabel: s.filter.any_label } : {}),
             },
           })),
         }

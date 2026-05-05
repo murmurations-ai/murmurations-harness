@@ -657,6 +657,141 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
     }
   });
 
+  /* eslint-disable @typescript-eslint/require-await -- fake clients mimic the async interface */
+  it("multi-query anyLabel: source-directive scoped to agent reaches the bundle (harness#331/#233)", async () => {
+    // Repro for chinook-wind 2026-05-05: a directive filed as
+    // `source-directive` + `scope:agent:rentals-agent` was invisible to
+    // the aggregator because the configured filter was AND-only with
+    // `assigned:rentals-agent`. With anyLabel routing, the issue should
+    // now show up in the bundle.
+    const directiveForRentals = fakeIssue({
+      n: 100,
+      title: "[DIRECTIVE] bootstrap",
+      labels: ["source-directive", "scope:agent:rentals-agent"],
+    });
+    // Track which label-set each query was asked for, so we can assert
+    // the multi-query fan-out happened.
+    const queriedFilters: (readonly string[] | undefined)[] = [];
+    const fakeClient: GithubClient = {
+      async getIssue() {
+        return {
+          ok: false,
+          error: { code: "not-found" } as unknown as GithubClientError,
+        };
+      },
+      async listIssues(_repo, filter): Promise<Result<readonly GithubIssue[], GithubClientError>> {
+        queriedFilters.push(filter?.labels);
+        // Mimic GitHub's AND-semantics: return the directive only when
+        // the query asks for `scope:agent:rentals-agent`.
+        const wantsScopeAgent = filter?.labels?.includes("scope:agent:rentals-agent") ?? false;
+        return { ok: true, value: wantsScopeAgent ? [directiveForRentals] : [] };
+      },
+      async listIssueComments() {
+        return { ok: true, value: [] };
+      },
+      async listIssueLabels() {
+        return { ok: true, value: [] };
+      },
+      getRef: notFound,
+      getPullRequest: notFound,
+      listPullRequests: notFound,
+      getPullRequestFiles: notFound,
+      getCommit: notFound,
+      getFileAtRef: notFound,
+      createIssueComment: mutationDenied,
+      createIssue: mutationDenied,
+      createCommitOnBranch: mutationDenied,
+      addLabels: mutationDenied,
+      removeLabel: mutationDenied,
+      updateIssueState: mutationDenied,
+      lastRateLimit: () => null,
+    };
+
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: fakeClient,
+      githubScopes: [
+        {
+          repo: REPO,
+          anyLabel: [
+            "assigned:rentals-agent",
+            "scope:agent:rentals-agent",
+            "scope:group:partnership",
+            "scope:all",
+          ],
+        },
+      ],
+    });
+
+    const result = await agg.aggregate(mkContext("rentals-agent"));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // The directive should be in the bundle.
+    const directives = result.bundle.signals.filter(
+      (s) => s.kind === "github-issue" && s.number === 100,
+    );
+    expect(directives).toHaveLength(1);
+
+    // And we should have run one query per anyLabel value (4 queries).
+    expect(queriedFilters).toHaveLength(4);
+  });
+
+  it("multi-query anyLabel: dedupes issues that match multiple labels (harness#331)", async () => {
+    // An issue tagged with both `assigned:foo` AND `scope:all` matches
+    // two queries; the aggregator should emit it once.
+    const issue = fakeIssue({
+      n: 200,
+      labels: ["assigned:rentals-agent", "scope:all"],
+    });
+    const fakeClient: GithubClient = {
+      async getIssue() {
+        return {
+          ok: false,
+          error: { code: "not-found" } as unknown as GithubClientError,
+        };
+      },
+      async listIssues(): Promise<Result<readonly GithubIssue[], GithubClientError>> {
+        // Same issue returned by every query — dedup is the aggregator's job.
+        return { ok: true, value: [issue] };
+      },
+      async listIssueComments() {
+        return { ok: true, value: [] };
+      },
+      async listIssueLabels() {
+        return { ok: true, value: [] };
+      },
+      getRef: notFound,
+      getPullRequest: notFound,
+      listPullRequests: notFound,
+      getPullRequestFiles: notFound,
+      getCommit: notFound,
+      getFileAtRef: notFound,
+      createIssueComment: mutationDenied,
+      createIssue: mutationDenied,
+      createCommitOnBranch: mutationDenied,
+      addLabels: mutationDenied,
+      removeLabel: mutationDenied,
+      updateIssueState: mutationDenied,
+      lastRateLimit: () => null,
+    };
+
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: fakeClient,
+      githubScopes: [{ repo: REPO, anyLabel: ["assigned:rentals-agent", "scope:all"] }],
+    });
+
+    const result = await agg.aggregate(mkContext("rentals-agent"));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const matching = result.bundle.signals.filter(
+      (s) => s.kind === "github-issue" && s.number === 200,
+    );
+    expect(matching).toHaveLength(1);
+  });
+  /* eslint-enable @typescript-eslint/require-await */
+
   it("emits warnings naming tier counts when items are dropped", async () => {
     const many = Array.from({ length: 20 }, (_, i) =>
       fakeIssue({ n: i + 1, labels: ["priority:critical"] }),
