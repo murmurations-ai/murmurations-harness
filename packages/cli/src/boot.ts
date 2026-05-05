@@ -81,7 +81,10 @@ import { McpToolLoader } from "@murmurations-ai/mcp";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
-import { buildGithubReadToolsForAgent } from "./github-tools/index.js";
+import {
+  buildGithubReadToolsForAgent,
+  buildGithubWriteToolsForAgent,
+} from "./github-tools/index.js";
 import type { HarnessLLMConfig } from "./harness-config.js";
 import { validateHarnessYaml } from "./harness-config.js";
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
@@ -1173,10 +1176,23 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     // GitHub-side rate-limit headers.
     const buildAgentBoundGithub = (): readonly (typeof extensionTools)[number][] => {
       if (provider?.has(GITHUB_TOKEN) !== true) return [];
-      const client = createGithubClient({
+      const readClient = createGithubClient({
         token: provider.get(GITHUB_TOKEN),
       });
-      return buildGithubReadToolsForAgent(client) as readonly (typeof extensionTools)[number][];
+      const readTools = buildGithubReadToolsForAgent(readClient);
+      // Add write tools for agents that declare issue_comments write scopes (#274).
+      // The write client enforces ADR-0017 scope at the GitHub layer.
+      const hasCommentScope = agent.githubWriteScopes.issueComments.length > 0;
+      const writeTools =
+        hasCommentScope && !dryRun
+          ? buildGithubWriteToolsForAgent(
+              createGithubClient({
+                token: provider.get(GITHUB_TOKEN),
+                writeScopes: toClientWriteScopes(agent),
+              }),
+            )
+          : [];
+      return [...readTools, ...writeTools] as readonly (typeof extensionTools)[number][];
     };
 
     if (agent.plugins.length === 0) {

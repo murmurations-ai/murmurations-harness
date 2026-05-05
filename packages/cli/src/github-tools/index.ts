@@ -1,23 +1,23 @@
 /**
- * GitHub read tools — agent-callable wrappers around the
+ * GitHub read + write tools — agent-callable wrappers around the
  * harness's existing GithubClient. Constructed per-agent at boot
  * so each tool's underlying client carries the agent's per-wake
  * cost hook and (eventually) per-agent read scopes.
  *
- * Five read-only tools (replacement for harness#256, which was
- * filed against the wrong premise — bodies were already in the
- * SignalBundle, but agents had no GitHub-aware tools at all):
- *
+ * Read tools (buildGithubReadToolsForAgent):
  *   read_issue            — fetch one issue by repo + number
  *   list_issues           — list issues in a repo (filterable)
  *   list_issue_comments   — fetch comment thread for one issue
  *   list_issue_labels     — fetch labels for one issue
  *   get_branch_head       — fetch HEAD oid of a branch
  *
- * Writes are intentionally NOT added here. The existing WakeAction
- * pipeline handles writes post-wake under ADR-0017 scope enforcement
- * with the Boundary 5 narrative-vs-action audit (#240). Direct write
- * tools would reopen that hole.
+ * Write tools (buildGithubWriteToolsForAgent, harness#274):
+ *   create_issue_comment  — post a comment on an issue (requires issueComments scope)
+ *
+ * The write tools are only added for agents that declare the matching
+ * `github.write_scopes` in role.md (ADR-0017). The client passed to
+ * buildGithubWriteToolsForAgent must already carry the per-agent
+ * write-scope enforcement — no additional gate is needed here.
  *
  * The `repo` parameter accepts the natural "owner/name" string form;
  * we parse it into a `RepoCoordinate` internally so the LLM doesn't
@@ -433,6 +433,49 @@ export const buildGithubReadToolsForAgent = (client: GithubClient): readonly Git
               ? "Binary file — content omitted; fetch via htmlUrl in a browser if needed."
               : `File too large or unsupported encoding (${f.encoding}); GitHub returned no inline content.`,
           htmlUrl: f.htmlUrl,
+        },
+        null,
+        2,
+      );
+    },
+  },
+];
+
+/**
+ * Build the write-capable tool surface against `client` (#274). Only
+ * wire these tools for agents that declare `github.write_scopes.issue_comments`
+ * in role.md — the client itself enforces the scope at the GitHub layer
+ * (ADR-0017), so a mis-scoped call will be rejected there.
+ */
+export const buildGithubWriteToolsForAgent = (client: GithubClient): readonly GithubReadTool[] => [
+  {
+    name: "create_issue_comment",
+    description:
+      "Post a comment on a GitHub issue. Use to acknowledge work, ask clarifying questions, or summarize conclusions in-line with the issue thread — without waiting for post-wake WakeAction dispatch. Requires `github.write_scopes.issue_comments` on the target repo.",
+    parameters: z.object({
+      repo: z.string().describe('"owner/name"'),
+      number: z.number().int().positive().describe("Issue number"),
+      body: z.string().min(1).describe("Comment body (Markdown supported)"),
+    }),
+    execute: async ({ repo, number, body }) => {
+      const parsed = parseRepo(String(repo));
+      if (!parsed.ok) return `create_issue_comment error: ${parsed.message}`;
+      if (typeof body !== "string" || body.trim().length === 0) {
+        return "create_issue_comment error: body must be a non-empty string";
+      }
+      const result = await client.createIssueComment(
+        parsed.value,
+        makeIssueNumber(Number(number)),
+        { body },
+      );
+      if (!result.ok) {
+        return `create_issue_comment error: ${result.error.code} — ${result.error.message}`;
+      }
+      return JSON.stringify(
+        {
+          id: result.value.id,
+          htmlUrl: result.value.htmlUrl,
+          createdAt: result.value.createdAt.toISOString(),
         },
         null,
         2,
