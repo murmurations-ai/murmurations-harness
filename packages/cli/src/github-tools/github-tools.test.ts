@@ -142,11 +142,12 @@ const stubClient = (
     getPullRequestFiles: () => successOf([minimalPRFile]),
     getCommit: () => successOf(minimalCommit),
     getFileAtRef: () => successOf(minimalFileContent),
+    searchIssues: () => successOf([minimalIssue]),
     ...overrides,
   }) as unknown as GithubClient;
 
 describe("buildGithubReadToolsForAgent", () => {
-  it("registers all ten read tools by name", () => {
+  it("registers all eleven read tools by name", () => {
     const tools = buildGithubReadToolsForAgent(stubClient());
     expect(tools.map((t) => t.name)).toEqual([
       "read_issue",
@@ -159,7 +160,21 @@ describe("buildGithubReadToolsForAgent", () => {
       "list_pull_request_files",
       "read_commit",
       "read_file_at_ref",
+      "search_issues",
     ]);
+  });
+
+  it("search_issues returns serialized issue array (#234)", async () => {
+    const tools = buildGithubReadToolsForAgent(stubClient());
+    const tool = tools.find((t) => t.name === "search_issues");
+    expect(tool).toBeDefined();
+    const result = (await tool!.execute({
+      repo: "owner/repo",
+      q: "label:bug state:open",
+    })) as string;
+    const parsed = JSON.parse(result) as Record<string, unknown>[];
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0]?.title).toBe("Test issue");
   });
 
   it("read_issue returns serialized issue JSON for a valid repo", async () => {

@@ -10,6 +10,7 @@
  *   list_issue_comments   — fetch comment thread for one issue
  *   list_issue_labels     — fetch labels for one issue
  *   get_branch_head       — fetch HEAD oid of a branch
+ *   search_issues         — GitHub issue search with query syntax (harness#234)
  *
  * Write tools (buildGithubWriteToolsForAgent, harness#274):
  *   create_issue_comment  — post a comment on an issue (requires issueComments scope)
@@ -434,6 +435,41 @@ export const buildGithubReadToolsForAgent = (client: GithubClient): readonly Git
               : `File too large or unsupported encoding (${f.encoding}); GitHub returned no inline content.`,
           htmlUrl: f.htmlUrl,
         },
+        null,
+        2,
+      );
+    },
+  },
+  {
+    name: "search_issues",
+    description:
+      "Search GitHub issues in a repository using GitHub's search query syntax. " +
+      "The `repo:owner/name` and `is:issue` qualifiers are added automatically — do not include them in `q`. " +
+      'Examples: q="label:bug state:open", q="in:title deployment". Returns up to perPage results (default 30).',
+    parameters: z.object({
+      repo: z.string().describe('"owner/name"'),
+      q: z.string().describe("GitHub search query (without repo: or is:issue)"),
+      perPage: z.number().int().min(1).max(100).optional().describe("Max results (default 30)"),
+    }),
+    execute: async ({ repo, q, perPage }) => {
+      const parsed = parseRepo(String(repo));
+      if (!parsed.ok) return `search_issues error: ${parsed.message}`;
+      const opts: { perPage?: number } = {};
+      if (typeof perPage === "number") opts.perPage = perPage;
+      const result = await client.searchIssues(parsed.value, String(q), opts);
+      if (!result.ok) {
+        return `search_issues error: ${result.error.code} — ${result.error.message}`;
+      }
+      return JSON.stringify(
+        result.value.map((issue) => ({
+          number: issue.number.value,
+          title: issue.title,
+          state: issue.state,
+          labels: issue.labels,
+          authorLogin: issue.authorLogin,
+          updatedAt: issue.updatedAt.toISOString(),
+          htmlUrl: issue.htmlUrl,
+        })),
         null,
         2,
       );

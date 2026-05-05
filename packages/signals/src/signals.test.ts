@@ -88,6 +88,9 @@ const makeFakeGithub = (issues: readonly GithubIssue[]): GithubClient => ({
   getPullRequestFiles: notFound,
   getCommit: notFound,
   getFileAtRef: notFound,
+  async searchIssues() {
+    return { ok: true, value: [] };
+  },
   createIssueComment: mutationDenied,
   createIssue: mutationDenied,
   createCommitOnBranch: mutationDenied,
@@ -119,6 +122,9 @@ const makeFailingGithub = (): GithubClient => ({
   getPullRequestFiles: notFound,
   getCommit: notFound,
   getFileAtRef: notFound,
+  async searchIssues() {
+    return { ok: true, value: [] };
+  },
   createIssueComment: mutationDenied,
   createIssue: mutationDenied,
   createCommitOnBranch: mutationDenied,
@@ -701,6 +707,9 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       getPullRequestFiles: notFound,
       getCommit: notFound,
       getFileAtRef: notFound,
+      async searchIssues() {
+        return { ok: true, value: [] };
+      },
       createIssueComment: mutationDenied,
       createIssue: mutationDenied,
       createCommitOnBranch: mutationDenied,
@@ -770,6 +779,9 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       getPullRequestFiles: notFound,
       getCommit: notFound,
       getFileAtRef: notFound,
+      async searchIssues() {
+        return { ok: true, value: [] };
+      },
       createIssueComment: mutationDenied,
       createIssue: mutationDenied,
       createCommitOnBranch: mutationDenied,
@@ -841,6 +853,9 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       getPullRequestFiles: notFound,
       getCommit: notFound,
       getFileAtRef: notFound,
+      async searchIssues() {
+        return { ok: true, value: [] };
+      },
       createIssueComment: mutationDenied,
       createIssue: mutationDenied,
       createCommitOnBranch: mutationDenied,
@@ -908,6 +923,9 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       getPullRequestFiles: notFound,
       getCommit: notFound,
       getFileAtRef: notFound,
+      async searchIssues() {
+        return { ok: true, value: [] };
+      },
       createIssueComment: mutationDenied,
       createIssue: mutationDenied,
       createCommitOnBranch: mutationDenied,
