@@ -223,15 +223,16 @@ describe("ClaudeCliAdapter.parseOutput", () => {
     expect(out.value.providerUsed).toBe("claude-cli");
   });
 
-  it("returns ParseError on empty output", () => {
+  it("returns ParseError(EMPTY_OUTPUT) on empty output (harness#280)", () => {
     const out = adapter.parseOutput("");
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.error.kind).toBe("parse-error");
+    expect(out.error.code).toBe("EMPTY_OUTPUT");
     expect(out.error.message.toLowerCase()).toContain("empty");
   });
 
-  it("returns ParseError when usage tokens are missing (ADR-0034 D3)", () => {
+  it("returns ParseError(TOKEN_COUNT_MISSING) when usage tokens are absent (ADR-0034 D3, harness#280)", () => {
     const noUsage = JSON.stringify({
       type: "result",
       subtype: "success",
@@ -241,10 +242,11 @@ describe("ClaudeCliAdapter.parseOutput", () => {
     const out = adapter.parseOutput(noUsage);
     expect(out.ok).toBe(false);
     if (out.ok) return;
+    expect(out.error.code).toBe("TOKEN_COUNT_MISSING");
     expect(out.error.message).toContain("usage");
   });
 
-  it("returns ParseError when no result event is present", () => {
+  it("returns ParseError(NO_RESULT_EVENT) when no result event is present (harness#280)", () => {
     const noResult = JSON.stringify({
       type: "system",
       session_id: "abc",
@@ -252,7 +254,16 @@ describe("ClaudeCliAdapter.parseOutput", () => {
     const out = adapter.parseOutput(noResult);
     expect(out.ok).toBe(false);
     if (out.ok) return;
+    expect(out.error.code).toBe("NO_RESULT_EVENT");
     expect(out.error.message).toContain("result event");
+  });
+
+  it("returns ParseError(MALFORMED_JSON) when no JSON lines parse at all (harness#280)", () => {
+    const out = adapter.parseOutput("not json at all\nalso not json");
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    // No parseable JSON → no events → MALFORMED_JSON
+    expect(out.error.code).toBe("MALFORMED_JSON");
   });
 
   it("skips malformed JSON lines instead of failing the whole parse", () => {

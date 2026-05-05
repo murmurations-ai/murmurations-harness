@@ -19,6 +19,7 @@ export type {
   AuthError,
   AuthStatus,
   ParseError,
+  ParseErrorCode,
   SpawnError,
   SubprocessError,
   SubprocessLLMAdapter,

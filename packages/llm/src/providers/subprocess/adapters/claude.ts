@@ -146,6 +146,7 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
         ok: false,
         error: {
           kind: "parse-error",
+          code: "EMPTY_OUTPUT",
           message: "Claude CLI produced empty output",
           raw: truncateForError(raw),
         },
@@ -170,6 +171,7 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
         ok: false,
         error: {
           kind: "parse-error",
+          code: events.length === 0 ? "MALFORMED_JSON" : "NO_RESULT_EVENT",
           message: "No result event found in Claude CLI output",
           raw: truncateForError(raw),
         },
@@ -186,6 +188,7 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
         ok: false,
         error: {
           kind: "parse-error",
+          code: "TOKEN_COUNT_MISSING",
           message: "Claude CLI result missing usage.input_tokens/output_tokens (D3 violation)",
           raw: truncateForError(raw),
         },
