@@ -1314,12 +1314,13 @@ const buildSpawnContext = async (
   const agentId = makeAgentId(agent.agentId);
   const groupIds: GroupId[] = agent.groupMemberships.map((c) => makeGroupId(c));
 
-  // Phase 1A: a minimal resolved model placeholder. Phase 1B reads
-  // murmuration/models.yaml to resolve tier → concrete model.
+  // Resolve from role.md llm config when present; fall back to
+  // provider:"unknown" so cost reporting shows a real provider name
+  // rather than the legacy "placeholder" stub (#326).
   const model: ResolvedModel = {
     tier: agent.modelTier,
-    provider: "placeholder",
-    model: "phase-1a-stub",
+    provider: agent.llm?.provider ?? "unknown",
+    model: agent.llm?.model ?? "unknown",
     maxTokens: 4096,
   };
 

@@ -134,7 +134,7 @@ describe("SubprocessExecutor", () => {
     expect(result.costRecord?.subprocess?.maxRssKb).toBeGreaterThan(0);
     // LLM and github fields are stubs in Phase 1.
     expect(result.costRecord?.llm.inputTokens).toBe(0);
-    expect(result.costRecord?.llm.modelProvider).toBe("placeholder");
+    expect(result.costRecord?.llm.modelProvider).toBe("unknown");
     expect(result.costRecord?.github.restCalls).toBe(0);
     expect(result.costRecord?.totals.costMicros.value).toBe(0);
     expect(result.costRecord?.budget).toBeNull();

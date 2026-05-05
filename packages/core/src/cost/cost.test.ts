@@ -131,8 +131,8 @@ describe("WakeCostBuilder", () => {
     expect(record.totals.apiCalls).toBe(0);
     expect(record.llm.inputTokens).toBe(0);
     expect(record.llm.outputTokens).toBe(0);
-    expect(record.llm.modelProvider).toBe("placeholder");
-    expect(record.llm.modelName).toBe("phase-1a-stub");
+    expect(record.llm.modelProvider).toBe("unknown");
+    expect(record.llm.modelName).toBe("unknown");
     expect(record.github.restCalls).toBe(0);
     expect(record.github.graphqlCalls).toBe(0);
     expect(record.budget).toBeNull();
@@ -303,8 +303,8 @@ describe("wakeCostRecordSchema", () => {
       outputTokens: 0,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      modelProvider: "placeholder",
-      modelName: "phase-1a-stub",
+      modelProvider: "unknown",
+      modelName: "unknown",
       costMicros: { kind: "usd-micros", value: 0 },
     },
     github: {

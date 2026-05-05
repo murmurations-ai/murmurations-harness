@@ -64,8 +64,8 @@ export class WakeCostBuilder {
   #llmCacheWriteTokens = 0;
   #llmCostMicros: USDMicros = ZERO_USD_MICROS;
   #llmShadowCostMicros: USDMicros | undefined = undefined;
-  #llmProvider = "placeholder";
-  #llmModel = "phase-1a-stub";
+  #llmProvider = "unknown";
+  #llmModel = "unknown";
 
   #ghRest = 0;
   #ghGraphql = 0;

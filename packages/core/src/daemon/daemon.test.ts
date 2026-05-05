@@ -413,7 +413,7 @@ describe("Daemon", () => {
     expect(costEvent?.data.schemaVersion).toBe(1);
     expect(costEvent?.data.agentId).toBe("hello-world");
     const llm = costEvent?.data.llm as { modelProvider?: string } | undefined;
-    expect(llm?.modelProvider).toBe("placeholder");
+    expect(llm?.modelProvider).toBe("unknown");
     const rollup = costEvent?.data.rollupHints as { dayUtc?: string } | undefined;
     expect(rollup?.dayUtc).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     await daemon.stop();
