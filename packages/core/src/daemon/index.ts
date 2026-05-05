@@ -180,6 +180,9 @@ export interface RegisteredAgent {
          */
         readonly anyLabel?: readonly string[];
       };
+      /** Sec M1: allowlist of GitHub logins trusted to apply scope:all. */
+      readonly scopeAllTrustedAuthors?: readonly string[];
+      readonly dropScopeAllFromUntrusted?: boolean;
     }[];
   };
 
@@ -313,6 +316,12 @@ export const registeredAgentFromLoadedIdentity = (
               ...(s.filter.labels !== undefined ? { labels: s.filter.labels } : {}),
               anyLabel: s.filter.any_label ?? derivedAnyLabel,
             },
+            ...(s.scope_all_trusted_authors !== undefined
+              ? { scopeAllTrustedAuthors: s.scope_all_trusted_authors }
+              : {}),
+            ...(s.drop_scope_all_from_untrusted !== undefined
+              ? { dropScopeAllFromUntrusted: s.drop_scope_all_from_untrusted }
+              : {}),
           })),
         }
       : { sources: frontmatter.signals.sources };

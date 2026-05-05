@@ -317,7 +317,7 @@ const githubFilterSchema = z
      * scope:all) automatically; operators can override if their
      * routing vocabulary differs.
      */
-    any_label: z.array(z.string().min(1)).optional(),
+    any_label: z.array(z.string().min(1)).max(16).optional(),
   })
   .strict();
 
@@ -326,6 +326,9 @@ const githubScopeSchema = z
     owner: z.string().min(1),
     repo: z.string().min(1),
     filter: githubFilterSchema.default({ state: "all" }),
+    /** Sec M1: allowlist of GitHub logins trusted to apply scope:all. */
+    scope_all_trusted_authors: z.array(z.string().min(1)).optional(),
+    drop_scope_all_from_untrusted: z.boolean().optional(),
   })
   .strict();
 

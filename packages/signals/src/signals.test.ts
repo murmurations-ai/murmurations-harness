@@ -960,3 +960,102 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
     }
   });
 });
+
+describe("DefaultSignalAggregator — scope:all provenance check (Sec M1, harness#339)", () => {
+  let rootDir = "";
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "signals-m1-"));
+  });
+  afterEach(async () => {
+    await rm(rootDir, { recursive: true, force: true });
+  });
+
+  it("back-compat: scope:all without scopeAllTrustedAuthors keeps baseTrust", async () => {
+    const issues = [fakeIssue({ n: 1, labels: ["scope:all"], authorLogin: "unknown-bot" })];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO, anyLabel: ["scope:all"] }],
+    });
+    const result = await agg.aggregate(mkContext("01-alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const sig = result.bundle.signals.find((s) => s.kind === "github-issue");
+      expect(sig?.trust).toBe("semi-trusted");
+    }
+  });
+
+  it("scope:all from trusted author keeps baseTrust (Sec M1)", async () => {
+    const issues = [fakeIssue({ n: 1, labels: ["scope:all"], authorLogin: "nori" })];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO, anyLabel: ["scope:all"], scopeAllTrustedAuthors: ["nori"] }],
+    });
+    const result = await agg.aggregate(mkContext("01-alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const sig = result.bundle.signals.find((s) => s.kind === "github-issue");
+      expect(sig?.trust).toBe("semi-trusted");
+    }
+  });
+
+  it("scope:all from untrusted author is downgraded to untrusted (Sec M1)", async () => {
+    const issues = [fakeIssue({ n: 1, labels: ["scope:all"], authorLogin: "external-bot" })];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO, anyLabel: ["scope:all"], scopeAllTrustedAuthors: ["nori"] }],
+    });
+    const result = await agg.aggregate(mkContext("01-alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const sig = result.bundle.signals.find((s) => s.kind === "github-issue");
+      expect(sig?.trust).toBe("untrusted");
+    }
+  });
+
+  it("scope:all from untrusted author is dropped when dropScopeAllFromUntrusted=true (Sec M1)", async () => {
+    const issues = [
+      fakeIssue({ n: 1, labels: ["scope:all"], authorLogin: "external-bot" }),
+      fakeIssue({ n: 2, labels: ["assigned:alpha"], authorLogin: "nori" }),
+    ];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [
+        {
+          repo: REPO,
+          anyLabel: ["scope:all", "assigned:alpha"],
+          scopeAllTrustedAuthors: ["nori"],
+          dropScopeAllFromUntrusted: true,
+        },
+      ],
+    });
+    const result = await agg.aggregate(mkContext("01-alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const ghSignals = result.bundle.signals.filter((s) => s.kind === "github-issue");
+      // issue #1 (scope:all, untrusted) dropped; issue #2 (assigned, trusted author) kept
+      expect(ghSignals).toHaveLength(1);
+      expect(ghSignals[0]?.trust).toBe("semi-trusted");
+    }
+  });
+
+  it("non-scope:all issue is not affected by scopeAllTrustedAuthors (Sec M1)", async () => {
+    const issues = [fakeIssue({ n: 1, labels: ["assigned:alpha"], authorLogin: "unknown-bot" })];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [
+        { repo: REPO, anyLabel: ["assigned:alpha"], scopeAllTrustedAuthors: ["nori"] },
+      ],
+    });
+    const result = await agg.aggregate(mkContext("01-alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const sig = result.bundle.signals.find((s) => s.kind === "github-issue");
+      expect(sig?.trust).toBe("semi-trusted");
+    }
+  });
+});

@@ -1436,6 +1436,12 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
             : {}),
         },
         ...(scope.filter.anyLabel !== undefined ? { anyLabel: scope.filter.anyLabel } : {}),
+        ...(scope.scopeAllTrustedAuthors !== undefined
+          ? { scopeAllTrustedAuthors: scope.scopeAllTrustedAuthors }
+          : {}),
+        ...(scope.dropScopeAllFromUntrusted !== undefined
+          ? { dropScopeAllFromUntrusted: scope.dropScopeAllFromUntrusted }
+          : {}),
       })) ?? [],
   );
 

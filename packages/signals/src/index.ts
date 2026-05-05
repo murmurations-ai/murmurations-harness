@@ -11,6 +11,7 @@ import { join, resolve, sep } from "node:path";
 
 import {
   ACTION_ITEM_LABEL,
+  SCOPE_ALL_LABEL,
   assignedLabel,
   makeAgentId,
   type AgentId,
@@ -55,6 +56,19 @@ export interface GithubSignalScope {
   readonly anyLabel?: readonly string[];
   /** If true, signals start at "trusted". Otherwise "semi-trusted". */
   readonly trusted?: boolean;
+  /**
+   * When set, any `scope:all`-tagged issue whose `authorLogin` is NOT
+   * in this list is downgraded to `untrusted`. Protects against
+   * non-agent actors (bots, external collaborators) writing scope:all
+   * labels to broadcast to every agent. Back-compat: when absent, no
+   * downgrade occurs. Sec M1 defense-in-depth (harness#339).
+   */
+  readonly scopeAllTrustedAuthors?: readonly string[];
+  /**
+   * When true AND `scopeAllTrustedAuthors` is set, `scope:all` issues
+   * from untrusted authors are dropped entirely rather than downgraded.
+   */
+  readonly dropScopeAllFromUntrusted?: boolean;
 }
 
 export interface AggregatorCaps {
@@ -333,6 +347,19 @@ export class DefaultSignalAggregator implements SignalAggregator {
         const key = `${issue.repo.owner.value}/${issue.repo.name.value}#${String(issue.number.value)}`;
         if (seen.has(key)) continue;
         seen.add(key);
+        // Sec M1: scope:all provenance check. If the scope declares
+        // trusted authors and this issue carries scope:all, verify the
+        // author is in the allowlist. Untrusted authors get downgraded
+        // (or dropped if dropScopeAllFromUntrusted is set).
+        if (
+          scope.scopeAllTrustedAuthors !== undefined &&
+          issue.labels.includes(SCOPE_ALL_LABEL) &&
+          !scope.scopeAllTrustedAuthors.includes(issue.authorLogin)
+        ) {
+          if (scope.dropScopeAllFromUntrusted === true) continue;
+          raw.push({ issue, trust: "untrusted" });
+          continue;
+        }
         raw.push({ issue, trust: baseTrust });
       }
     };
