@@ -17,6 +17,8 @@
 
 import { spawn } from "node:child_process";
 
+import { scrubValuePatterns } from "@murmurations-ai/core";
+
 import type { LLMClientError } from "../../errors.js";
 import {
   LLMInternalError,
@@ -235,7 +237,7 @@ export class SubprocessAdapter implements LLMAdapter {
         // immediately so MCP startup errors / auth prompts / hang causes
         // surface in the wake log even when the subprocess never exits.
         process.stderr.write(
-          `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "subprocess.stderr.chunk", bytes: s.length, text: s.slice(0, 800) })}\n`,
+          `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "subprocess.stderr.chunk", bytes: s.length, text: scrubValuePatterns(s.slice(0, 800)) })}\n`,
         );
       });
 
@@ -294,7 +296,7 @@ export class SubprocessAdapter implements LLMAdapter {
         clearTimeout(termTimer);
         if (abort) abort.removeEventListener("abort", onAbort);
         process.stderr.write(
-          `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "subprocess.close", exitCode: code, timedOut, stdoutBytes: stdout.length, stderrBytes: stderr.length, stderrSnippet: stderr.slice(0, 500) })}\n`,
+          `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "subprocess.close", exitCode: code, timedOut, stdoutBytes: stdout.length, stderrBytes: stderr.length, stderrSnippet: scrubValuePatterns(stderr.slice(0, 500)) })}\n`,
         );
 
         if (timedOut) {
