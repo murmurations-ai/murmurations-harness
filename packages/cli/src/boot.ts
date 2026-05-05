@@ -83,6 +83,7 @@ import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
 import { buildGithubReadToolsForAgent } from "./github-tools/index.js";
 import type { HarnessLLMConfig } from "./harness-config.js";
+import { validateHarnessYaml } from "./harness-config.js";
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 import { registerRunningSocket, unregisterRunningSocket } from "./running-sessions.js";
@@ -719,6 +720,18 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const { DaemonEventBus, DaemonLoggerImpl } = await import("@murmurations-ai/core");
   const eventBus = new DaemonEventBus();
   const logger = new DaemonLoggerImpl({ level: config.logging.level, eventBus });
+
+  // Emit daemon.config.warn for every harness.yaml field that silently
+  // fell back to a default (#323). This surfaces mis-spellings and invalid
+  // enum values that loadHarnessConfig swallows without feedback.
+  for (const w of await validateHarnessYaml(exampleRoot)) {
+    logger.warn("daemon.config.warn", {
+      field: w.field,
+      message: w.message,
+      received: w.received,
+      ...(w.accepted !== undefined ? { accepted: w.accepted } : {}),
+    });
+  }
 
   // Load governance plugin — from merged config (CLI > harness.yaml > default)
   const governancePath = config.governance.plugin;

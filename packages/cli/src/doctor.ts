@@ -26,7 +26,7 @@ import {
 } from "@murmurations-ai/core";
 
 import { listBundledPluginAliases, probeGovernancePlugin } from "./governance-plugin-resolver.js";
-import { loadHarnessConfig, type HarnessConfig } from "./harness-config.js";
+import { loadHarnessConfig, validateHarnessYaml, type HarnessConfig } from "./harness-config.js";
 
 const execFileP = promisify(execFile);
 
@@ -216,6 +216,21 @@ const runLayoutChecks = async (ctx: CheckContext): Promise<void> => {
 
 const runSchemaChecks = async (ctx: CheckContext): Promise<void> => {
   const { rootDir, findings, harness } = ctx;
+
+  // harness.yaml Zod validation (#323)
+  const harnessWarnings = await validateHarnessYaml(rootDir);
+  for (const w of harnessWarnings) {
+    const safePath = w.field.replaceAll(/\W+/g, "_");
+    findings.push({
+      checkId: `schema.harness-yaml.${safePath}`,
+      category: "schema",
+      severity: "warning",
+      title: `murmuration/harness.yaml: ${w.field} — ${w.message}`,
+      detail: `Received: ${w.received}${w.accepted !== undefined ? `; accepted: ${w.accepted.join(", ")}` : ""}`,
+      remediation: `Edit murmuration/harness.yaml and correct the \`${w.field}\` field.`,
+    });
+  }
+
   const agentsDir = join(rootDir, "agents");
   if (!existsSync(agentsDir)) return;
 
