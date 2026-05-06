@@ -56,12 +56,18 @@ interface CodexEvent {
 }
 
 export class CodexCliAdapter implements SubprocessLLMAdapter {
-  public readonly command = "codex";
+  public readonly command: string;
   public readonly providerId = "codex-cli";
 
   readonly #permissionMode: SubscriptionCliPermissionMode;
 
-  public constructor(config: { readonly permissionMode?: SubscriptionCliPermissionMode } = {}) {
+  public constructor(
+    config: {
+      readonly permissionMode?: SubscriptionCliPermissionMode;
+      readonly cliPath?: string;
+    } = {},
+  ) {
+    this.command = config.cliPath ?? "codex";
     this.#permissionMode = config.permissionMode ?? "restricted";
   }
 

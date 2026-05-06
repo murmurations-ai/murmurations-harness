@@ -44,6 +44,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Assert Spirit MCP binary exists after build (#279)
+        run: test -f packages/cli/dist/spirit/mcp-bin.js
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -82,7 +85,7 @@ jobs:
           # daemon.wake.cost fires with the v1 schema and real subprocess delta.
           grep -q '"event":"daemon.wake.cost"' /tmp/gate.log
           grep -q '"event":"daemon.wake.cost".*"schemaVersion":1' /tmp/gate.log
-          grep -q '"event":"daemon.wake.cost".*"modelProvider":"placeholder"' /tmp/gate.log
+          grep -q '"event":"daemon.wake.cost".*"modelProvider":"unknown"' /tmp/gate.log
           grep -q '"event":"daemon.wake.cost".*"costUsdFormatted":"0.0000"' /tmp/gate.log
           grep -q '"event":"daemon.wake.cost".*"dayUtc":"' /tmp/gate.log
           grep -q '"event":"daemon.wake.cost".*"isoWeekUtc":"' /tmp/gate.log

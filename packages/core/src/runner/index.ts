@@ -23,6 +23,7 @@ import { join, resolve, dirname } from "node:path";
 
 import { runsDirForAgent } from "../daemon/runs-path.js";
 import { parseSelfReflection } from "../execution/index.js";
+import { SOURCE_DIRECTIVE_LABEL } from "../labels/index.js";
 import type {
   AgentOutputArtifact,
   AgentSpawnContext,
@@ -95,6 +96,7 @@ export interface DefaultRunnerClients {
             content: string;
             inputTokens: number;
             outputTokens: number;
+            cacheReadTokens?: number;
             modelUsed: string;
             /** Number of LLM→tool round-trips. */
             steps?: number;
@@ -185,7 +187,7 @@ const renderSignal = (s: Signal): string => {
       const data = custom.data as
         | { id?: string; title?: string; body?: string; labels?: string[] }
         | undefined;
-      const isDirective = data?.labels?.includes("source-directive") === true;
+      const isDirective = data?.labels?.includes(SOURCE_DIRECTIVE_LABEL) === true;
       const tag = isDirective ? "SOURCE DIRECTIVE" : "item";
       return `- [${tag} #${data?.id ?? "?"}] ${data?.title ?? "(no title)"}\n  labels: ${data?.labels?.join(", ") ?? "(none)"}\n\n${data?.body ?? ""}\n`;
     }
@@ -578,10 +580,12 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
 
     // 10. Parse self-reflection
     const reflection = parseSelfReflection(content);
+    const cacheReadTokens = result.value.cacheReadTokens ?? 0;
     const summaryLines = [
       `[${agentId}] wake ${wakeId}`,
       `  model: ${result.value.modelUsed}`,
       `  input_tokens: ${String(result.value.inputTokens)}`,
+      ...(cacheReadTokens > 0 ? [`  cache_read_tokens: ${String(cacheReadTokens)}`] : []),
       `  output_tokens: ${String(result.value.outputTokens)}`,
       `  steps: ${String(stepCount)} / ${String(stepBudget)}`,
       `  tool_calls: ${String(toolCallCount)}`,

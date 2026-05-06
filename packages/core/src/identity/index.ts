@@ -303,7 +303,21 @@ const githubFilterSchema = z
   .object({
     state: z.enum(["open", "closed", "all"]).default("all"),
     since_days: z.number().int().positive().optional(),
+    /**
+     * AND-semantics: every label in this list must be present on the
+     * issue. GitHub's listIssues API enforces this at query time.
+     */
     labels: z.array(z.string().min(1)).optional(),
+    /**
+     * OR-semantics: any one of these labels matching is sufficient.
+     * Implemented as multiple listIssues queries (one per label) with
+     * client-side deduplication by issue number — GitHub's API doesn't
+     * support OR natively. Used by the daemon to inject membership-aware
+     * routing (assigned:<self>, scope:agent:<self>, scope:group:<g>...,
+     * scope:all) automatically; operators can override if their
+     * routing vocabulary differs.
+     */
+    any_label: z.array(z.string().min(1)).max(16).optional(),
   })
   .strict();
 
@@ -312,6 +326,9 @@ const githubScopeSchema = z
     owner: z.string().min(1),
     repo: z.string().min(1),
     filter: githubFilterSchema.default({ state: "all" }),
+    /** Sec M1: allowlist of GitHub logins trusted to apply scope:all. */
+    scope_all_trusted_authors: z.array(z.string().min(1)).optional(),
+    drop_scope_all_from_untrusted: z.boolean().optional(),
   })
   .strict();
 

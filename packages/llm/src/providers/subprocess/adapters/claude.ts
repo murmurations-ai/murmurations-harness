@@ -12,6 +12,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { scrubValuePatterns } from "@murmurations-ai/core";
+
 import type { LLMRequest, LLMResponse, Result } from "../../../types.js";
 
 import type {
@@ -78,8 +80,10 @@ const normalizeModel = (raw: string | undefined): string => {
   return raw.replace(/-\d{8}$/, "");
 };
 
-const truncateForError = (raw: string): string =>
-  raw.length > 2000 ? `${raw.slice(0, 2000)}…[truncated]` : raw;
+const truncateForError = (raw: string): string => {
+  const truncated = raw.length > 2000 ? `${raw.slice(0, 2000)}…[truncated]` : raw;
+  return scrubValuePatterns(truncated);
+};
 
 // ---------------------------------------------------------------------------
 // Adapter
@@ -96,16 +100,25 @@ export interface ClaudeCliAdapterConfig {
   readonly mcpConfigPath?: string;
   /** ADR-0036: only `trusted` emits Claude's native auto-approve flag. */
   readonly permissionMode?: SubscriptionCliPermissionMode;
+  /**
+   * Absolute path to the `claude` binary. When set, used verbatim in
+   * spawn() instead of relying on PATH resolution. Critical for launchd /
+   * cron environments where PATH is minimal and doesn't include
+   * user-specific install locations (e.g. ~/.local/bin). Resolved at
+   * daemon boot via `resolveCliBinaryPath()` in boot.ts (harness#XXX).
+   */
+  readonly cliPath?: string;
 }
 
 export class ClaudeCliAdapter implements SubprocessLLMAdapter {
-  public readonly command = "claude";
+  public readonly command: string;
   public readonly providerId = "claude-cli";
 
   readonly #mcpConfigPath: string | undefined;
   readonly #permissionMode: SubscriptionCliPermissionMode;
 
   public constructor(config: ClaudeCliAdapterConfig = {}) {
+    this.command = config.cliPath ?? "claude";
     this.#mcpConfigPath = config.mcpConfigPath;
     this.#permissionMode = config.permissionMode ?? "restricted";
   }
@@ -146,6 +159,7 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
         ok: false,
         error: {
           kind: "parse-error",
+          code: "EMPTY_OUTPUT",
           message: "Claude CLI produced empty output",
           raw: truncateForError(raw),
         },
@@ -170,6 +184,7 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
         ok: false,
         error: {
           kind: "parse-error",
+          code: events.length === 0 ? "MALFORMED_JSON" : "NO_RESULT_EVENT",
           message: "No result event found in Claude CLI output",
           raw: truncateForError(raw),
         },
@@ -186,16 +201,39 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
         ok: false,
         error: {
           kind: "parse-error",
+          code: "TOKEN_COUNT_MISSING",
           message: "Claude CLI result missing usage.input_tokens/output_tokens (D3 violation)",
           raw: truncateForError(raw),
         },
       };
     }
 
-    // Most-recent assistant event carries the model id and (BU-1) any tool_use blocks.
+    // Accumulate tool_use blocks from ALL assistant events — not just the last.
+    // In multi-turn agentic sessions claude-cli emits one assistant event per
+    // turn; tool calls in early turns would be invisible if we only scanned
+    // lastAssistant (harness#295).
     let lastAssistant: ClaudeJsonEvent | undefined;
+    const toolCalls: { name: string; args: Record<string, unknown>; result: unknown }[] = [];
+    let assistantEventCount = 0;
     for (const e of events) {
-      if (e.type === "assistant") lastAssistant = e;
+      if (e.type === "assistant") {
+        lastAssistant = e;
+        assistantEventCount++;
+        if (e.message?.content) {
+          for (const block of e.message.content) {
+            if (block.type === "tool_use" && typeof block.name === "string") {
+              toolCalls.push({
+                name: block.name,
+                args:
+                  typeof block.input === "object" && block.input !== null
+                    ? (block.input as Record<string, unknown>)
+                    : {},
+                result: null,
+              });
+            }
+          }
+        }
+      }
     }
 
     // v0.7.0 (harness#293): capture session_id for resume. Claude CLI
@@ -207,22 +245,6 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
         ? resultEvent.session_id
         : (events.find((e) => e.type === "system" && typeof e.session_id === "string")
             ?.session_id ?? undefined);
-
-    const toolCalls: { name: string; args: Record<string, unknown>; result: unknown }[] = [];
-    if (lastAssistant?.message?.content) {
-      for (const block of lastAssistant.message.content) {
-        if (block.type === "tool_use" && typeof block.name === "string") {
-          toolCalls.push({
-            name: block.name,
-            args:
-              typeof block.input === "object" && block.input !== null
-                ? (block.input as Record<string, unknown>)
-                : {},
-            result: null,
-          });
-        }
-      }
-    }
 
     const response: LLMResponse = {
       content: resultEvent.result ?? "",
@@ -238,7 +260,7 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
       modelUsed: normalizeModel(lastAssistant?.message?.model),
       providerUsed: this.providerId,
       toolCalls,
-      steps: 1,
+      steps: Math.max(1, assistantEventCount),
       ...(sessionId !== undefined ? { sessionId } : {}),
     };
     return { ok: true, value: response };

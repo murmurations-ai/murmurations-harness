@@ -18,6 +18,7 @@ import { join, resolve, relative, basename, dirname } from "node:path";
 import type { ToolDefinition } from "@murmurations-ai/llm";
 import { z } from "zod";
 
+import { runDoctor, formatReport } from "../doctor.js";
 import { SpiritMemory, type MemoryType } from "./memory.js";
 import { describeMurmuration } from "./overview.js";
 import { SpiritSkillsOverlay } from "./skills.js";
@@ -599,6 +600,77 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     },
   };
 
+  // harness#318 — cost tool
+  const costTool: SpiritTool = {
+    name: "cost",
+    description:
+      "Murmuration cost summary: total wakes, artifacts, and per-agent breakdown. Same numbers as `murmuration cost`. Use when Source asks about spend or wake activity.",
+    parameters: z.object({}),
+    execute: async () => formatSocketResponse(await send("cost.summary")),
+  };
+
+  // harness#319 — backlog tool
+  const backlogTool: SpiritTool = {
+    name: "backlog",
+    description:
+      "List governance items currently in flight for this murmuration. Returns all items from .murmuration/governance/items.jsonl, newest first. Optionally filter by group_id (matches against item payload, best-effort) or state.",
+    parameters: z.object({
+      group_id: z
+        .string()
+        .optional()
+        .describe("Group/circle id. When set, only items referencing this group are returned."),
+      state: z
+        .enum(["open", "all"])
+        .optional()
+        .describe(
+          "'open' omits items in terminal-looking states (ratified/rejected/abandoned/withdrawn). Default: open.",
+        ),
+    }),
+    execute: async (input) => {
+      const { group_id, state } = input as { group_id?: string; state?: string };
+      try {
+        const items = await readAllGovernanceItems(rootDir);
+        const TERMINAL_RE = /^(ratified|rejected|abandoned|withdrawn|closed|done)$/i;
+        const filtered = items.filter((item) => {
+          const stateStr = typeof item.currentState === "string" ? item.currentState : "";
+          if ((state ?? "open") === "open" && TERMINAL_RE.test(stateStr)) return false;
+          if (group_id !== undefined) {
+            const raw = JSON.stringify(item.payload ?? {}).toLowerCase();
+            const creatorId = typeof item.createdBy?.value === "string" ? item.createdBy.value : "";
+            return raw.includes(group_id.toLowerCase()) || creatorId === group_id;
+          }
+          return true;
+        });
+        if (filtered.length === 0) return "(no active governance items)";
+        return JSON.stringify(filtered, null, 2);
+      } catch (err) {
+        return `backlog error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
+  // harness#320 — doctor tool
+  const doctorTool: SpiritTool = {
+    name: "doctor",
+    description:
+      "Run the same preflight as `murmuration doctor`: layout, schema, secrets, governance, drift checks. Returns a human-readable report. Pass live: true to also check GitHub access (costs one API call).",
+    parameters: z.object({
+      live: z
+        .boolean()
+        .optional()
+        .describe("Include live GitHub auth + repo access checks. Default: false."),
+    }),
+    execute: async (input) => {
+      const { live } = input as { live?: boolean };
+      try {
+        const report = await runDoctor({ rootDir, live: live ?? false });
+        return formatReport(report);
+      } catch (err) {
+        return `doctor error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  };
+
   return [
     statusTool,
     agentsTool,
@@ -621,6 +693,9 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     getAgreementTool,
     listAwaitingSourceCloseTool,
     closeIssueTool,
+    costTool,
+    backlogTool,
+    doctorTool,
   ];
 };
 
@@ -669,20 +744,24 @@ interface RawGovernanceItem {
   readonly createdBy?: { readonly value?: unknown };
   readonly createdAt?: unknown;
   readonly reviewAt?: unknown;
+  readonly payload?: unknown;
   readonly history?: readonly unknown[];
 }
+
+const readGovernanceItemsFile = async (rootDir: string): Promise<string | null> => {
+  try {
+    return await readFile(join(rootDir, ".murmuration", "governance", "items.jsonl"), "utf8");
+  } catch {
+    return null;
+  }
+};
 
 const readGovernanceItem = async (
   rootDir: string,
   id: string,
 ): Promise<RawGovernanceItem | null> => {
-  const path = join(rootDir, ".murmuration", "governance", "items.jsonl");
-  let content: string;
-  try {
-    content = await readFile(path, "utf8");
-  } catch {
-    return null;
-  }
+  const content = await readGovernanceItemsFile(rootDir);
+  if (content === null) return null;
   for (const line of content.split("\n")) {
     const trimmed = line.trim();
     if (trimmed.length === 0) continue;
@@ -694,6 +773,22 @@ const readGovernanceItem = async (
     }
   }
   return null;
+};
+
+const readAllGovernanceItems = async (rootDir: string): Promise<readonly RawGovernanceItem[]> => {
+  const content = await readGovernanceItemsFile(rootDir);
+  if (content === null) return [];
+  const items: RawGovernanceItem[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    try {
+      items.push(JSON.parse(trimmed) as RawGovernanceItem);
+    } catch {
+      /* skip malformed line */
+    }
+  }
+  return items.reverse(); // newest first (JSONL is append-only, oldest first)
 };
 
 const extractAwaitingCloseSection = (digest: string): string => {

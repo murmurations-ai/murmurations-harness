@@ -11,6 +11,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // Config shape
@@ -95,6 +96,121 @@ const isSubscriptionCli = (v: unknown): v is SubscriptionCli =>
 
 const isSubscriptionCliPermissionMode = (v: unknown): v is SubscriptionCliPermissionMode =>
   v === "restricted" || v === "operator-approved" || v === "trusted";
+
+// ---------------------------------------------------------------------------
+// Zod schema (for validation-only; the lenient loader below is the runtime path)
+// ---------------------------------------------------------------------------
+
+const harnessConfigSchema = z
+  .object({
+    llm: z
+      .object({
+        provider: z
+          .enum(["gemini", "anthropic", "openai", "ollama", "subscription-cli"])
+          .optional(),
+        model: z.string().optional(),
+        cli: z.enum(["claude", "codex", "gemini"]).optional(),
+        permissionMode: z.enum(["restricted", "operator-approved", "trusted"]).optional(),
+      })
+      .strict()
+      .optional(),
+    governance: z
+      .object({
+        plugin: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    collaboration: z
+      .object({
+        provider: z.enum(["github", "local"]).optional(),
+        repo: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    products: z
+      .array(
+        z
+          .object({
+            name: z.string(),
+            repo: z.string(),
+          })
+          .strict(),
+      )
+      .optional(),
+    logging: z
+      .object({
+        level: z.enum(["debug", "info", "warn", "error"]).optional(),
+      })
+      .strict()
+      .optional(),
+    spirit: z
+      .object({
+        maxSteps: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
+    agent: z
+      .object({
+        maxSteps: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export interface HarnessConfigWarning {
+  /** Dot-separated field path, e.g. "llm.permissionMode". */
+  readonly field: string;
+  readonly message: string;
+  readonly received: string;
+  /** Accepted enum values (where applicable). */
+  readonly accepted?: readonly string[];
+}
+
+/**
+ * Validate `{rootDir}/murmuration/harness.yaml` against the Zod schema
+ * and return structured warnings for every invalid or unknown field.
+ * Returns an empty array when the file is absent, unparseable, or valid.
+ * Never throws.
+ */
+export async function validateHarnessYaml(rootDir: string): Promise<HarnessConfigWarning[]> {
+  const filePath = resolve(rootDir, "murmuration", "harness.yaml");
+  let raw: unknown;
+  try {
+    const content = await readFile(filePath, "utf8");
+    raw = parseYaml(content);
+  } catch {
+    return [];
+  }
+  if (!raw || typeof raw !== "object") return [];
+
+  const result = harnessConfigSchema.safeParse(raw);
+  if (result.success) return [];
+
+  return result.error.issues.map((issue) => {
+    const field = issue.path.join(".");
+    // Zod v4: "invalid_value" is the enum-mismatch code; "received" lives on
+    // the raw issue object but isn't in the base type — cast to extract safely.
+    const raw_issue = issue as unknown as Record<string, unknown>;
+    const received =
+      typeof raw_issue.received === "string"
+        ? raw_issue.received
+        : typeof raw_issue.received === "number" || typeof raw_issue.received === "boolean"
+          ? String(raw_issue.received)
+          : "unknown";
+    // Zod v4 "invalid_value" (enum) carries `values`; "unrecognized_keys" carries `keys`.
+    const options: readonly string[] | undefined =
+      issue.code === "invalid_value" && Array.isArray(raw_issue.values)
+        ? (raw_issue.values as string[])
+        : undefined;
+    return {
+      field: field === "" ? "(root)" : field,
+      message: issue.message,
+      received,
+      ...(options !== undefined ? { accepted: options } : {}),
+    };
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Loader

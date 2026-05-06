@@ -113,6 +113,21 @@ describe("runDirective — manage subcommands (restoration of regression fixed b
     await expect(runDirective(["hello"], root)).rejects.toThrow(/specify --agent|scope/);
   });
 
+  it("rejects --agent value that fails IDENTIFIER_RE (Sec M2)", async () => {
+    await expect(runDirective(["--agent", "foo,bar", "some body"], root)).rejects.toThrow(
+      /--agent must match/,
+    );
+    await expect(runDirective(["--agent", "foo bar", "some body"], root)).rejects.toThrow(
+      /--agent must match/,
+    );
+  });
+
+  it("rejects --group value that fails IDENTIFIER_RE (Sec M2)", async () => {
+    await expect(runDirective(["--group", "bad/group", "some body"], root)).rejects.toThrow(
+      /--group must match/,
+    );
+  });
+
   it("edit opens $EDITOR on the local item file", async () => {
     writeLocalItem("aaaa1234");
     const originalEditor = process.env.EDITOR;

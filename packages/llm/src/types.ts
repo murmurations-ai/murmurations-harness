@@ -109,6 +109,27 @@ export interface LLMResponse {
    * surface an id.
    */
   readonly sessionId?: string;
+  /**
+   * v0.7.1 (#280): subscription-CLI only. Absolute path of the CLI binary
+   * that ran (e.g. `/Users/alice/.local/bin/claude`). Useful for audit —
+   * confirms the daemon resolved the expected binary, not a stale PATH hit.
+   * Undefined for direct API providers.
+   */
+  readonly cliPath?: string;
+  /**
+   * v0.7.1 (#280): subscription-CLI only. Milliseconds from `spawn()` to
+   * first stdout byte received. Surfaces slow CLI startup and cold-start
+   * overhead in cost records. Undefined when no stdout was received (e.g.
+   * auth error before first output) or for direct API providers.
+   */
+  readonly spawnMs?: number;
+  /**
+   * v0.7.1 (#280): subscription-CLI only. The wall-clock timeout (ms)
+   * configured for this subprocess call. Operators can compare this against
+   * `wallClockMs` in the cost record to understand how close a wake came to
+   * timing out. Undefined for direct API providers.
+   */
+  readonly timeoutMs?: number;
 }
 
 /** Declarative description of what a given {@link LLMClient} instance can do. */

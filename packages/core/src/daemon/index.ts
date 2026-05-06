@@ -28,6 +28,7 @@ import {
   makeAgentId,
   makeGroupId,
   makeWakeId,
+  SpawnError,
   type AgentExecutor,
   type AgentResult,
   type AgentSpawnContext,
@@ -41,6 +42,7 @@ import {
   amendWakeSummaryWithValidation,
 } from "../execution/index.js";
 import type { LoadedAgentIdentity } from "../identity/index.js";
+import { buildAgentRoutingLabels } from "../labels/index.js";
 import {
   makeSecretKey,
   REDACT,
@@ -170,8 +172,18 @@ export interface RegisteredAgent {
       readonly filter: {
         readonly state: "open" | "closed" | "all";
         readonly sinceDays?: number;
+        /** AND-semantics — every label must be present. */
         readonly labels?: readonly string[];
+        /**
+         * OR-semantics — any one label matching is sufficient.
+         * Daemon auto-derives membership-aware routing labels here
+         * unless operator overrides via `signals.github_scopes[].filter.any_label`.
+         */
+        readonly anyLabel?: readonly string[];
       };
+      /** Sec M1: allowlist of GitHub logins trusted to apply scope:all. */
+      readonly scopeAllTrustedAuthors?: readonly string[];
+      readonly dropScopeAllFromUntrusted?: boolean;
     }[];
   };
 
@@ -276,6 +288,22 @@ export const registeredAgentFromLoadedIdentity = (
       }
     : undefined;
 
+  // Auto-derive the membership-aware OR-set of routing labels (harness#331
+  // fix, with derivation moved here from boot.ts per Engineering Standard
+  // #8 — keep the composition root thin). The aggregator listens for any
+  // of these to deliver assigned items, scoped directives, group
+  // directives, and broadcast directives.
+  //
+  // Operator precedence: if `signals.github_scopes[].filter.any_label` is
+  // explicitly set in role.md, that wins; otherwise the daemon's
+  // membership-aware default applies. This makes "what labels does
+  // agent X listen on?" a property of the loaded identity rather than
+  // a daemon-boot concern, so dashboards / `agents` CLI / signals tests
+  // all read from the same single source of truth.
+  const derivedAnyLabel = buildAgentRoutingLabels(
+    frontmatter.agent_id,
+    frontmatter.group_memberships,
+  );
   const signalScopes =
     frontmatter.signals.github_scopes !== undefined
       ? {
@@ -287,7 +315,14 @@ export const registeredAgentFromLoadedIdentity = (
               state: s.filter.state,
               ...(s.filter.since_days !== undefined ? { sinceDays: s.filter.since_days } : {}),
               ...(s.filter.labels !== undefined ? { labels: s.filter.labels } : {}),
+              anyLabel: s.filter.any_label ?? derivedAnyLabel,
             },
+            ...(s.scope_all_trusted_authors !== undefined
+              ? { scopeAllTrustedAuthors: s.scope_all_trusted_authors }
+              : {}),
+            ...(s.drop_scope_all_from_untrusted !== undefined
+              ? { dropScopeAllFromUntrusted: s.drop_scope_all_from_untrusted }
+              : {}),
           })),
         }
       : { sources: frontmatter.signals.sources };
@@ -980,13 +1015,17 @@ export class Daemon {
         }
       }
     } catch (error) {
-      this.#agentStateStore?.recordWakeOutcome(event.wakeId.value, "failure", {
+      const isSpawnFailure = error instanceof SpawnError;
+      const outcome = isSpawnFailure ? "spawn-failed" : "failure";
+      this.#agentStateStore?.recordWakeOutcome(event.wakeId.value, outcome, {
         errorMessage: error instanceof Error ? error.message : String(error),
       });
-      this.#logger.error("daemon.wake.error", {
+      const logEvent = isSpawnFailure ? "daemon.wake.spawn-failed" : "daemon.wake.error";
+      this.#logger.error(logEvent, {
         agentId: agent.agentId,
         wakeId: event.wakeId.value,
         error: error instanceof Error ? error.message : String(error),
+        ...(isSpawnFailure ? { hint: "verify the agent CLI binary is installed and on PATH" } : {}),
       });
     }
   }
@@ -1275,12 +1314,13 @@ const buildSpawnContext = async (
   const agentId = makeAgentId(agent.agentId);
   const groupIds: GroupId[] = agent.groupMemberships.map((c) => makeGroupId(c));
 
-  // Phase 1A: a minimal resolved model placeholder. Phase 1B reads
-  // murmuration/models.yaml to resolve tier → concrete model.
+  // Resolve from role.md llm config when present; fall back to
+  // provider:"unknown" so cost reporting shows a real provider name
+  // rather than the legacy "placeholder" stub (#326).
   const model: ResolvedModel = {
     tier: agent.modelTier,
-    provider: "placeholder",
-    model: "phase-1a-stub",
+    provider: agent.llm?.provider ?? "unknown",
+    model: agent.llm?.model ?? "unknown",
     maxTokens: 4096,
   };
 

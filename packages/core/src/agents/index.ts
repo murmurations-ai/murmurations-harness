@@ -5,6 +5,7 @@
  *   registered → idle → waking → running → completed → idle
  *                                        → failed → idle
  *                                        → timed-out → idle
+ *                              → spawn-failed → idle
  *
  * The daemon transitions state at each lifecycle point. The dashboard
  * reads state directly — no log scraping.
@@ -27,9 +28,10 @@ export type AgentLifecycleState =
   | "running"
   | "completed"
   | "failed"
-  | "timed-out";
+  | "timed-out"
+  | "spawn-failed";
 
-export type WakeOutcome = "success" | "failure" | "timeout" | "killed";
+export type WakeOutcome = "success" | "failure" | "timeout" | "killed" | "spawn-failed";
 
 export interface AgentWakeInstance {
   readonly wakeId: string;
@@ -291,7 +293,13 @@ export class AgentStateStore implements IAgentStateStore {
     const durationMs = now.getTime() - startedAt.getTime();
 
     const terminalState: AgentLifecycleState =
-      outcome === "success" ? "completed" : outcome === "timeout" ? "timed-out" : "failed";
+      outcome === "success"
+        ? "completed"
+        : outcome === "timeout"
+          ? "timed-out"
+          : outcome === "spawn-failed"
+            ? "spawn-failed"
+            : "failed";
 
     this.#wakes.set(wakeId, {
       ...wake,

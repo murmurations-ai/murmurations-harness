@@ -60,12 +60,18 @@ interface GeminiOutput {
 }
 
 export class GeminiCliAdapter implements SubprocessLLMAdapter {
-  public readonly command = "gemini";
+  public readonly command: string;
   public readonly providerId = "gemini-cli";
 
   readonly #permissionMode: SubscriptionCliPermissionMode;
 
-  public constructor(config: { readonly permissionMode?: SubscriptionCliPermissionMode } = {}) {
+  public constructor(
+    config: {
+      readonly permissionMode?: SubscriptionCliPermissionMode;
+      readonly cliPath?: string;
+    } = {},
+  ) {
+    this.command = config.cliPath ?? "gemini";
     this.#permissionMode = config.permissionMode ?? "restricted";
   }
 

@@ -64,8 +64,11 @@ export class WakeCostBuilder {
   #llmCacheWriteTokens = 0;
   #llmCostMicros: USDMicros = ZERO_USD_MICROS;
   #llmShadowCostMicros: USDMicros | undefined = undefined;
-  #llmProvider = "placeholder";
-  #llmModel = "phase-1a-stub";
+  #llmProvider = "unknown";
+  #llmModel = "unknown";
+  #llmCliPath: string | undefined = undefined;
+  #llmSpawnMs: number | undefined = undefined;
+  #llmTimeoutMs: number | undefined = undefined;
 
   #ghRest = 0;
   #ghGraphql = 0;
@@ -142,6 +145,12 @@ export class WakeCostBuilder {
      * calls leave this undefined.
      */
     readonly shadowCostMicros?: USDMicros;
+    /** v0.7.1 (#280): subscription-CLI only. Absolute path of the CLI binary. */
+    readonly cliPath?: string;
+    /** v0.7.1 (#280): subscription-CLI only. Spawn-to-first-byte latency in ms. */
+    readonly spawnMs?: number;
+    /** v0.7.1 (#280): subscription-CLI only. Configured subprocess timeout in ms. */
+    readonly timeoutMs?: number;
   }): void {
     this.#assertNotFinalized();
     this.#llmInputTokens += usage.inputTokens;
@@ -157,6 +166,9 @@ export class WakeCostBuilder {
     }
     this.#llmProvider = usage.modelProvider;
     this.#llmModel = usage.modelName;
+    if (usage.cliPath !== undefined) this.#llmCliPath = usage.cliPath;
+    if (usage.spawnMs !== undefined) this.#llmSpawnMs = usage.spawnMs;
+    if (usage.timeoutMs !== undefined) this.#llmTimeoutMs = usage.timeoutMs;
   }
 
   /**
@@ -223,6 +235,9 @@ export class WakeCostBuilder {
         modelName: this.#llmModel,
         costMicros: this.#llmCostMicros,
         shadowCostMicros: this.#llmShadowCostMicros,
+        ...(this.#llmCliPath !== undefined ? { cliPath: this.#llmCliPath } : {}),
+        ...(this.#llmSpawnMs !== undefined ? { spawnMs: this.#llmSpawnMs } : {}),
+        ...(this.#llmTimeoutMs !== undefined ? { timeoutMs: this.#llmTimeoutMs } : {}),
       },
       github: {
         restCalls: this.#ghRest,

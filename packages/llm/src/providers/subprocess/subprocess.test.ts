@@ -223,15 +223,16 @@ describe("ClaudeCliAdapter.parseOutput", () => {
     expect(out.value.providerUsed).toBe("claude-cli");
   });
 
-  it("returns ParseError on empty output", () => {
+  it("returns ParseError(EMPTY_OUTPUT) on empty output (harness#280)", () => {
     const out = adapter.parseOutput("");
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.error.kind).toBe("parse-error");
+    expect(out.error.code).toBe("EMPTY_OUTPUT");
     expect(out.error.message.toLowerCase()).toContain("empty");
   });
 
-  it("returns ParseError when usage tokens are missing (ADR-0034 D3)", () => {
+  it("returns ParseError(TOKEN_COUNT_MISSING) when usage tokens are absent (ADR-0034 D3, harness#280)", () => {
     const noUsage = JSON.stringify({
       type: "result",
       subtype: "success",
@@ -241,10 +242,11 @@ describe("ClaudeCliAdapter.parseOutput", () => {
     const out = adapter.parseOutput(noUsage);
     expect(out.ok).toBe(false);
     if (out.ok) return;
+    expect(out.error.code).toBe("TOKEN_COUNT_MISSING");
     expect(out.error.message).toContain("usage");
   });
 
-  it("returns ParseError when no result event is present", () => {
+  it("returns ParseError(NO_RESULT_EVENT) when no result event is present (harness#280)", () => {
     const noResult = JSON.stringify({
       type: "system",
       session_id: "abc",
@@ -252,7 +254,16 @@ describe("ClaudeCliAdapter.parseOutput", () => {
     const out = adapter.parseOutput(noResult);
     expect(out.ok).toBe(false);
     if (out.ok) return;
+    expect(out.error.code).toBe("NO_RESULT_EVENT");
     expect(out.error.message).toContain("result event");
+  });
+
+  it("returns ParseError(MALFORMED_JSON) when no JSON lines parse at all (harness#280)", () => {
+    const out = adapter.parseOutput("not json at all\nalso not json");
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    // No parseable JSON → no events → MALFORMED_JSON
+    expect(out.error.code).toBe("MALFORMED_JSON");
   });
 
   it("skips malformed JSON lines instead of failing the whole parse", () => {
@@ -262,7 +273,7 @@ ${JSON.stringify({ type: "result", result: "ok", usage: { input_tokens: 1, outpu
     expect(out.ok).toBe(true);
   });
 
-  it("extracts tool_use blocks from the most recent assistant event (BU-1)", () => {
+  it("extracts tool_use blocks from ALL assistant events (harness#295)", () => {
     const withTools = [
       JSON.stringify({
         type: "assistant",
@@ -271,6 +282,13 @@ ${JSON.stringify({ type: "result", result: "ok", usage: { input_tokens: 1, outpu
             { type: "text", text: "thinking…" },
             { type: "tool_use", id: "t1", name: "read_file", input: { path: "x.ts" } },
           ],
+          model: "claude-sonnet-4-6",
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [{ type: "tool_use", id: "t2", name: "write_file", input: { path: "y.ts" } }],
           model: "claude-sonnet-4-6",
         },
       }),
@@ -285,7 +303,9 @@ ${JSON.stringify({ type: "result", result: "ok", usage: { input_tokens: 1, outpu
     if (!out.ok) return;
     expect(out.value.toolCalls).toEqual([
       { name: "read_file", args: { path: "x.ts" }, result: null },
+      { name: "write_file", args: { path: "y.ts" }, result: null },
     ]);
+    expect(out.value.steps).toBe(2);
   });
 
   it("preserves cache token fields when present", () => {
@@ -566,6 +586,59 @@ describe("createSubscriptionCliClient — factory", () => {
     expect(result.value.content).toBe("mock response");
     expect(result.value.inputTokens).toBe(7);
     expect(result.value.outputTokens).toBe(3);
+  });
+
+  it("complete() attaches cliPath, spawnMs, and timeoutMs on success (#280)", async () => {
+    const client = createSubscriptionCliClient({
+      cli: "claude",
+      model: "test-model",
+      cliAdapter: mockAdapter,
+      timeoutMs: 5_000,
+    });
+    const result = await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+      maxOutputTokens: 100,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // cliPath is the adapter's command (the binary that was spawned).
+    expect(result.value.cliPath).toBe(mockAdapter.command);
+    // spawnMs is set when /bin/echo produces stdout; must be a non-negative number.
+    expect(typeof result.value.spawnMs).toBe("number");
+    expect(result.value.spawnMs).toBeGreaterThanOrEqual(0);
+    // timeoutMs reflects the configured value, not a default.
+    expect(result.value.timeoutMs).toBe(5_000);
+  });
+
+  it("complete() does not set spawnMs when subprocess fails (#280)", async () => {
+    // Use an adapter that returns a parse error — simulates a subprocess that
+    // exits non-zero or produces unparseable output. spawnMs must not appear
+    // on the error result (it lives only on the LLMResponse success path).
+    const failAdapter: SubprocessLLMAdapter = {
+      command: "/bin/echo",
+      providerId: "fail-cli",
+      buildFlags: () => [],
+      parseOutput: () => ({
+        ok: false,
+        error: { kind: "parse-error" as const, message: "bad output", raw: "" },
+      }),
+      authCheck: async () =>
+        Promise.resolve({ ok: true as const, value: { kind: "authenticated" as const } }),
+    };
+    const client = createSubscriptionCliClient({
+      cli: "claude",
+      model: "test-model",
+      cliAdapter: failAdapter,
+      timeoutMs: 5_000,
+    });
+    const result = await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+      maxOutputTokens: 100,
+    });
+    expect(result.ok).toBe(false);
+    // spawnMs is only on LLMResponse (the ok path); the error path has no such field.
+    if (result.ok) return;
+    expect("spawnMs" in result).toBe(false);
   });
 
   it("capabilities() reports the configured provider id", () => {

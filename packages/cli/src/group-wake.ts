@@ -9,10 +9,12 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { access, constants, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { resolve, join } from "node:path";
 
 import {
+  findReservedLabels,
   makeSecretKey,
   IdentityLoader,
   IdentityFileMissingError,
@@ -76,6 +78,52 @@ type ResolveLLMResult =
       readonly issues: readonly string[];
     }
   | { readonly ok: false; readonly reason: "other"; readonly message: string };
+
+/** Shared fallback paths for subscription-CLI binaries (see boot.ts). */
+const CLI_FALLBACK_PATHS_GW: Record<string, readonly string[]> = {
+  claude: [
+    join(homedir(), ".local", "bin", "claude"),
+    "/usr/local/bin/claude",
+    "/opt/homebrew/bin/claude",
+    join(homedir(), ".npm", "bin", "claude"),
+    join(homedir(), "node_modules", ".bin", "claude"),
+  ],
+  gemini: [
+    join(homedir(), ".local", "bin", "gemini"),
+    "/usr/local/bin/gemini",
+    "/opt/homebrew/bin/gemini",
+    join(homedir(), ".npm", "bin", "gemini"),
+  ],
+  codex: [
+    join(homedir(), ".local", "bin", "codex"),
+    "/usr/local/bin/codex",
+    "/opt/homebrew/bin/codex",
+    join(homedir(), ".npm", "bin", "codex"),
+    join(homedir(), ".openai", "bin", "codex"),
+  ],
+};
+
+const resolveGroupWakeCliBinaryPath = async (cli: string): Promise<string | undefined> => {
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const ef = promisify(execFile);
+    const { stdout } = await ef("which", [cli], { timeout: 5000 });
+    const p = stdout.trim();
+    if (p.length > 0) return p;
+  } catch {
+    /* not in PATH */
+  }
+  for (const p of CLI_FALLBACK_PATHS_GW[cli] ?? []) {
+    try {
+      await access(p, constants.X_OK);
+      return p;
+    } catch {
+      /* try next */
+    }
+  }
+  return undefined;
+};
 
 /**
  * Resolve LLM provider + model from the facilitator's role.md.
@@ -266,6 +314,23 @@ const executeActions = async (
             receipts.push({ action, success: false, error: "missing issueNumber or label" });
             break;
           }
+          // Security H1: agents (including meeting facilitators) MUST NOT
+          // write Source-reserved routing labels. See packages/core/src/labels.
+          const reservedLabel = findReservedLabels([
+            action.label,
+            ...(action.removeLabel !== undefined ? [action.removeLabel] : []),
+          ]);
+          if (reservedLabel.length > 0) {
+            console.log(
+              `    \x1b[31m✗\x1b[0m label-issue #${String(action.issueNumber)}: reserved-label ${reservedLabel.join(",")}`,
+            );
+            receipts.push({
+              action,
+              success: false,
+              error: `reserved-label:${reservedLabel.join(",")}`,
+            });
+            break;
+          }
           const ref = { id: String(action.issueNumber) };
           if (action.removeLabel) {
             await provider.removeLabel(ref, action.removeLabel);
@@ -293,6 +358,21 @@ const executeActions = async (
           if (!action.title) {
             receipts.push({ action, success: false, error: "missing title" });
             break;
+          }
+          // Security H1: see label-issue case above.
+          if (action.labels && action.labels.length > 0) {
+            const reserved = findReservedLabels(action.labels);
+            if (reserved.length > 0) {
+              console.log(
+                `    \x1b[31m✗\x1b[0m create-issue: reserved-label ${reserved.join(",")}`,
+              );
+              receipts.push({
+                action,
+                success: false,
+                error: `reserved-label:${reserved.join(",")}`,
+              });
+              break;
+            }
           }
           const input: { title: string; body: string; labels?: readonly string[] } = {
             title: action.title,
@@ -477,6 +557,9 @@ export const runGroupWakeCommand = async (
         `murmuration convene: facilitator "${config.facilitator}" has provider "subscription-cli" but llm.cli must be one of claude | codex | gemini`,
       );
     }
+    // Resolve CLI binary to absolute path so launchd / cron environments
+    // (minimal PATH, no ~/.local/bin) can still find it (harness#XXX).
+    const cliPath = await resolveGroupWakeCliBinaryPath(llmConfig.cli);
     llmClient = createSubscriptionCliClient({
       cli: llmConfig.cli,
       model: llmConfig.model,
@@ -484,6 +567,7 @@ export const runGroupWakeCommand = async (
       ...(llmConfig.permissionMode !== undefined
         ? { permissionMode: llmConfig.permissionMode }
         : {}),
+      ...(cliPath !== undefined ? { cliPath } : {}),
     });
   } else {
     const envKeyName = providerRegistry.envKeyName(llmConfig.provider);

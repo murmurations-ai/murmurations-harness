@@ -22,6 +22,15 @@ import { existsSync } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import {
+  IDENTIFIER_RE,
+  isScopeLabel,
+  SCOPE_ALL_LABEL,
+  SOURCE_DIRECTIVE_LABEL,
+  scopeAgentLabel,
+  scopeGroupLabel,
+} from "@murmurations-ai/core";
+
 import { buildCollaborationProvider, CollaborationBuildError } from "./collaboration-factory.js";
 
 const MANAGE_SUBCOMMANDS = new Set(["close", "delete", "edit"]);
@@ -159,13 +168,23 @@ export const runDirective = async (args: readonly string[], rootDir: string): Pr
   const agentArg = args[agentIdx + 1];
   const groupArg = args[groupIdx + 1];
   if (agentIdx >= 0 && agentArg) {
-    scopeLabel = `scope:agent:${agentArg}`;
+    if (!IDENTIFIER_RE.test(agentArg)) {
+      throw new Error(
+        `directive: --agent must match /^[a-z0-9][a-z0-9._-]*$/i (max 64 chars) — got: ${JSON.stringify(agentArg)}`,
+      );
+    }
+    scopeLabel = scopeAgentLabel(agentArg);
     scopeDesc = `agent ${agentArg}`;
   } else if (groupIdx >= 0 && groupArg) {
-    scopeLabel = `scope:group:${groupArg}`;
+    if (!IDENTIFIER_RE.test(groupArg)) {
+      throw new Error(
+        `directive: --group must match /^[a-z0-9][a-z0-9._-]*$/i (max 64 chars) — got: ${JSON.stringify(groupArg)}`,
+      );
+    }
+    scopeLabel = scopeGroupLabel(groupArg);
     scopeDesc = `group ${groupArg}`;
   } else if (allFlag) {
-    scopeLabel = "scope:all";
+    scopeLabel = SCOPE_ALL_LABEL;
     scopeDesc = "all agents";
   } else if (!args.includes("--list")) {
     throw new Error(
@@ -191,7 +210,7 @@ export const runDirective = async (args: readonly string[], rootDir: string): Pr
   if (args.includes("--list")) {
     const result = await provider.listItems({
       state: "all",
-      labels: ["source-directive"],
+      labels: [SOURCE_DIRECTIVE_LABEL],
       limit: 20,
     });
     if (!result.ok) {
@@ -203,7 +222,7 @@ export const runDirective = async (args: readonly string[], rootDir: string): Pr
     }
     for (const item of result.value) {
       const state = item.state === "open" ? "pending" : "responded";
-      const scope = item.labels.find((l) => l.startsWith("scope:")) ?? "scope:?";
+      const scope = item.labels.find((l) => isScopeLabel(l)) ?? "scope:?";
       console.log(
         `  ${item.ref.id.padEnd(6)} ${state.padEnd(10)} ${scope.padEnd(20)} ${item.title.slice(0, 60)}`,
       );
@@ -273,7 +292,7 @@ export const runDirective = async (args: readonly string[], rootDir: string): Pr
   const createResult = await provider.createItem({
     title: `[DIRECTIVE] ${titleSource.trim().slice(0, 80)}`,
     body: directiveBody,
-    labels: ["source-directive", scopeLabel],
+    labels: [SOURCE_DIRECTIVE_LABEL, scopeLabel],
   });
 
   if (!createResult.ok) {

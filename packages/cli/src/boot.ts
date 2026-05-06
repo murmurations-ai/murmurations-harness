@@ -21,7 +21,8 @@
  */
 
 import { existsSync, unlinkSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, constants, mkdir, open, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -29,6 +30,7 @@ import {
   AgentStateStore,
   Daemon,
   DispatchExecutor,
+  findReservedLabels,
   GitHubCollaborationProvider,
   GovernanceGitHubSync,
   DaemonHttp,
@@ -80,12 +82,86 @@ import { McpToolLoader } from "@murmurations-ai/mcp";
 import { DotenvSecretsProvider } from "@murmurations-ai/secrets-dotenv";
 import { DefaultSignalAggregator } from "@murmurations-ai/signals";
 
-import { buildGithubReadToolsForAgent } from "./github-tools/index.js";
+import {
+  buildGithubReadToolsForAgent,
+  buildGithubWriteToolsForAgent,
+} from "./github-tools/index.js";
 import type { HarnessLLMConfig } from "./harness-config.js";
+import { validateHarnessYaml } from "./harness-config.js";
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 import { registerRunningSocket, unregisterRunningSocket } from "./running-sessions.js";
 import { writeSpiritMcpConfig } from "./spirit/mcp-config.js";
+
+// ---------------------------------------------------------------------------
+// CLI binary resolution — launchd / cron safe (harness#XXX)
+//
+// macOS launchd and Linux systemd/cron start processes with a minimal PATH
+// that doesn't include user-specific install directories (e.g. ~/.local/bin,
+// ~/.npm/bin). When the daemon runs via launchd (io.murmurations.*), a plain
+// `spawn("claude")` fails with ENOENT even though `claude` is installed.
+//
+// Fix: resolve to an absolute path at daemon boot time. Try PATH first (works
+// in interactive sessions), then fall back to the common install locations
+// each CLI vendor uses on macOS/Linux. The resolved path is immune to PATH
+// changes after boot.
+// ---------------------------------------------------------------------------
+
+/** Common install locations per CLI binary, most-likely first. */
+const CLI_FALLBACK_PATHS: Record<string, readonly string[]> = {
+  claude: [
+    join(homedir(), ".local", "bin", "claude"),
+    "/usr/local/bin/claude",
+    "/opt/homebrew/bin/claude",
+    join(homedir(), ".npm", "bin", "claude"),
+    join(homedir(), "node_modules", ".bin", "claude"),
+  ],
+  gemini: [
+    join(homedir(), ".local", "bin", "gemini"),
+    "/usr/local/bin/gemini",
+    "/opt/homebrew/bin/gemini",
+    join(homedir(), ".npm", "bin", "gemini"),
+  ],
+  codex: [
+    join(homedir(), ".local", "bin", "codex"),
+    "/usr/local/bin/codex",
+    "/opt/homebrew/bin/codex",
+    join(homedir(), ".npm", "bin", "codex"),
+    join(homedir(), ".openai", "bin", "codex"),
+  ],
+};
+
+/**
+ * Resolve the absolute path for a CLI binary.
+ *
+ * Returns the first reachable executable found, or null if nothing is found.
+ * Tries `which` first (inherits current PATH), then probes common install
+ * locations so launchd / cron environments can still locate the binary.
+ */
+const resolveCliBinaryPath = async (cli: string): Promise<string | null> => {
+  // Try PATH resolution via `which` first.
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+    const { stdout } = await execFileAsync("which", [cli], { timeout: 5000 });
+    const p = stdout.trim();
+    if (p.length > 0) return p;
+  } catch {
+    // which failed — PATH doesn't include the binary; try fallback paths.
+  }
+  // Probe well-known install locations.
+  const candidates = CLI_FALLBACK_PATHS[cli] ?? [];
+  for (const p of candidates) {
+    try {
+      await access(p, constants.X_OK);
+      return p;
+    } catch {
+      // not found or not executable
+    }
+  }
+  return null;
+};
 
 const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
 
@@ -179,6 +255,9 @@ export const makeDaemonHook = (
         modelName: call.model,
         costMicros,
         ...(shadowCostMicros !== undefined ? { shadowCostMicros } : {}),
+        ...(call.cliPath !== undefined ? { cliPath: call.cliPath } : {}),
+        ...(call.spawnMs !== undefined ? { spawnMs: call.spawnMs } : {}),
+        ...(call.timeoutMs !== undefined ? { timeoutMs: call.timeoutMs } : {}),
       });
     },
   };
@@ -365,6 +444,13 @@ interface BuildAgentClientsArgs {
   /** Optional logger so the cost hook can emit `daemon.cost.pricing.unknown`
    *  warns when a model isn't in the pricing catalog (harness#251). */
   readonly logger?: { warn: (event: string, fields?: Record<string, unknown>) => void };
+  /**
+   * Absolute path to the subscription-CLI binary, pre-resolved at boot by
+   * `resolveCliBinaryPath()`. When set, passed to `createSubscriptionCliClient`
+   * so `spawn()` uses the absolute path rather than relying on PATH resolution.
+   * Fixes ENOENT failures in launchd / cron environments (harness#XXX).
+   */
+  readonly resolvedCliPath?: string;
 }
 
 interface BuildAgentClientsResult {
@@ -382,6 +468,7 @@ interface BuildAgentClientsResult {
  * builder) so the cost hook lands on the right record.
  */
 const buildAgentClients = ({
+  resolvedCliPath,
   agent,
   provider,
   providerRegistry,
@@ -447,6 +534,7 @@ const buildAgentClients = ({
             : {}),
           ...(mcpConfigPath !== undefined ? { mcpConfigPath } : {}),
           ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
+          ...(resolvedCliPath !== undefined ? { cliPath: resolvedCliPath } : {}),
         });
       }
     } else {
@@ -719,6 +807,18 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const eventBus = new DaemonEventBus();
   const logger = new DaemonLoggerImpl({ level: config.logging.level, eventBus });
 
+  // Emit daemon.config.warn for every harness.yaml field that silently
+  // fell back to a default (#323). This surfaces mis-spellings and invalid
+  // enum values that loadHarnessConfig swallows without feedback.
+  for (const w of await validateHarnessYaml(exampleRoot)) {
+    logger.warn("daemon.config.warn", {
+      field: w.field,
+      message: w.message,
+      received: w.received,
+      ...(w.accepted !== undefined ? { accepted: w.accepted } : {}),
+    });
+  }
+
   // Load governance plugin — from merged config (CLI > harness.yaml > default)
   const governancePath = config.governance.plugin;
   let governancePlugin: import("@murmurations-ai/core").GovernancePlugin | undefined;
@@ -769,6 +869,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       process.exit(78);
     }
     governancePlugin = candidate as import("@murmurations-ai/core").GovernancePlugin;
+    const pluginVocabulary = governancePlugin.labelVocabulary?.() ?? [];
     process.stdout.write(
       `${JSON.stringify({
         ts: new Date().toISOString(),
@@ -776,6 +877,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         event: "daemon.governance.loaded",
         plugin: governancePlugin.name,
         version: governancePlugin.version,
+        ...(pluginVocabulary.length > 0 ? { labelVocabulary: pluginVocabulary } : {}),
       })}\n`,
     );
   }
@@ -1157,10 +1259,23 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     // GitHub-side rate-limit headers.
     const buildAgentBoundGithub = (): readonly (typeof extensionTools)[number][] => {
       if (provider?.has(GITHUB_TOKEN) !== true) return [];
-      const client = createGithubClient({
+      const readClient = createGithubClient({
         token: provider.get(GITHUB_TOKEN),
       });
-      return buildGithubReadToolsForAgent(client) as readonly (typeof extensionTools)[number][];
+      const readTools = buildGithubReadToolsForAgent(readClient);
+      // Add write tools for agents that declare issue_comments write scopes (#274).
+      // The write client enforces ADR-0017 scope at the GitHub layer.
+      const hasCommentScope = agent.githubWriteScopes.issueComments.length > 0;
+      const writeTools =
+        hasCommentScope && !dryRun
+          ? buildGithubWriteToolsForAgent(
+              createGithubClient({
+                token: provider.get(GITHUB_TOKEN),
+                writeScopes: toClientWriteScopes(agent),
+              }),
+            )
+          : [];
+      return [...readTools, ...writeTools] as readonly (typeof extensionTools)[number][];
     };
 
     if (agent.plugins.length === 0) {
@@ -1215,6 +1330,25 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const ollamaBaseUrl = process.env.OLLAMA_BASE_URL;
   const executorMap = new Map<string, AgentExecutor>();
 
+  // Resolve subscription-CLI binary path once at boot. launchd / cron / systemd
+  // start daemons with a minimal PATH that may omit user-install locations
+  // (e.g. ~/.local/bin). Resolving here — before the agent loop — lets every
+  // agent reuse the cached absolute path rather than re-running PATH lookups
+  // per wake. Uses `which` first (works in interactive shells), then probes
+  // common install locations as a fallback.
+  const harnessCliName = config.llm.provider === "subscription-cli" ? config.llm.cli : undefined;
+  const resolvedCliPath: string | undefined = harnessCliName
+    ? ((await resolveCliBinaryPath(harnessCliName)) ?? undefined)
+    : undefined;
+  if (harnessCliName && resolvedCliPath) {
+    logger.info("daemon.cli.resolved", { cli: harnessCliName, path: resolvedCliPath });
+  } else if (harnessCliName && !resolvedCliPath) {
+    logger.warn("daemon.cli.not-found", {
+      cli: harnessCliName,
+      message: `"${harnessCliName}" not found via PATH or common install locations; wakes will fail with ENOENT`,
+    });
+  }
+
   for (const agent of allRegistered) {
     // Boot-time validation pass: build a throw-away client bag with
     // NO cost builder so we just verify everything can be wired.
@@ -1226,6 +1360,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       ollamaBaseUrl,
       harnessLlm: config.llm,
       rootDir: exampleRoot,
+      ...(resolvedCliPath !== undefined ? { resolvedCliPath } : {}),
     });
 
     if (agent.llm && validation.llmSkipReason) {
@@ -1382,6 +1517,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               harnessLlm: config.llm,
               rootDir: exampleRoot,
               logger,
+              ...(resolvedCliPath !== undefined ? { resolvedCliPath } : {}),
             });
             const firstBranchScope = capturedAgent.githubWriteScopes.branchCommits[0];
             const targetRepo = firstBranchScope ? parseRepoKey(firstBranchScope.repo) : undefined;
@@ -1418,8 +1554,11 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   // keep the first-pass daemon if neither condition applies — which
   // is the hello-world / no-token path.
   // Merge signal scopes from ALL agents into a single aggregator
-  // config. Duplicate repos are OK — the aggregator deduplicates at
-  // the fetch level (same URL = same cache entry).
+  // config. Duplicate repos are OK — the aggregator deduplicates by
+  // issue id at the fetch level. The membership-aware `anyLabel`
+  // routing set is already derived inside `registeredAgentFromLoadedIdentity`
+  // (harness#343 — composition root stays thin, Engineering Standard #8),
+  // so this site only translates DTO shapes.
   const githubSignalScopes = allRegistered.flatMap(
     (agent) =>
       agent.signalScopes?.githubScopes?.map((scope) => ({
@@ -1431,6 +1570,13 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
             ? { since: new Date(Date.now() - scope.filter.sinceDays * 86_400_000) }
             : {}),
         },
+        ...(scope.filter.anyLabel !== undefined ? { anyLabel: scope.filter.anyLabel } : {}),
+        ...(scope.scopeAllTrustedAuthors !== undefined
+          ? { scopeAllTrustedAuthors: scope.scopeAllTrustedAuthors }
+          : {}),
+        ...(scope.dropScopeAllFromUntrusted !== undefined
+          ? { dropScopeAllFromUntrusted: scope.dropScopeAllFromUntrusted }
+          : {}),
       })) ?? [],
   );
 
@@ -1477,7 +1623,29 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               receipts.push({ action, success: false, error: "missing fields" });
               break;
             }
+            // Security H1: agents MUST NOT write Source-reserved routing
+            // labels (`source-directive`, `kickoff`, `scope:*`). Refusing
+            // here closes the lateral-movement channel opened when the
+            // aggregator started listening for `scope:*` (harness#331).
+            const reservedLabel = findReservedLabels([action.label]);
+            if (reservedLabel.length > 0) {
+              receipts.push({
+                action,
+                success: false,
+                error: `reserved-label:${reservedLabel.join(",")}`,
+              });
+              break;
+            }
             if (action.removeLabel) {
+              const reservedRemove = findReservedLabels([action.removeLabel]);
+              if (reservedRemove.length > 0) {
+                receipts.push({
+                  action,
+                  success: false,
+                  error: `reserved-label:${reservedRemove.join(",")}`,
+                });
+                break;
+              }
               await gh.removeLabel(repo, makeIssueNumber(action.issueNumber), action.removeLabel);
             }
             const r = await gh.addLabels(repo, makeIssueNumber(action.issueNumber), [action.label]);
@@ -1488,6 +1656,18 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
             if (!action.title) {
               receipts.push({ action, success: false, error: "missing title" });
               break;
+            }
+            // Security H1: see label-issue case above.
+            if (action.labels && action.labels.length > 0) {
+              const reserved = findReservedLabels(action.labels);
+              if (reserved.length > 0) {
+                receipts.push({
+                  action,
+                  success: false,
+                  error: `reserved-label:${reserved.join(",")}`,
+                });
+                break;
+              }
             }
             const input: Record<string, unknown> = { title: action.title };
             if (action.body) input.body = action.body;
@@ -1630,13 +1810,71 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   // Write pidfile — skip for --once/--now wakes (child processes shouldn't clobber the daemon's pid)
   const pidfilePath = resolve(exampleRoot, ".murmuration", "daemon.pid");
+  const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
   await mkdir(resolve(exampleRoot, ".murmuration"), { recursive: true });
   if (!once) {
-    await writeFile(pidfilePath, String(process.pid), "utf8");
+    // Guard against same-machine collision (#219): atomically create the pidfile
+    // with O_CREAT|O_EXCL ("wx" flag). If another process created it first we get
+    // EEXIST — then we read the stored PID and probe liveness.
+    //
+    // The atomic O_CREAT|O_EXCL create closes the TOCTOU race that the previous
+    // read-then-write had: two concurrent `murmuration start` calls could both
+    // observe ENOENT and both fall through to write, ending up with two daemons
+    // running against the same root (violating Engineering Standard #3).
+    const alreadyRunningError = (existingPid: number): Error => {
+      const lines = [
+        `murmuration: a daemon is already running for this murmuration.`,
+        `  root:   ${exampleRoot}`,
+        `  pid:    ${String(existingPid)}`,
+        `  socket: ${socketPath}`,
+        `  attach: murmuration attach ${runningSessionName}`,
+        `  stop:   murmuration stop --root ${exampleRoot}`,
+        ``,
+        `If you believe this is wrong (e.g. the process crashed without`,
+        `cleaning up), remove the stale pidfile manually:`,
+        `  rm ${pidfilePath}`,
+      ];
+      return new Error(lines.join("\n"));
+    };
+
+    try {
+      // Atomic exclusive create: succeeds only if the file does not already exist.
+      const fh = await open(pidfilePath, "wx");
+      await fh.writeFile(String(process.pid), "utf8");
+      await fh.close();
+    } catch (createErr) {
+      const code = (createErr as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST") throw createErr;
+
+      // Pidfile already exists — check whether the recorded process is still alive.
+      const rawPid = await readFile(pidfilePath, "utf8").catch(() => "");
+      const existingPid = Number(rawPid.trim());
+      if (Number.isFinite(existingPid) && existingPid > 0) {
+        try {
+          process.kill(existingPid, 0); // signal 0 = probe only, doesn't kill
+          // No throw → process is alive.
+          throw alreadyRunningError(existingPid);
+        } catch (killErr) {
+          const killCode = (killErr as NodeJS.ErrnoException).code;
+          if (killCode === "ESRCH") {
+            // Process is gone — stale pidfile. Overwrite it.
+            logger.info("daemon.pidfile.stale", { existingPid, pidfilePath });
+            const fh = await open(pidfilePath, "w");
+            await fh.writeFile(String(process.pid), "utf8");
+            await fh.close();
+          } else if (killCode === "EPERM") {
+            // Process exists but is owned by a different OS user — treat as alive.
+            throw alreadyRunningError(existingPid);
+          } else {
+            throw killErr;
+          }
+        }
+      }
+    }
   }
 
   // Start daemon control socket
-  const socketPath = resolve(exampleRoot, ".murmuration", "daemon.sock");
+  // socketPath declared above alongside pidfilePath (collision check needs it)
   // ~/.murmuration/sockets/ directory so `murmuration list` can find it.
   if (!once) {
     registerRunningSocket(runningSessionName, socketPath);

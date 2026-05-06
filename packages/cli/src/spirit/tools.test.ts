@@ -500,3 +500,149 @@ describe("Spirit tools — close_issue (K3)", () => {
     expect(result).toContain("'it'\\''s fine'");
   });
 });
+
+// ---------------------------------------------------------------------------
+// harness#318 — cost tool
+// ---------------------------------------------------------------------------
+
+describe("Spirit tools — cost (harness#318)", () => {
+  it("calls send('cost.summary') and returns formatted result", async () => {
+    let calledMethod = "";
+    const send: typeof noopSend = (method) => {
+      calledMethod = method;
+      return Promise.resolve({ id: "1", result: { totalWakes: 42, agents: [] } });
+    };
+    const tools = buildSpiritTools({ rootDir: "/", send });
+    const tool = tools.find((t) => t.name === "cost");
+    expect(tool).toBeDefined();
+    const result = (await tool!.execute({})) as string;
+    expect(calledMethod).toBe("cost.summary");
+    expect(result).toContain("totalWakes");
+  });
+
+  it("surfaces daemon error when daemon is not running", async () => {
+    const send: typeof noopSend = () => Promise.resolve({ id: "1", error: "daemon not connected" });
+    const tools = buildSpiritTools({ rootDir: "/", send });
+    const tool = tools.find((t) => t.name === "cost");
+    const result = (await tool!.execute({})) as string;
+    expect(result).toMatch(/daemon not connected/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// harness#319 — backlog tool
+// ---------------------------------------------------------------------------
+
+describe("Spirit tools — backlog (harness#319)", () => {
+  let root = "";
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), `spirit-backlog-${randomUUID().slice(0, 8)}-`));
+    mkdirSync(join(root, ".murmuration", "governance"), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const getTool = (name: string) => {
+    const tools = buildSpiritTools({ rootDir: root, send: noopSend });
+    const tool = tools.find((t) => t.name === name);
+    if (!tool) throw new Error(`tool ${name} not found`);
+    return tool;
+  };
+
+  it("returns friendly message when no items file exists", async () => {
+    const tool = getTool("backlog");
+    const result = (await tool.execute({})) as string;
+    expect(result).toMatch(/no active governance items/);
+  });
+
+  it("returns open items (excludes terminal states by default)", async () => {
+    const items = [
+      JSON.stringify({
+        id: "prop-1",
+        kind: "proposal",
+        currentState: "proposed",
+        createdBy: { value: "01-agent" },
+        createdAt: "2026-05-01T00:00:00Z",
+        reviewAt: null,
+      }),
+      JSON.stringify({
+        id: "prop-2",
+        kind: "proposal",
+        currentState: "ratified",
+        createdBy: { value: "01-agent" },
+        createdAt: "2026-05-02T00:00:00Z",
+        reviewAt: null,
+      }),
+    ].join("\n");
+    writeFileSync(join(root, ".murmuration", "governance", "items.jsonl"), items, "utf8");
+
+    const tool = getTool("backlog");
+    const result = (await tool.execute({})) as string;
+    const parsed = JSON.parse(result) as unknown[];
+    expect(parsed).toHaveLength(1);
+    expect((parsed[0] as { id: string }).id).toBe("prop-1");
+  });
+
+  it("returns all items when state=all", async () => {
+    const items = [
+      JSON.stringify({
+        id: "prop-1",
+        kind: "proposal",
+        currentState: "proposed",
+        createdBy: { value: "01-agent" },
+        createdAt: "2026-05-01T00:00:00Z",
+        reviewAt: null,
+      }),
+      JSON.stringify({
+        id: "prop-2",
+        kind: "proposal",
+        currentState: "ratified",
+        createdBy: { value: "01-agent" },
+        createdAt: "2026-05-02T00:00:00Z",
+        reviewAt: null,
+      }),
+    ].join("\n");
+    writeFileSync(join(root, ".murmuration", "governance", "items.jsonl"), items, "utf8");
+
+    const tool = getTool("backlog");
+    const result = (await tool.execute({ state: "all" })) as string;
+    const parsed = JSON.parse(result) as unknown[];
+    expect(parsed).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// harness#320 — doctor tool
+// ---------------------------------------------------------------------------
+
+describe("Spirit tools — doctor (harness#320)", () => {
+  let root = "";
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), `spirit-doctor-${randomUUID().slice(0, 8)}-`));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("runs doctor and returns a human-readable report", async () => {
+    const tools = buildSpiritTools({ rootDir: root, send: noopSend });
+    const tool = tools.find((t) => t.name === "doctor");
+    expect(tool).toBeDefined();
+    const result = (await tool!.execute({ live: false })) as string;
+    // formatReport always starts with a header containing "Doctor" or "murmuration"
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it("runs doctor without live flag (default)", async () => {
+    const tools = buildSpiritTools({ rootDir: root, send: noopSend });
+    const tool = tools.find((t) => t.name === "doctor");
+    const result = (await tool!.execute({})) as string;
+    expect(typeof result).toBe("string");
+  });
+});

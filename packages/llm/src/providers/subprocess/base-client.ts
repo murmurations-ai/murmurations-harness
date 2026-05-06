@@ -17,6 +17,8 @@
 
 import { spawn } from "node:child_process";
 
+import { scrubValuePatterns } from "@murmurations-ai/core";
+
 import type { LLMClientError } from "../../errors.js";
 import {
   LLMInternalError,
@@ -133,6 +135,11 @@ export class SubprocessAdapter implements LLMAdapter {
           ...(internal.value.cacheWriteTokens !== undefined
             ? { cacheWriteTokens: internal.value.cacheWriteTokens }
             : {}),
+          ...(internal.value.cliPath !== undefined ? { cliPath: internal.value.cliPath } : {}),
+          ...(internal.value.spawnMs !== undefined ? { spawnMs: internal.value.spawnMs } : {}),
+          ...(internal.value.timeoutMs !== undefined
+            ? { timeoutMs: internal.value.timeoutMs }
+            : {}),
         });
       }
       return internal;
@@ -158,11 +165,19 @@ export class SubprocessAdapter implements LLMAdapter {
     const flags = [...this.#cli.buildFlags(requestWithModel)];
     const prompt = renderPrompt(request);
 
+    // Capture the CLI path before entering the Promise so the resolved
+    // command is available inside the settle closure even if 'this' is GC'd.
+    const cliPath = this.#cli.command;
+    const timeoutMs = this.#timeoutMs;
+
     return new Promise((resolve) => {
       let stdout = "";
       let stderr = "";
       let timedOut = false;
       let settled = false;
+      // v0.7.1 (#280): spawn-to-first-byte latency.
+      const spawnStartMs = Date.now();
+      let firstByteMs: number | undefined;
 
       const settle = (result: Result<LLMResponse, SubprocessError>): void => {
         if (settled) return;
@@ -227,6 +242,7 @@ export class SubprocessAdapter implements LLMAdapter {
 
       childStdout.on("data", (chunk: Buffer) => {
         stdout += chunk.toString("utf8");
+        firstByteMs ??= Date.now();
       });
       childStderr.on("data", (chunk: Buffer) => {
         const s = chunk.toString("utf8");
@@ -235,7 +251,7 @@ export class SubprocessAdapter implements LLMAdapter {
         // immediately so MCP startup errors / auth prompts / hang causes
         // surface in the wake log even when the subprocess never exits.
         process.stderr.write(
-          `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "subprocess.stderr.chunk", bytes: s.length, text: s.slice(0, 800) })}\n`,
+          `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "subprocess.stderr.chunk", bytes: s.length, text: scrubValuePatterns(s.slice(0, 800)) })}\n`,
         );
       });
 
@@ -294,7 +310,7 @@ export class SubprocessAdapter implements LLMAdapter {
         clearTimeout(termTimer);
         if (abort) abort.removeEventListener("abort", onAbort);
         process.stderr.write(
-          `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "subprocess.close", exitCode: code, timedOut, stdoutBytes: stdout.length, stderrBytes: stderr.length, stderrSnippet: stderr.slice(0, 500) })}\n`,
+          `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "subprocess.close", exitCode: code, timedOut, stdoutBytes: stdout.length, stderrBytes: stderr.length, stderrSnippet: scrubValuePatterns(stderr.slice(0, 500)) })}\n`,
         );
 
         if (timedOut) {
@@ -349,7 +365,20 @@ export class SubprocessAdapter implements LLMAdapter {
         }
 
         const parsed = this.#cli.parseOutput(stdout);
-        settle(parsed);
+        if (parsed.ok) {
+          const spawnMs = firstByteMs !== undefined ? firstByteMs - spawnStartMs : undefined;
+          settle({
+            ok: true,
+            value: {
+              ...parsed.value,
+              cliPath,
+              ...(spawnMs !== undefined ? { spawnMs } : {}),
+              timeoutMs,
+            },
+          });
+        } else {
+          settle(parsed);
+        }
       });
 
       child.on("error", (err) => {

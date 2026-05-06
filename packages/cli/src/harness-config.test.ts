@@ -7,7 +7,7 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { loadHarnessConfig, mergeWithCliFlags } from "./harness-config.js";
+import { loadHarnessConfig, mergeWithCliFlags, validateHarnessYaml } from "./harness-config.js";
 
 let rootDir: string;
 
@@ -153,6 +153,84 @@ logging:
     const config = await loadHarnessConfig(rootDir);
     expect(config.products).toHaveLength(1);
     expect(config.products[0]!.name).toBe("valid");
+  });
+});
+
+describe("validateHarnessYaml (#323)", () => {
+  it("returns empty array when file is missing", async () => {
+    const warnings = await validateHarnessYaml(rootDir);
+    expect(warnings).toEqual([]);
+  });
+
+  it("returns empty array for valid harness.yaml", async () => {
+    await writeFile(
+      join(rootDir, "murmuration", "harness.yaml"),
+      `llm:
+  provider: anthropic
+  model: claude-opus-4-7
+logging:
+  level: debug
+collaboration:
+  provider: github
+spirit:
+  maxSteps: 128
+`,
+      "utf8",
+    );
+    const warnings = await validateHarnessYaml(rootDir);
+    expect(warnings).toEqual([]);
+  });
+
+  it("reports invalid llm.provider enum value", async () => {
+    await writeFile(
+      join(rootDir, "murmuration", "harness.yaml"),
+      `llm:
+  provider: gpt4o-turbo
+`,
+      "utf8",
+    );
+    const warnings = await validateHarnessYaml(rootDir);
+    expect(warnings.length).toBeGreaterThan(0);
+    const w = warnings.find((x) => x.field === "llm.provider");
+    expect(w).toBeDefined();
+    expect(w?.accepted).toContain("anthropic");
+    expect(w?.accepted).toContain("openai");
+  });
+
+  it("reports invalid logging.level enum value", async () => {
+    await writeFile(
+      join(rootDir, "murmuration", "harness.yaml"),
+      `logging:
+  level: trace
+`,
+      "utf8",
+    );
+    const warnings = await validateHarnessYaml(rootDir);
+    const w = warnings.find((x) => x.field === "logging.level");
+    expect(w).toBeDefined();
+    expect(w?.accepted).toContain("debug");
+    expect(w?.accepted).toContain("warn");
+  });
+
+  it("reports unknown top-level field (typo detection)", async () => {
+    await writeFile(
+      join(rootDir, "murmuration", "harness.yaml"),
+      `collaboraiton:
+  provider: github
+`,
+      "utf8",
+    );
+    const warnings = await validateHarnessYaml(rootDir);
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings.some((w) => w.field === "(root)" || w.message.includes("collaboraiton"))).toBe(
+      true,
+    );
+  });
+
+  it("returns empty array for file absent or unparseable", async () => {
+    await writeFile(join(rootDir, "murmuration", "harness.yaml"), "{{{{ not yaml", "utf8");
+    const warnings = await validateHarnessYaml(rootDir);
+    expect(warnings).toEqual([]);
   });
 });
 

@@ -13,11 +13,11 @@
  * legacy repo, run `doctor --fix`.
  */
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { copyFile, readFile, writeFile, chmod, readdir } from "node:fs/promises";
+import { access, constants, readFile, writeFile, chmod, readdir } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 
 import {
   FrontmatterInvalidError,
@@ -26,9 +26,16 @@ import {
 } from "@murmurations-ai/core";
 
 import { listBundledPluginAliases, probeGovernancePlugin } from "./governance-plugin-resolver.js";
-import { loadHarnessConfig, type HarnessConfig } from "./harness-config.js";
+import { loadHarnessConfig, validateHarnessYaml, type HarnessConfig } from "./harness-config.js";
 
-const execFileP = promisify(execFile);
+const which = (bin: string): boolean => {
+  try {
+    execFileSync("which", [bin], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,7 +87,7 @@ interface CheckContext {
 // ---------------------------------------------------------------------------
 
 const runLayoutChecks = async (ctx: CheckContext): Promise<void> => {
-  const { rootDir, findings } = ctx;
+  const { rootDir, findings, harness } = ctx;
 
   const requireDir = (relPath: string, severity: DoctorSeverity, reason: string): void => {
     const full = join(rootDir, relPath);
@@ -189,6 +196,88 @@ const runLayoutChecks = async (ctx: CheckContext): Promise<void> => {
     }
   }
 
+  // murmuration CLI binary — if not on PATH, subprocess spawn will fail (#329)
+  if (!which("murmuration")) {
+    findings.push({
+      checkId: "layout.murmuration-binary.missing",
+      category: "layout",
+      severity: "warning",
+      title: "`murmuration` binary not found on PATH",
+      detail:
+        "Agents that use a subprocess executor will fail with spawn-failed. This is expected in development (run via `pnpm exec murmuration`), but in production the binary must be globally installed.",
+      remediation: `Run \`npm install -g @murmurations-ai/cli\` or ensure \`node_modules/.bin\` is on PATH.`,
+    });
+  }
+
+  // subscription-CLI binary reachability (harness#XXX)
+  // launchd / cron start daemons with a minimal PATH that may omit ~/.local/bin,
+  // causing ENOENT on every cron wake. Doctor catches this at setup time.
+  if (harness.llm.provider === "subscription-cli" && harness.llm.cli) {
+    const cliName = harness.llm.cli;
+    const fallbackPaths: readonly string[] =
+      cliName === "claude"
+        ? [
+            join(homedir(), ".local", "bin", "claude"),
+            "/usr/local/bin/claude",
+            "/opt/homebrew/bin/claude",
+            join(homedir(), ".npm", "bin", "claude"),
+            join(homedir(), "node_modules", ".bin", "claude"),
+          ]
+        : cliName === "gemini"
+          ? [
+              join(homedir(), ".local", "bin", "gemini"),
+              "/usr/local/bin/gemini",
+              "/opt/homebrew/bin/gemini",
+              join(homedir(), ".npm", "bin", "gemini"),
+            ]
+          : [
+              join(homedir(), ".local", "bin", "codex"),
+              "/usr/local/bin/codex",
+              "/opt/homebrew/bin/codex",
+              join(homedir(), ".npm", "bin", "codex"),
+              join(homedir(), ".openai", "bin", "codex"),
+            ];
+
+    let absoluteCliPath: string | undefined;
+    try {
+      absoluteCliPath = execFileSync("which", [cliName], { encoding: "utf8" }).trim() || undefined;
+    } catch {
+      /* not in PATH — try fallback locations */
+    }
+    const inPath = absoluteCliPath !== undefined;
+    if (!inPath) {
+      for (const p of fallbackPaths) {
+        try {
+          await access(p, constants.X_OK);
+          absoluteCliPath = p;
+          break;
+        } catch {
+          /* try next */
+        }
+      }
+    }
+
+    if (!absoluteCliPath) {
+      findings.push({
+        checkId: `layout.cli-binary.${cliName}.missing`,
+        category: "layout",
+        severity: "error",
+        title: `CLI binary "${cliName}" not found`,
+        detail: `harness.yaml configures provider: subscription-cli / cli: ${cliName}, but the binary was not found on PATH or in common install locations (${fallbackPaths.join(", ")}). Every agent wake will fail with spawn ENOENT.`,
+        remediation: `Install the CLI: e.g. \`npm install -g @anthropic-ai/claude-code\` for claude. After installing, run \`doctor\` again to confirm.`,
+      });
+    } else if (!inPath) {
+      findings.push({
+        checkId: `layout.cli-binary.${cliName}.not-in-path`,
+        category: "layout",
+        severity: "warning",
+        title: `CLI binary "${cliName}" found at ${absoluteCliPath} but not on PATH`,
+        detail: `The daemon will resolve "${cliName}" to "${absoluteCliPath}" via its fallback search, but launchd / cron environments may not have this path in PATH. The harness resolves the binary at boot time, so daemon wakes will work — but interactive \`${cliName}\` commands from the terminal may fail if PATH is not set correctly.`,
+        remediation: `Add the directory containing "${cliName}" to your shell PATH (e.g. add \`export PATH="$HOME/.local/bin:$PATH"\` to ~/.zshrc).`,
+      });
+    }
+  }
+
   // .env permissions
   const envPath = join(rootDir, ".env");
   if (existsSync(envPath)) {
@@ -216,6 +305,21 @@ const runLayoutChecks = async (ctx: CheckContext): Promise<void> => {
 
 const runSchemaChecks = async (ctx: CheckContext): Promise<void> => {
   const { rootDir, findings, harness } = ctx;
+
+  // harness.yaml Zod validation (#323)
+  const harnessWarnings = await validateHarnessYaml(rootDir);
+  for (const w of harnessWarnings) {
+    const safePath = w.field.replaceAll(/\W+/g, "_");
+    findings.push({
+      checkId: `schema.harness-yaml.${safePath}`,
+      category: "schema",
+      severity: "warning",
+      title: `murmuration/harness.yaml: ${w.field} — ${w.message}`,
+      detail: `Received: ${w.received}${w.accepted !== undefined ? `; accepted: ${w.accepted.join(", ")}` : ""}`,
+      remediation: `Edit murmuration/harness.yaml and correct the \`${w.field}\` field.`,
+    });
+  }
+
   const agentsDir = join(rootDir, "agents");
   if (!existsSync(agentsDir)) return;
 
@@ -246,9 +350,46 @@ const runSchemaChecks = async (ctx: CheckContext): Promise<void> => {
     return;
   }
 
+  // agentDeclaredGroups collects each agent's self-declared group_memberships
+  // for the bidirectional membership consistency check (#238).
+  const agentDeclaredGroups = new Map<string, readonly string[]>();
+
   for (const slug of agentDirs) {
     try {
-      await loader.load(slug);
+      const identity = await loader.load(slug);
+      // Operational completeness checks (#236): flag configuration that is
+      // syntactically valid but operationally hollow.
+      const fm = identity.frontmatter;
+      const sources = fm.signals.sources;
+      const githubScopes = fm.signals.github_scopes ?? [];
+      agentDeclaredGroups.set(slug, fm.group_memberships);
+      // Only flag the github-issue-without-scopes gap when the harness
+      // collaboration provider is "github" — a local-provider setup has no
+      // GitHub signals regardless of the sources default, so it's not a bug.
+      if (
+        harness.collaboration.provider === "github" &&
+        sources.includes("github-issue") &&
+        githubScopes.length === 0
+      ) {
+        findings.push({
+          checkId: `schema.role.${slug}.github-issue-source-without-scopes`,
+          category: "schema",
+          severity: "error",
+          title: `agents/${slug}: signals.sources includes "github-issue" but signals.github_scopes is empty`,
+          detail: `Agent will be wake-blind to GitHub — signal aggregator will return [] on every wake.`,
+          remediation: `Add signals.github_scopes in agents/${slug}/role.md with owner, repo, and filter to route GitHub issues to this agent.`,
+        });
+      }
+      if (sources.length === 0) {
+        findings.push({
+          checkId: `schema.role.${slug}.no-signal-sources`,
+          category: "schema",
+          severity: "warning",
+          title: `agents/${slug}: signals.sources is empty — agent will receive no signals`,
+          detail: `Agent will wake on its cron schedule but see no action items.`,
+          remediation: `Add signals.sources (e.g. "github-issue", "private-note") in agents/${slug}/role.md.`,
+        });
+      }
     } catch (err) {
       if (err instanceof FrontmatterInvalidError) {
         for (const issue of err.issues) {
@@ -332,6 +473,38 @@ const runSchemaChecks = async (ctx: CheckContext): Promise<void> => {
             remediation: `Either create agents/${member}/role.md or remove "${member}" from the Members list.`,
           });
         }
+      }
+    }
+
+    // Bidirectional membership consistency (#238): each member listed here
+    // must also declare this group in their role.md group_memberships.
+    const groupId = groupFile.replace(/\.md$/, "");
+    for (const member of members) {
+      if (!agentDirs.includes(member)) continue; // already flagged above
+      const declaredGroups = agentDeclaredGroups.get(member);
+      if (declaredGroups !== undefined && !declaredGroups.includes(groupId)) {
+        findings.push({
+          checkId: `schema.group.${groupFile}.membership-consistency.${member}`,
+          category: "schema",
+          severity: "error",
+          title: `governance/groups/${groupFile}: member "${member}" is not in their role.md group_memberships`,
+          detail: `"${member}" is listed in the group file's ## Members but their role.md declares group_memberships: [${declaredGroups.join(", ")}].`,
+          remediation: `Add "${groupId}" to agents/${member}/role.md group_memberships, or remove "${member}" from governance/groups/${groupFile}.`,
+        });
+      }
+    }
+
+    // Reverse direction: agents claiming this group in role.md but not listed here.
+    for (const [agentSlug, groups] of agentDeclaredGroups) {
+      if (groups.includes(groupId) && !members.includes(agentSlug)) {
+        findings.push({
+          checkId: `schema.group.${groupFile}.membership-consistency.missing-${agentSlug}`,
+          category: "schema",
+          severity: "error",
+          title: `agents/${agentSlug} declares group_memberships includes "${groupId}" but is not listed in governance/groups/${groupFile}`,
+          detail: `"${agentSlug}" will receive ${groupId}-routed signals but won't be invited to group-wake meetings.`,
+          remediation: `Add "${agentSlug}" to the ## Members list in governance/groups/${groupFile}, or remove "${groupId}" from agents/${agentSlug}/role.md group_memberships.`,
+        });
       }
     }
 
@@ -871,10 +1044,3 @@ export const runDoctorCli = async (options: DoctorOptions): Promise<number> => {
 
   return exitCodeFor(report);
 };
-
-// Suppress unused-import warnings for Node-only helpers that might not
-// be needed on every code path; `copyFile`/`execFileP` are reserved for
-// future auto-fix strategies (backup-then-rename). TODO: tighten if
-// still unused when the PR lands.
-void copyFile;
-void execFileP;

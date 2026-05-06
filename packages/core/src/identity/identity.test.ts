@@ -616,6 +616,53 @@ describe("roleFrontmatterSchema (ADR-0016 extensions)", () => {
     await expect(loader.load("bad-repo")).rejects.toThrow(FrontmatterInvalidError);
   });
 
+  it("rejects any_label arrays longer than 16 entries (Sec M3)", async () => {
+    const labelLines = Array.from({ length: 17 }, (_, i) => `          - "label-${String(i)}"`);
+    await writeMinimalFixture(
+      "too-many-labels",
+      [
+        'agent_id: "too-many-labels"',
+        'name: "Too Many"',
+        "model_tier: fast",
+        "signals:",
+        "  sources:",
+        '    - "github-issue"',
+        "  github_scopes:",
+        '    - owner: "acme"',
+        '      repo: "signals"',
+        "      filter:",
+        "        any_label:",
+        ...labelLines,
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    await expect(loader.load("too-many-labels")).rejects.toThrow(FrontmatterInvalidError);
+  });
+
+  it("accepts any_label arrays of exactly 16 entries (Sec M3)", async () => {
+    const labelLines = Array.from({ length: 16 }, (_, i) => `          - "label-${String(i)}"`);
+    await writeMinimalFixture(
+      "max-labels",
+      [
+        'agent_id: "max-labels"',
+        'name: "Max Labels"',
+        "model_tier: fast",
+        "signals:",
+        "  sources:",
+        '    - "github-issue"',
+        "  github_scopes:",
+        '    - owner: "acme"',
+        '      repo: "signals"',
+        "      filter:",
+        "        any_label:",
+        ...labelLines,
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    const loaded = await loader.load("max-labels");
+    expect(loaded.frontmatter.signals.github_scopes?.[0]?.filter.any_label).toHaveLength(16);
+  });
+
   it("tools defaults to empty mcp/cli when omitted (backwards compat)", async () => {
     await writeMinimalFixture(
       "no-tools",

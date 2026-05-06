@@ -78,6 +78,17 @@ export interface WakeCostRecord {
      * API spend for fairness, budgeting, and the "you saved $X" headline.
      */
     readonly shadowCostMicros: USDMicros | undefined;
+    /**
+     * v0.7.1 (#280): subscription-CLI only. Absolute path of the CLI binary.
+     * Consumers that serialize `WakeCostRecord` to disk or external systems
+     * must project only the fields they need — do not `JSON.stringify` the
+     * whole record, as this would leak the operator's local filesystem layout.
+     */
+    readonly cliPath?: string;
+    /** v0.7.1 (#280): subscription-CLI only. Spawn-to-first-byte latency in ms. */
+    readonly spawnMs?: number;
+    /** v0.7.1 (#280): subscription-CLI only. Configured subprocess timeout in ms. */
+    readonly timeoutMs?: number;
   };
 
   /** GitHub API accounting. Stubbed zero until Phase 1B-d (B2). */
@@ -142,6 +153,9 @@ export const wakeCostRecordSchema = z.object({
     modelName: z.string(),
     costMicros: brandedValue("usd-micros", z.number().int().nonnegative()),
     shadowCostMicros: brandedValue("usd-micros", z.number().int().nonnegative()).optional(),
+    cliPath: z.string().optional(),
+    spawnMs: z.number().int().nonnegative().optional(),
+    timeoutMs: z.number().int().nonnegative().optional(),
   }),
   github: z.object({
     restCalls: z.number().int().nonnegative(),

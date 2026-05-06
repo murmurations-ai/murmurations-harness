@@ -27,7 +27,7 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { humanizeSlug } from "@murmurations-ai/core";
+import { assignedLabel, humanizeSlug } from "@murmurations-ai/core";
 
 import { buildBuiltinProviderRegistry } from "./builtin-providers/index.js";
 import { detectInstalledClis, formatDetectionSummary, type CliPresence } from "./cli-detect.js";
@@ -1082,7 +1082,7 @@ _Extend with agent-specific bright lines as they become clear._
       repo: "${githubRepoName}"
       filter:
         state: "open"
-        labels: ["assigned:${agent.dir}"]`
+        labels: ["${assignedLabel(agent.dir)}"]`
       : "";
     const writeScopes = githubOwner
       ? `

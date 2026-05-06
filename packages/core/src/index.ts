@@ -62,3 +62,4 @@ export * from "./done-criteria/index.js";
 export * from "./metrics/effectiveness.js";
 export * from "./metrics/observations.js";
 export * from "./metrics/disk-snapshot.js";
+export * from "./labels/index.js";

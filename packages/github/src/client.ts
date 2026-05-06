@@ -320,6 +320,19 @@ export interface GithubClient {
     options?: CallOptions,
   ): Promise<Result<void, GithubClientError>>;
 
+  /**
+   * Search issues in a repository. The `query` is appended to a
+   * `repo:<owner>/<name>` qualifier automatically — do not include
+   * `repo:` in the query. Returns up to `perPage` results (default 30,
+   * max 100). Pull-request hits are filtered out server-side by
+   * appending `is:issue` to the effective query.
+   */
+  searchIssues(
+    repo: RepoCoordinate,
+    query: string,
+    options?: CallOptions & { readonly perPage?: number },
+  ): Promise<Result<readonly GithubIssue[], GithubClientError>>;
+
   lastRateLimit(): GithubRateLimitSnapshot | null;
 }
 
@@ -674,6 +687,24 @@ class GithubClientImpl implements GithubClient {
     const raw = await this.#requestMutation(url, "PATCH", { state }, options);
     if (!raw.ok) return raw;
     return { ok: true, value: undefined };
+  }
+
+  public async searchIssues(
+    repo: RepoCoordinate,
+    query: string,
+    options: CallOptions & { readonly perPage?: number } = {},
+  ): Promise<Result<readonly GithubIssue[], GithubClientError>> {
+    const q = `repo:${repo.owner.value}/${repo.name.value} is:issue ${query}`.trim();
+    const params = new URLSearchParams({ q });
+    if (options.perPage !== undefined) params.set("per_page", String(options.perPage));
+    const url = `${this.#baseUrl}/search/issues?${params.toString()}`;
+    const raw = await this.#request(url, options);
+    if (!raw.ok) return raw;
+    const body = raw.value.body;
+    if (typeof body !== "object" || body === null || !("items" in body)) {
+      return { ok: false, error: new GithubParseError("searchIssues: missing items array") };
+    }
+    return parseIssueArray((body as { items: unknown }).items, repo);
   }
 
   public async createCommitOnBranch(

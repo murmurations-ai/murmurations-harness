@@ -10,9 +10,13 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
 import {
+  ACTION_ITEM_LABEL,
+  SCOPE_ALL_LABEL,
+  assignedLabel,
   makeAgentId,
   type AgentId,
   type Signal,
+  type SignalAggregationFailure,
   type SignalTrustLevel,
 } from "@murmurations-ai/core";
 import type {
@@ -38,8 +42,33 @@ import { composeBundle, filterDoneItems, type ClassifierContext } from "./priori
 export interface GithubSignalScope {
   readonly repo: RepoCoordinate;
   readonly filter?: ListIssuesFilter;
+  /**
+   * Labels with OR-semantics: an issue matches if any one of these
+   * labels is present (combined with the AND-set in `filter.labels`).
+   * Implemented as multiple `listIssues` queries client-side because
+   * GitHub's API only supports AND. Used by the daemon to inject
+   * membership-aware routing labels (assigned, scope:agent, scope:group,
+   * scope:all) per agent — see `buildAgentRoutingLabels` in
+   * `@murmurations-ai/core`.
+   *
+   * When unset, falls through to a single query with `filter.labels`.
+   */
+  readonly anyLabel?: readonly string[];
   /** If true, signals start at "trusted". Otherwise "semi-trusted". */
   readonly trusted?: boolean;
+  /**
+   * When set, any `scope:all`-tagged issue whose `authorLogin` is NOT
+   * in this list is downgraded to `untrusted`. Protects against
+   * non-agent actors (bots, external collaborators) writing scope:all
+   * labels to broadcast to every agent. Back-compat: when absent, no
+   * downgrade occurs. Sec M1 defense-in-depth (harness#339).
+   */
+  readonly scopeAllTrustedAuthors?: readonly string[];
+  /**
+   * When true AND `scopeAllTrustedAuthors` is set, `scope:all` issues
+   * from untrusted authors are dropped entirely rather than downgraded.
+   */
+  readonly dropScopeAllFromUntrusted?: boolean;
 }
 
 export interface AggregatorCaps {
@@ -171,10 +200,11 @@ export class DefaultSignalAggregator implements SignalAggregator {
 
   public async aggregate(context: SignalAggregationContext): Promise<SignalAggregationResult> {
     const warnings: string[] = [];
+    const partialFailures: SignalAggregationFailure[] = [];
     const signals: Signal[] = [];
 
     const results = await Promise.allSettled([
-      this.#collectGithub(context, warnings),
+      this.#collectGithub(context, warnings, partialFailures),
       this.#collectPrivateNotes(context, warnings),
       this.#collectInboxMessages(context, warnings),
       this.#collectCollaborationItems(),
@@ -249,7 +279,7 @@ export class DefaultSignalAggregator implements SignalAggregator {
     const actionItems = finalSignals.filter((s) => {
       if (s.kind !== "github-issue") return false;
       const labels = (s as unknown as { labels: readonly string[] }).labels;
-      return labels.includes("action-item") && labels.some((l) => l === `assigned:${agentIdValue}`);
+      return labels.includes(ACTION_ITEM_LABEL) && labels.includes(assignedLabel(agentIdValue));
     });
 
     return {
@@ -260,6 +290,7 @@ export class DefaultSignalAggregator implements SignalAggregator {
         signals: finalSignals,
         actionItems,
         warnings,
+        partialFailures,
       },
     };
   }
@@ -271,38 +302,109 @@ export class DefaultSignalAggregator implements SignalAggregator {
   async #collectGithub(
     context: SignalAggregationContext,
     warnings: string[],
+    partialFailures: SignalAggregationFailure[],
   ): Promise<readonly Signal[]> {
     const client = this.#config.github;
     const scopes = this.#config.githubScopes ?? [];
     if (!client || scopes.length === 0) return [];
 
-    const collected: Signal[] = [];
-    for (const scope of scopes) {
-      const filter: ListIssuesFilter = {
-        perPage: Math.min(this.#caps.githubIssue + 5, 30),
-        ...(scope.filter ?? {}),
-      };
+    // Per-issue dedup across multi-query fan-out: a single issue may
+    // match multiple `anyLabel` queries on the same scope (e.g. an
+    // issue labeled both `assigned:foo` AND `scope:all` shows up in
+    // both queries). Key by repo+number so multi-repo scopes don't
+    // collide. We collect the *raw* issue + its trust level so we can
+    // sort the merged set by `updatedAt` (deterministic, recency-first)
+    // before applying the per-source cap — older `assigned:` items
+    // would otherwise crowd out newer `scope:agent:<self>` directives
+    // because fan-out queries returned them in collection order
+    // (QA review of harness#331).
+    const seen = new Set<string>();
+    const raw: { readonly issue: GithubIssue; readonly trust: SignalTrustLevel }[] = [];
+    const baseFilter = (scope: GithubSignalScope): ListIssuesFilter => ({
+      perPage: Math.min(this.#caps.githubIssue + 5, 30),
+      ...(scope.filter ?? {}),
+    });
+    const recordIssues = async (
+      scope: GithubSignalScope,
+      filter: ListIssuesFilter,
+      anyLabel: string | undefined,
+    ): Promise<void> => {
       const result = await client.listIssues(scope.repo, filter);
+      const repoCoord = `${scope.repo.owner.value}/${scope.repo.name.value}`;
       if (!result.ok) {
-        warnings.push(
-          `github source: ${scope.repo.owner.value}/${scope.repo.name.value} failed (${result.error.code})`,
-        );
-        continue;
+        warnings.push(`github source: ${repoCoord} failed (${result.error.code})`);
+        partialFailures.push({
+          source: "github",
+          repo: repoCoord,
+          ...(anyLabel !== undefined ? { anyLabel } : {}),
+          code: result.error.code,
+          detail: result.error.message,
+        });
+        return;
       }
       const baseTrust: SignalTrustLevel = scope.trusted === true ? "trusted" : "semi-trusted";
       for (const issue of result.value) {
-        collected.push(issueToSignal(issue, baseTrust, context.now));
+        const key = `${issue.repo.owner.value}/${issue.repo.name.value}#${String(issue.number.value)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        // Sec M1: scope:all provenance check. If the scope declares
+        // trusted authors and this issue carries scope:all, verify the
+        // author is in the allowlist. Untrusted authors get downgraded
+        // (or dropped if dropScopeAllFromUntrusted is set).
+        if (
+          scope.scopeAllTrustedAuthors !== undefined &&
+          issue.labels.includes(SCOPE_ALL_LABEL) &&
+          !scope.scopeAllTrustedAuthors.includes(issue.authorLogin)
+        ) {
+          if (scope.dropScopeAllFromUntrusted === true) continue;
+          raw.push({ issue, trust: "untrusted" });
+          continue;
+        }
+        raw.push({ issue, trust: baseTrust });
+      }
+    };
+
+    for (const scope of scopes) {
+      const baseFilterForScope = baseFilter(scope);
+      if (scope.anyLabel === undefined || scope.anyLabel.length === 0) {
+        // Single-query fast path — no OR semantics needed.
+        await recordIssues(scope, baseFilterForScope, undefined);
+        continue;
+      }
+      // Fan-out: one query per anyLabel value. Each query AND-combines
+      // the existing labels filter (if any) with the OR-label.
+      const baseLabels = baseFilterForScope.labels ?? [];
+      for (const orLabel of scope.anyLabel) {
+        const filter: ListIssuesFilter = {
+          ...baseFilterForScope,
+          labels: [...baseLabels, orLabel],
+        };
+        await recordIssues(scope, filter, orLabel);
       }
     }
 
-    if (collected.length > this.#caps.githubIssue) {
-      const total = collected.length;
-      collected.length = this.#caps.githubIssue;
+    // Sort by recency before applying the cap so the most-recent-N is
+    // what survives, regardless of which fan-out query produced them.
+    // Tie-breaker on `(repo, number)` keeps the order stable across
+    // ties so two runs with identical input produce identical output.
+    raw.sort((a, b) => {
+      const ta = a.issue.updatedAt.getTime();
+      const tb = b.issue.updatedAt.getTime();
+      if (ta !== tb) return tb - ta; // DESC by updatedAt
+      const repoA = `${a.issue.repo.owner.value}/${a.issue.repo.name.value}`;
+      const repoB = `${b.issue.repo.owner.value}/${b.issue.repo.name.value}`;
+      if (repoA !== repoB) return repoA.localeCompare(repoB);
+      return b.issue.number.value - a.issue.number.value; // DESC by issue number
+    });
+
+    let kept: typeof raw = raw;
+    if (raw.length > this.#caps.githubIssue) {
+      kept = raw.slice(0, this.#caps.githubIssue);
       warnings.push(
-        `github-issue source truncated to ${String(this.#caps.githubIssue)} of ${String(total)} matches (cap)`,
+        `github-issue source truncated to ${String(this.#caps.githubIssue)} of ${String(raw.length)} matches (cap, sorted by updatedAt desc)`,
       );
     }
-    return collected;
+    return kept.map(({ issue, trust }) => issueToSignal(issue, trust, context.now));
   }
 
   // ---------------------------------------------------------------------

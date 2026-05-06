@@ -19,6 +19,7 @@ export type {
   AuthError,
   AuthStatus,
   ParseError,
+  ParseErrorCode,
   SpawnError,
   SubprocessError,
   SubprocessLLMAdapter,
@@ -86,6 +87,14 @@ export interface SubscriptionCliClientConfig {
    * must be selected explicitly for dogfooding environments.
    */
   readonly permissionMode?: SubscriptionCliPermissionMode;
+  /**
+   * Absolute path to the CLI binary. When set, used verbatim in spawn()
+   * instead of relying on PATH resolution. Resolved at daemon boot via
+   * `resolveCliBinaryPath()` in boot.ts so that launchd / cron / systemd
+   * environments (which have a minimal PATH that omits user-specific
+   * install locations like ~/.local/bin) can still find the binary.
+   */
+  readonly cliPath?: string;
 }
 
 const buildAdapter = (
@@ -97,14 +106,17 @@ const buildAdapter = (
       return new ClaudeCliAdapter({
         ...(config.mcpConfigPath !== undefined ? { mcpConfigPath: config.mcpConfigPath } : {}),
         ...(config.permissionMode !== undefined ? { permissionMode: config.permissionMode } : {}),
+        ...(config.cliPath !== undefined ? { cliPath: config.cliPath } : {}),
       });
     case "gemini":
       return new GeminiCliAdapter({
         ...(config.permissionMode !== undefined ? { permissionMode: config.permissionMode } : {}),
+        ...(config.cliPath !== undefined ? { cliPath: config.cliPath } : {}),
       });
     case "codex":
       return new CodexCliAdapter({
         ...(config.permissionMode !== undefined ? { permissionMode: config.permissionMode } : {}),
+        ...(config.cliPath !== undefined ? { cliPath: config.cliPath } : {}),
       });
   }
 };

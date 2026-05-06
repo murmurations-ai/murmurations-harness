@@ -34,7 +34,7 @@ We add a **subscription-CLI provider family** to `packages/llm` with:
      provider: subscription-cli
      cli: claude | gemini | codex
      model: claude-sonnet-4-6 # optional
-     timeoutMs: 90000 # optional
+     timeoutMs: 600000 # optional; default 600 000ms (10 min) for multi-step wakes
    ```
 
 ### Locked interface (the load-bearing contract)
@@ -75,18 +75,18 @@ This interface is **locked before adapter work began**. Subsequent adapters (gem
 
 ### Ratified constraints (D1–D10 from the 2026-05-01 engineering meeting)
 
-| #       | Constraint                                                                                                   | Rationale                                                                                                   |
-| ------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| **D1**  | `buildFlags()` MUST NOT contain prompt content. Prompt is delivered via stdin only, argv is array form only. | `ps aux`, audit logs, and shell history would otherwise leak prompts.                                       |
-| **D2**  | Three-state auth model: `authenticated` \| `unauthenticated` \| `unavailable`.                               | Distinguishes "CLI missing" (soft skip with actionable message) from "logged out" (hard wake-time failure). |
-| **D3**  | Token counts MUST NEVER silently zero. Missing counts → `ParseError { code: 'TOKEN_COUNT_MISSING' }`.        | Silent zeros disable budget enforcement. Same incident class as #635.                                       |
-| **D4**  | Wall-clock subprocess timeout, default 90s, configurable via `llm.timeoutMs`.                                | Subprocesses can hang indefinitely; the daemon must reclaim the wake slot.                                  |
-| **D5**  | SIGTERM first, then SIGKILL after 5s grace. Wait for child exit.                                             | Avoid zombies; respect cleanup hooks where possible.                                                        |
-| **D6**  | `SecretsProvider.get()` MUST be used for any credential value read. No `process.env` fallback.               | ADR-0010 compliance; `scrubLogRecord` coverage.                                                             |
-| **D7**  | No silent fallback from API to CLI or vice-versa. CLI failure → typed error, propagate.                      | Operators must see real failures; silent fallback masks subscription/quota issues.                          |
-| **D8**  | Operators without an AI CLI installed MUST NOT be blocked from running the harness. CI included.             | Soft `unavailable` skip with message; agents using `provider: subscription-cli` fail closed.                |
-| **D9**  | `costUsd: 0` records with `provider: <cli>-cli` and real `tokens.{prompt,completion}` populated.             | Subscription wakes are $0 marginal but real tokens; observability must reflect that.                        |
-| **D10** | `LLMClient` interface unchanged. Subprocess provider is interchangeable from the daemon's perspective.       | Composition root stays thin; daemon doesn't branch on provider type.                                        |
+| #       | Constraint                                                                                                                                                                                                                 | Rationale                                                                                                   |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **D1**  | `buildFlags()` MUST NOT contain prompt content. Prompt is delivered via stdin only, argv is array form only.                                                                                                               | `ps aux`, audit logs, and shell history would otherwise leak prompts.                                       |
+| **D2**  | Three-state auth model: `authenticated` \| `unauthenticated` \| `unavailable`.                                                                                                                                             | Distinguishes "CLI missing" (soft skip with actionable message) from "logged out" (hard wake-time failure). |
+| **D3**  | Token counts MUST NEVER silently zero. Missing counts → `ParseError { code: 'TOKEN_COUNT_MISSING' }`.                                                                                                                      | Silent zeros disable budget enforcement. Same incident class as #635.                                       |
+| **D4**  | Wall-clock subprocess timeout, default 600 000ms (10 min), configurable via `llm.timeoutMs`. The 10-min default is intentional: multi-step agentic wakes routinely take 5–8 min, so 90 s would kill most productive wakes. | Subprocesses can hang indefinitely; the daemon must reclaim the wake slot.                                  |
+| **D5**  | SIGTERM first, then SIGKILL after 5s grace. Wait for child exit.                                                                                                                                                           | Avoid zombies; respect cleanup hooks where possible.                                                        |
+| **D6**  | `SecretsProvider.get()` MUST be used for any credential value read. No `process.env` fallback.                                                                                                                             | ADR-0010 compliance; `scrubLogRecord` coverage.                                                             |
+| **D7**  | No silent fallback from API to CLI or vice-versa. CLI failure → typed error, propagate.                                                                                                                                    | Operators must see real failures; silent fallback masks subscription/quota issues.                          |
+| **D8**  | Operators without an AI CLI installed MUST NOT be blocked from running the harness. CI included.                                                                                                                           | Soft `unavailable` skip with message; agents using `provider: subscription-cli` fail closed.                |
+| **D9**  | `costUsd: 0` records with `provider: <cli>-cli` and real `tokens.{prompt,completion}` populated.                                                                                                                           | Subscription wakes are $0 marginal but real tokens; observability must reflect that.                        |
+| **D10** | `LLMClient` interface unchanged. Subprocess provider is interchangeable from the daemon's perspective.                                                                                                                     | Composition root stays thin; daemon doesn't branch on provider type.                                        |
 
 ### Package layout
 

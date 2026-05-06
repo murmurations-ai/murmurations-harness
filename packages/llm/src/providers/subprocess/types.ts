@@ -40,11 +40,24 @@ export interface SpawnError {
   readonly exitCode?: number;
 }
 
+/**
+ * Structured parse failure categories (harness#280). Enables operators and
+ * alerting to distinguish "bad CLI version" from "auth not configured" from
+ * "transient stream truncation" without grepping message strings.
+ */
+export type ParseErrorCode =
+  | "EMPTY_OUTPUT" // subprocess exited 0 but produced no stdout
+  | "NO_RESULT_EVENT" // output was non-empty but had no terminal result event
+  | "TOKEN_COUNT_MISSING" // result event present but usage fields absent (ADR-0034 D3)
+  | "MALFORMED_JSON"; // couldn't parse any JSON lines from stdout
+
 /** CLI output could not be parsed into an LLMResponse. */
 export interface ParseError {
   readonly kind: "parse-error";
   readonly message: string;
-  /** Raw stdout (truncated to 2000 chars) for debugging. */
+  /** Structured failure category for alerting and dashboards (harness#280). */
+  readonly code?: ParseErrorCode;
+  /** Raw stdout (truncated to 2000 chars) for debugging. Scrubbed of secrets. */
   readonly raw: string;
 }
 

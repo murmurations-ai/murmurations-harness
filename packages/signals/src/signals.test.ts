@@ -88,6 +88,9 @@ const makeFakeGithub = (issues: readonly GithubIssue[]): GithubClient => ({
   getPullRequestFiles: notFound,
   getCommit: notFound,
   getFileAtRef: notFound,
+  async searchIssues() {
+    return { ok: true, value: [] };
+  },
   createIssueComment: mutationDenied,
   createIssue: mutationDenied,
   createCommitOnBranch: mutationDenied,
@@ -119,6 +122,9 @@ const makeFailingGithub = (): GithubClient => ({
   getPullRequestFiles: notFound,
   getCommit: notFound,
   getFileAtRef: notFound,
+  async searchIssues() {
+    return { ok: true, value: [] };
+  },
   createIssueComment: mutationDenied,
   createIssue: mutationDenied,
   createCommitOnBranch: mutationDenied,
@@ -590,10 +596,13 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       // 2 critical + low fills budget. The order in the emitted
-      // bundle should put critical first.
+      // bundle should put a critical-tier item first (regardless of
+      // which one — the github-source pre-sort by updatedAt may
+      // permute order within a tier when timestamps tie).
       const first = result.bundle.signals[0];
+      expect(first?.kind).toBe("github-issue");
       if (first?.kind === "github-issue") {
-        expect(first.number).toBe(1);
+        expect([1, 2]).toContain(first.number);
       }
     }
   });
@@ -657,6 +666,297 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
     }
   });
 
+  /* eslint-disable @typescript-eslint/require-await -- fake clients mimic the async interface */
+  it("multi-query anyLabel: source-directive scoped to agent reaches the bundle (harness#331/#233)", async () => {
+    // Repro for chinook-wind 2026-05-05: a directive filed as
+    // `source-directive` + `scope:agent:rentals-agent` was invisible to
+    // the aggregator because the configured filter was AND-only with
+    // `assigned:rentals-agent`. With anyLabel routing, the issue should
+    // now show up in the bundle.
+    const directiveForRentals = fakeIssue({
+      n: 100,
+      title: "[DIRECTIVE] bootstrap",
+      labels: ["source-directive", "scope:agent:rentals-agent"],
+    });
+    // Track which label-set each query was asked for, so we can assert
+    // the multi-query fan-out happened.
+    const queriedFilters: (readonly string[] | undefined)[] = [];
+    const fakeClient: GithubClient = {
+      async getIssue() {
+        return {
+          ok: false,
+          error: { code: "not-found" } as unknown as GithubClientError,
+        };
+      },
+      async listIssues(_repo, filter): Promise<Result<readonly GithubIssue[], GithubClientError>> {
+        queriedFilters.push(filter?.labels);
+        // Mimic GitHub's AND-semantics: return the directive only when
+        // the query asks for `scope:agent:rentals-agent`.
+        const wantsScopeAgent = filter?.labels?.includes("scope:agent:rentals-agent") ?? false;
+        return { ok: true, value: wantsScopeAgent ? [directiveForRentals] : [] };
+      },
+      async listIssueComments() {
+        return { ok: true, value: [] };
+      },
+      async listIssueLabels() {
+        return { ok: true, value: [] };
+      },
+      getRef: notFound,
+      getPullRequest: notFound,
+      listPullRequests: notFound,
+      getPullRequestFiles: notFound,
+      getCommit: notFound,
+      getFileAtRef: notFound,
+      async searchIssues() {
+        return { ok: true, value: [] };
+      },
+      createIssueComment: mutationDenied,
+      createIssue: mutationDenied,
+      createCommitOnBranch: mutationDenied,
+      addLabels: mutationDenied,
+      removeLabel: mutationDenied,
+      updateIssueState: mutationDenied,
+      lastRateLimit: () => null,
+    };
+
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: fakeClient,
+      githubScopes: [
+        {
+          repo: REPO,
+          anyLabel: [
+            "assigned:rentals-agent",
+            "scope:agent:rentals-agent",
+            "scope:group:partnership",
+            "scope:all",
+          ],
+        },
+      ],
+    });
+
+    const result = await agg.aggregate(mkContext("rentals-agent"));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // The directive should be in the bundle.
+    const directives = result.bundle.signals.filter(
+      (s) => s.kind === "github-issue" && s.number === 100,
+    );
+    expect(directives).toHaveLength(1);
+
+    // And we should have run one query per anyLabel value (4 queries).
+    expect(queriedFilters).toHaveLength(4);
+  });
+
+  it("multi-query anyLabel: dedupes issues that match multiple labels (harness#331)", async () => {
+    // An issue tagged with both `assigned:foo` AND `scope:all` matches
+    // two queries; the aggregator should emit it once.
+    const issue = fakeIssue({
+      n: 200,
+      labels: ["assigned:rentals-agent", "scope:all"],
+    });
+    const fakeClient: GithubClient = {
+      async getIssue() {
+        return {
+          ok: false,
+          error: { code: "not-found" } as unknown as GithubClientError,
+        };
+      },
+      async listIssues(): Promise<Result<readonly GithubIssue[], GithubClientError>> {
+        // Same issue returned by every query — dedup is the aggregator's job.
+        return { ok: true, value: [issue] };
+      },
+      async listIssueComments() {
+        return { ok: true, value: [] };
+      },
+      async listIssueLabels() {
+        return { ok: true, value: [] };
+      },
+      getRef: notFound,
+      getPullRequest: notFound,
+      listPullRequests: notFound,
+      getPullRequestFiles: notFound,
+      getCommit: notFound,
+      getFileAtRef: notFound,
+      async searchIssues() {
+        return { ok: true, value: [] };
+      },
+      createIssueComment: mutationDenied,
+      createIssue: mutationDenied,
+      createCommitOnBranch: mutationDenied,
+      addLabels: mutationDenied,
+      removeLabel: mutationDenied,
+      updateIssueState: mutationDenied,
+      lastRateLimit: () => null,
+    };
+
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: fakeClient,
+      githubScopes: [{ repo: REPO, anyLabel: ["assigned:rentals-agent", "scope:all"] }],
+    });
+
+    const result = await agg.aggregate(mkContext("rentals-agent"));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const matching = result.bundle.signals.filter(
+      (s) => s.kind === "github-issue" && s.number === 200,
+    );
+    expect(matching).toHaveLength(1);
+  });
+  /* eslint-enable @typescript-eslint/require-await */
+
+  /* eslint-disable @typescript-eslint/require-await -- fake clients mimic the async interface */
+  it("multi-query anyLabel: cap keeps newest issues even when they came from a later fan-out query (QA #1)", async () => {
+    // QA review of harness#331: the original fan-out collected in
+    // collection order — `assigned:` query first, then `scope:agent:`,
+    // etc. With a small cap and many older `assigned:` items, a freshly
+    // filed `scope:agent:<self>` directive could be silently dropped.
+    // After the fix, sort by updatedAt DESC means the newest-N survive.
+    const recentDirective = fakeIssue({
+      n: 999,
+      title: "[DIRECTIVE] urgent",
+      labels: ["source-directive", "scope:agent:rentals-agent"],
+      // Most recent — must survive the cap.
+      updatedAt: new Date("2026-05-05T12:00:00Z"),
+    });
+    const olderActionItems = Array.from({ length: 5 }, (_, i) =>
+      fakeIssue({
+        n: 100 + i,
+        title: `Old action ${String(i)}`,
+        labels: ["assigned:rentals-agent", "action-item"],
+        // All older than the directive.
+        updatedAt: new Date(`2026-05-0${String(i + 1)}T08:00:00Z`),
+      }),
+    );
+    const fakeClient: GithubClient = {
+      async getIssue() {
+        return { ok: false, error: { code: "not-found" } as unknown as GithubClientError };
+      },
+      async listIssues(_repo, filter): Promise<Result<readonly GithubIssue[], GithubClientError>> {
+        const wantsAssigned = filter?.labels?.includes("assigned:rentals-agent") ?? false;
+        const wantsScopeAgent = filter?.labels?.includes("scope:agent:rentals-agent") ?? false;
+        if (wantsAssigned) return { ok: true, value: olderActionItems };
+        if (wantsScopeAgent) return { ok: true, value: [recentDirective] };
+        return { ok: true, value: [] };
+      },
+      async listIssueComments() {
+        return { ok: true, value: [] };
+      },
+      async listIssueLabels() {
+        return { ok: true, value: [] };
+      },
+      getRef: notFound,
+      getPullRequest: notFound,
+      listPullRequests: notFound,
+      getPullRequestFiles: notFound,
+      getCommit: notFound,
+      getFileAtRef: notFound,
+      async searchIssues() {
+        return { ok: true, value: [] };
+      },
+      createIssueComment: mutationDenied,
+      createIssue: mutationDenied,
+      createCommitOnBranch: mutationDenied,
+      addLabels: mutationDenied,
+      removeLabel: mutationDenied,
+      updateIssueState: mutationDenied,
+      lastRateLimit: () => null,
+    };
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: fakeClient,
+      githubScopes: [
+        {
+          repo: REPO,
+          anyLabel: ["assigned:rentals-agent", "scope:agent:rentals-agent", "scope:all"],
+        },
+      ],
+      // Cap of 3 — would have dropped the directive under collection-order
+      // truncation (older `assigned:` items came first).
+      caps: { githubIssue: 3, total: 50 },
+    });
+    const result = await agg.aggregate(mkContext("rentals-agent"));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const directive = result.bundle.signals.find(
+      (s) => s.kind === "github-issue" && s.number === 999,
+    );
+    expect(directive, "newest directive must survive the per-source cap").toBeDefined();
+    // Cap respected.
+    const ghIssues = result.bundle.signals.filter((s) => s.kind === "github-issue");
+    expect(ghIssues).toHaveLength(3);
+  });
+
+  it("multi-query anyLabel: surfaces structured partialFailures when a sub-query fails (QA #3)", async () => {
+    // QA review of harness#331: a single failed sub-query used to push
+    // a string into `warnings` and silently lose data. Now also pushes
+    // a structured entry to `partialFailures` so callers can distinguish
+    // "no signals matched" from "1 of 4 fan-out queries failed".
+    const fakeClient: GithubClient = {
+      async getIssue() {
+        return { ok: false, error: { code: "not-found" } as unknown as GithubClientError };
+      },
+      async listIssues(_repo, filter): Promise<Result<readonly GithubIssue[], GithubClientError>> {
+        const failOn = "scope:agent:rentals-agent";
+        if (filter?.labels?.includes(failOn) ?? false) {
+          return {
+            ok: false,
+            error: {
+              code: "rate-limited",
+              message: "secondary rate limit",
+            } as unknown as GithubClientError,
+          };
+        }
+        return { ok: true, value: [] };
+      },
+      async listIssueComments() {
+        return { ok: true, value: [] };
+      },
+      async listIssueLabels() {
+        return { ok: true, value: [] };
+      },
+      getRef: notFound,
+      getPullRequest: notFound,
+      listPullRequests: notFound,
+      getPullRequestFiles: notFound,
+      getCommit: notFound,
+      getFileAtRef: notFound,
+      async searchIssues() {
+        return { ok: true, value: [] };
+      },
+      createIssueComment: mutationDenied,
+      createIssue: mutationDenied,
+      createCommitOnBranch: mutationDenied,
+      addLabels: mutationDenied,
+      removeLabel: mutationDenied,
+      updateIssueState: mutationDenied,
+      lastRateLimit: () => null,
+    };
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: fakeClient,
+      githubScopes: [
+        {
+          repo: REPO,
+          anyLabel: ["assigned:rentals-agent", "scope:agent:rentals-agent", "scope:all"],
+        },
+      ],
+    });
+    const result = await agg.aggregate(mkContext("rentals-agent"));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const failures = result.bundle.partialFailures ?? [];
+    expect(failures).toHaveLength(1);
+    expect(failures[0]?.source).toBe("github");
+    expect(failures[0]?.anyLabel).toBe("scope:agent:rentals-agent");
+    expect(failures[0]?.code).toBe("rate-limited");
+    // The string warning is still there too — same info, both surfaces.
+    expect(result.bundle.warnings.some((w) => w.includes("rate-limited"))).toBe(true);
+  });
+  /* eslint-enable @typescript-eslint/require-await */
+
   it("emits warnings naming tier counts when items are dropped", async () => {
     const many = Array.from({ length: 20 }, (_, i) =>
       fakeIssue({ n: i + 1, labels: ["priority:critical"] }),
@@ -675,6 +975,105 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       const counted = result.bundle.signals.filter((s) => s.kind === "github-issue");
       expect(counted).toHaveLength(5);
       expect(result.bundle.warnings.some((w) => w.includes("priority bundle"))).toBe(true);
+    }
+  });
+});
+
+describe("DefaultSignalAggregator — scope:all provenance check (Sec M1, harness#339)", () => {
+  let rootDir = "";
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "signals-m1-"));
+  });
+  afterEach(async () => {
+    await rm(rootDir, { recursive: true, force: true });
+  });
+
+  it("back-compat: scope:all without scopeAllTrustedAuthors keeps baseTrust", async () => {
+    const issues = [fakeIssue({ n: 1, labels: ["scope:all"], authorLogin: "unknown-bot" })];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO, anyLabel: ["scope:all"] }],
+    });
+    const result = await agg.aggregate(mkContext("01-alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const sig = result.bundle.signals.find((s) => s.kind === "github-issue");
+      expect(sig?.trust).toBe("semi-trusted");
+    }
+  });
+
+  it("scope:all from trusted author keeps baseTrust (Sec M1)", async () => {
+    const issues = [fakeIssue({ n: 1, labels: ["scope:all"], authorLogin: "nori" })];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO, anyLabel: ["scope:all"], scopeAllTrustedAuthors: ["nori"] }],
+    });
+    const result = await agg.aggregate(mkContext("01-alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const sig = result.bundle.signals.find((s) => s.kind === "github-issue");
+      expect(sig?.trust).toBe("semi-trusted");
+    }
+  });
+
+  it("scope:all from untrusted author is downgraded to untrusted (Sec M1)", async () => {
+    const issues = [fakeIssue({ n: 1, labels: ["scope:all"], authorLogin: "external-bot" })];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO, anyLabel: ["scope:all"], scopeAllTrustedAuthors: ["nori"] }],
+    });
+    const result = await agg.aggregate(mkContext("01-alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const sig = result.bundle.signals.find((s) => s.kind === "github-issue");
+      expect(sig?.trust).toBe("untrusted");
+    }
+  });
+
+  it("scope:all from untrusted author is dropped when dropScopeAllFromUntrusted=true (Sec M1)", async () => {
+    const issues = [
+      fakeIssue({ n: 1, labels: ["scope:all"], authorLogin: "external-bot" }),
+      fakeIssue({ n: 2, labels: ["assigned:alpha"], authorLogin: "nori" }),
+    ];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [
+        {
+          repo: REPO,
+          anyLabel: ["scope:all", "assigned:alpha"],
+          scopeAllTrustedAuthors: ["nori"],
+          dropScopeAllFromUntrusted: true,
+        },
+      ],
+    });
+    const result = await agg.aggregate(mkContext("01-alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const ghSignals = result.bundle.signals.filter((s) => s.kind === "github-issue");
+      // issue #1 (scope:all, untrusted) dropped; issue #2 (assigned, trusted author) kept
+      expect(ghSignals).toHaveLength(1);
+      expect(ghSignals[0]?.trust).toBe("semi-trusted");
+    }
+  });
+
+  it("non-scope:all issue is not affected by scopeAllTrustedAuthors (Sec M1)", async () => {
+    const issues = [fakeIssue({ n: 1, labels: ["assigned:alpha"], authorLogin: "unknown-bot" })];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [
+        { repo: REPO, anyLabel: ["assigned:alpha"], scopeAllTrustedAuthors: ["nori"] },
+      ],
+    });
+    const result = await agg.aggregate(mkContext("01-alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const sig = result.bundle.signals.find((s) => s.kind === "github-issue");
+      expect(sig?.trust).toBe("semi-trusted");
     }
   });
 });
