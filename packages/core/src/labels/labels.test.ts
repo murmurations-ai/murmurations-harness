@@ -9,11 +9,14 @@ import {
   VERIFICATION_FAILED_LABEL,
   assignedLabel,
   buildAgentRoutingLabels,
+  circleLabel,
   findReservedLabels,
   isAssignedLabel,
+  isCircleLabel,
   isReservedLabel,
   isScopeLabel,
   parseAssignedLabel,
+  parseCircleLabel,
   parseScopeAgentLabel,
   parseScopeGroupLabel,
   scopeAgentLabel,
@@ -33,28 +36,37 @@ describe("label factories and parsers", () => {
     expect(parseScopeGroupLabel(scopeGroupLabel("partnership"))).toBe("partnership");
   });
 
+  it("round-trips circleLabel through parseCircleLabel", () => {
+    expect(parseCircleLabel(circleLabel("engineering"))).toBe("engineering");
+  });
+
   it("returns null when parser is given a non-matching label", () => {
     expect(parseAssignedLabel("scope:agent:foo")).toBeNull();
     expect(parseScopeAgentLabel("assigned:foo")).toBeNull();
     expect(parseScopeGroupLabel("scope:agent:foo")).toBeNull();
+    expect(parseCircleLabel("scope:group:foo")).toBeNull();
   });
 
-  it("isAssignedLabel and isScopeLabel discriminate cleanly", () => {
+  it("isAssignedLabel, isScopeLabel, and isCircleLabel discriminate cleanly", () => {
     expect(isAssignedLabel(assignedLabel("a"))).toBe(true);
     expect(isAssignedLabel(scopeAgentLabel("a"))).toBe(false);
     expect(isScopeLabel(scopeAgentLabel("a"))).toBe(true);
     expect(isScopeLabel(scopeGroupLabel("g"))).toBe(true);
     expect(isScopeLabel(SCOPE_ALL_LABEL)).toBe(true);
     expect(isScopeLabel(assignedLabel("a"))).toBe(false);
+    expect(isCircleLabel(circleLabel("engineering"))).toBe(true);
+    expect(isCircleLabel(scopeGroupLabel("engineering"))).toBe(false);
+    expect(isCircleLabel(assignedLabel("a"))).toBe(false);
   });
 });
 
 describe("buildAgentRoutingLabels", () => {
-  it("returns the OR-set of labels an agent should match", () => {
+  it("returns the OR-set of labels an agent should match (harness#788: includes circle: labels)", () => {
     expect(buildAgentRoutingLabels("rentals-agent", ["partnership"])).toStrictEqual([
       "assigned:rentals-agent",
       "scope:agent:rentals-agent",
       "scope:group:partnership",
+      "circle:partnership",
       "scope:all",
     ]);
   });
@@ -67,13 +79,16 @@ describe("buildAgentRoutingLabels", () => {
     ]);
   });
 
-  it("preserves group order", () => {
+  it("preserves group order and includes both scope:group: and circle: for each group", () => {
     expect(buildAgentRoutingLabels("a", ["g1", "g2", "g3"])).toStrictEqual([
       "assigned:a",
       "scope:agent:a",
       "scope:group:g1",
       "scope:group:g2",
       "scope:group:g3",
+      "circle:g1",
+      "circle:g2",
+      "circle:g3",
       "scope:all",
     ]);
   });
@@ -105,6 +120,11 @@ describe("isReservedLabel — Security H1 lateral-movement defense", () => {
   it("does NOT reserve closure-ladder labels (written by agents during normal operation)", () => {
     expect(isReservedLabel(AWAITING_SOURCE_CLOSE_LABEL)).toBe(false);
     expect(isReservedLabel(VERIFICATION_FAILED_LABEL)).toBe(false);
+  });
+
+  it("does NOT reserve circle:* (agents may write these to file group proposals)", () => {
+    expect(isReservedLabel(circleLabel("engineering"))).toBe(false);
+    expect(isReservedLabel(circleLabel("content"))).toBe(false);
   });
 
   it("does NOT reserve arbitrary operator labels", () => {

@@ -86,6 +86,20 @@ export const scopeAgentLabel = (agentId: string): string => `scope:agent:${agent
  */
 export const scopeGroupLabel = (groupId: string): string => `scope:group:${groupId}`;
 
+/**
+ * Circle-membership label. Written by Source or agents when filing a
+ * governance proposal meant for a specific group (e.g. S3 consent round,
+ * tension, meeting agenda item). Matched by every agent that lists the
+ * group in its `group_memberships` via the routing OR-set.
+ *
+ * NOT reserved — agents may write this label to file circle-scoped
+ * proposals without requiring Source to fan out `assigned:<member>`
+ * labels for each member individually.
+ *
+ * @example circleLabel("engineering") → "circle:engineering"
+ */
+export const circleLabel = (groupId: string): string => `circle:${groupId}`;
+
 // ---------------------------------------------------------------------------
 // Predicates + parsers — for matching and extraction.
 // ---------------------------------------------------------------------------
@@ -95,6 +109,9 @@ export const isAssignedLabel = (label: string): boolean => label.startsWith("ass
 
 /** True if the label is any kind of `scope:<...>` directive routing label. */
 export const isScopeLabel = (label: string): boolean => label.startsWith("scope:");
+
+/** True if the label is any kind of `circle:<...>` group-membership proposal label. */
+export const isCircleLabel = (label: string): boolean => label.startsWith("circle:");
 
 /**
  * True if the label is reserved for Source / harness-internal use and
@@ -143,6 +160,10 @@ export const parseScopeAgentLabel = (label: string): string | null =>
 export const parseScopeGroupLabel = (label: string): string | null =>
   label.startsWith("scope:group:") ? label.slice("scope:group:".length) : null;
 
+/** Returns the group-id from `circle:<group-id>`, or null if not a match. */
+export const parseCircleLabel = (label: string): string | null =>
+  label.startsWith("circle:") ? label.slice("circle:".length) : null;
+
 // ---------------------------------------------------------------------------
 // Routing — membership-aware label set for an agent.
 // ---------------------------------------------------------------------------
@@ -155,13 +176,18 @@ export const parseScopeGroupLabel = (label: string): string | null =>
  *
  * Order: most-specific first (action items addressed to this agent),
  * then directive scopes (per-agent, per-group, broadcast). The
- * aggregator queries each label independently and dedupes by issue
+ * `circle:<groupId>` labels follow `scope:group:<groupId>` — they
+ * match governance proposals filed by Source or agents with the
+ * `circle:` convention (tension #788: proposals bypassing the
+ * directive CLI weren't reaching circle members).
+ *
+ * The aggregator queries each label independently and dedupes by issue
  * number, so the order here doesn't affect correctness — it only
  * affects which query fires first when scopes are batched.
  *
  * @example buildAgentRoutingLabels("rentals-agent", ["partnership"])
  *   → ["assigned:rentals-agent", "scope:agent:rentals-agent",
- *      "scope:group:partnership", "scope:all"]
+ *      "scope:group:partnership", "circle:partnership", "scope:all"]
  */
 export const buildAgentRoutingLabels = (
   agentId: string,
@@ -170,6 +196,7 @@ export const buildAgentRoutingLabels = (
   assignedLabel(agentId),
   scopeAgentLabel(agentId),
   ...groupIds.map(scopeGroupLabel),
+  ...groupIds.map(circleLabel),
   SCOPE_ALL_LABEL,
 ];
 
