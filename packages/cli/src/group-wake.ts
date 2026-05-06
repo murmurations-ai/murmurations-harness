@@ -86,16 +86,20 @@ const CLI_FALLBACK_PATHS_GW: Record<string, readonly string[]> = {
     "/usr/local/bin/claude",
     "/opt/homebrew/bin/claude",
     join(homedir(), ".npm", "bin", "claude"),
+    join(homedir(), "node_modules", ".bin", "claude"),
   ],
   gemini: [
     join(homedir(), ".local", "bin", "gemini"),
     "/usr/local/bin/gemini",
     "/opt/homebrew/bin/gemini",
+    join(homedir(), ".npm", "bin", "gemini"),
   ],
   codex: [
     join(homedir(), ".local", "bin", "codex"),
     "/usr/local/bin/codex",
     "/opt/homebrew/bin/codex",
+    join(homedir(), ".npm", "bin", "codex"),
+    join(homedir(), ".openai", "bin", "codex"),
   ],
 };
 

@@ -610,6 +610,37 @@ describe("createSubscriptionCliClient — factory", () => {
     expect(result.value.timeoutMs).toBe(5_000);
   });
 
+  it("complete() does not set spawnMs when subprocess fails (#280)", async () => {
+    // Use an adapter that returns a parse error — simulates a subprocess that
+    // exits non-zero or produces unparseable output. spawnMs must not appear
+    // on the error result (it lives only on the LLMResponse success path).
+    const failAdapter: SubprocessLLMAdapter = {
+      command: "/bin/echo",
+      providerId: "fail-cli",
+      buildFlags: () => [],
+      parseOutput: () => ({
+        ok: false,
+        error: { kind: "parse-error" as const, message: "bad output", raw: "" },
+      }),
+      authCheck: async () =>
+        Promise.resolve({ ok: true as const, value: { kind: "authenticated" as const } }),
+    };
+    const client = createSubscriptionCliClient({
+      cli: "claude",
+      model: "test-model",
+      cliAdapter: failAdapter,
+      timeoutMs: 5_000,
+    });
+    const result = await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+      maxOutputTokens: 100,
+    });
+    expect(result.ok).toBe(false);
+    // spawnMs is only on LLMResponse (the ok path); the error path has no such field.
+    if (result.ok) return;
+    expect("spawnMs" in result).toBe(false);
+  });
+
   it("capabilities() reports the configured provider id", () => {
     const client = createSubscriptionCliClient({
       cli: "claude",

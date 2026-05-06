@@ -221,17 +221,21 @@ const runLayoutChecks = async (ctx: CheckContext): Promise<void> => {
             "/usr/local/bin/claude",
             "/opt/homebrew/bin/claude",
             join(homedir(), ".npm", "bin", "claude"),
+            join(homedir(), "node_modules", ".bin", "claude"),
           ]
         : cliName === "gemini"
           ? [
               join(homedir(), ".local", "bin", "gemini"),
               "/usr/local/bin/gemini",
               "/opt/homebrew/bin/gemini",
+              join(homedir(), ".npm", "bin", "gemini"),
             ]
           : [
               join(homedir(), ".local", "bin", "codex"),
               "/usr/local/bin/codex",
               "/opt/homebrew/bin/codex",
+              join(homedir(), ".npm", "bin", "codex"),
+              join(homedir(), ".openai", "bin", "codex"),
             ];
 
     let absoluteCliPath: string | undefined;
