@@ -588,6 +588,28 @@ describe("createSubscriptionCliClient — factory", () => {
     expect(result.value.outputTokens).toBe(3);
   });
 
+  it("complete() attaches cliPath, spawnMs, and timeoutMs on success (#280)", async () => {
+    const client = createSubscriptionCliClient({
+      cli: "claude",
+      model: "test-model",
+      cliAdapter: mockAdapter,
+      timeoutMs: 5_000,
+    });
+    const result = await client.complete({
+      messages: [{ role: "user", content: "hi" }],
+      maxOutputTokens: 100,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // cliPath is the adapter's command (the binary that was spawned).
+    expect(result.value.cliPath).toBe(mockAdapter.command);
+    // spawnMs is set when /bin/echo produces stdout; must be a non-negative number.
+    expect(typeof result.value.spawnMs).toBe("number");
+    expect(result.value.spawnMs).toBeGreaterThanOrEqual(0);
+    // timeoutMs reflects the configured value, not a default.
+    expect(result.value.timeoutMs).toBe(5_000);
+  });
+
   it("capabilities() reports the configured provider id", () => {
     const client = createSubscriptionCliClient({
       cli: "claude",

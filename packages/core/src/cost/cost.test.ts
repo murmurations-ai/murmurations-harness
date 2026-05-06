@@ -141,6 +141,39 @@ describe("WakeCostBuilder", () => {
     expect(record.rollupHints.isoWeekUtc).toMatch(/^\d{4}-W\d{2}$/);
   });
 
+  it("addLlmTokens stores cliPath, spawnMs, timeoutMs in finalized record (#280)", () => {
+    const builder = mkBuilder();
+    builder.addLlmTokens({
+      inputTokens: 10,
+      outputTokens: 5,
+      modelProvider: "claude-cli",
+      modelName: "claude-sonnet-4-6",
+      costMicros: makeUSDMicros(0),
+      cliPath: "/usr/local/bin/claude",
+      spawnMs: 312,
+      timeoutMs: 600_000,
+    });
+    const record = builder.finalize();
+    expect(record.llm.cliPath).toBe("/usr/local/bin/claude");
+    expect(record.llm.spawnMs).toBe(312);
+    expect(record.llm.timeoutMs).toBe(600_000);
+  });
+
+  it("addLlmTokens leaves cliPath/spawnMs/timeoutMs undefined when not supplied", () => {
+    const builder = mkBuilder();
+    builder.addLlmTokens({
+      inputTokens: 10,
+      outputTokens: 5,
+      modelProvider: "anthropic",
+      modelName: "claude-sonnet-4-6",
+      costMicros: makeUSDMicros(500),
+    });
+    const record = builder.finalize();
+    expect(record.llm.cliPath).toBeUndefined();
+    expect(record.llm.spawnMs).toBeUndefined();
+    expect(record.llm.timeoutMs).toBeUndefined();
+  });
+
   it("addLlmTokens sums across multiple calls and preserves last model", () => {
     const builder = mkBuilder();
     builder.addLlmTokens({
@@ -326,6 +359,19 @@ describe("wakeCostRecordSchema", () => {
 
   it("accepts a minimal zero-cost record", () => {
     expect(wakeCostRecordSchema.safeParse(validRecord).success).toBe(true);
+  });
+
+  it("accepts a record with cliPath, spawnMs, and timeoutMs in llm (#280)", () => {
+    const withCliFields = {
+      ...validRecord,
+      llm: {
+        ...validRecord.llm,
+        cliPath: "/usr/local/bin/claude",
+        spawnMs: 312,
+        timeoutMs: 600_000,
+      },
+    };
+    expect(wakeCostRecordSchema.safeParse(withCliFields).success).toBe(true);
   });
 
   it("rejects schemaVersion !== 1", () => {
