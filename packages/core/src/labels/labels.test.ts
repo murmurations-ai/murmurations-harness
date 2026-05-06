@@ -9,18 +9,18 @@ import {
   VERIFICATION_FAILED_LABEL,
   assignedLabel,
   buildAgentRoutingLabels,
-  circleLabel,
   findReservedLabels,
   isAssignedLabel,
-  isCircleLabel,
+  isGroupProposalLabel,
   isReservedLabel,
   isScopeLabel,
   parseAssignedLabel,
-  parseCircleLabel,
+  parseGroupProposalLabel,
   parseScopeAgentLabel,
   parseScopeGroupLabel,
   scopeAgentLabel,
   scopeGroupLabel,
+  groupProposalLabel,
 } from "./index.js";
 
 describe("label factories and parsers", () => {
@@ -36,37 +36,37 @@ describe("label factories and parsers", () => {
     expect(parseScopeGroupLabel(scopeGroupLabel("partnership"))).toBe("partnership");
   });
 
-  it("round-trips circleLabel through parseCircleLabel", () => {
-    expect(parseCircleLabel(circleLabel("engineering"))).toBe("engineering");
+  it("round-trips groupProposalLabel through parseGroupProposalLabel", () => {
+    expect(parseGroupProposalLabel(groupProposalLabel("engineering"))).toBe("engineering");
   });
 
   it("returns null when parser is given a non-matching label", () => {
     expect(parseAssignedLabel("scope:agent:foo")).toBeNull();
     expect(parseScopeAgentLabel("assigned:foo")).toBeNull();
     expect(parseScopeGroupLabel("scope:agent:foo")).toBeNull();
-    expect(parseCircleLabel("scope:group:foo")).toBeNull();
+    expect(parseGroupProposalLabel("scope:group:foo")).toBeNull();
   });
 
-  it("isAssignedLabel, isScopeLabel, and isCircleLabel discriminate cleanly", () => {
+  it("isAssignedLabel, isScopeLabel, and isGroupProposalLabel discriminate cleanly", () => {
     expect(isAssignedLabel(assignedLabel("a"))).toBe(true);
     expect(isAssignedLabel(scopeAgentLabel("a"))).toBe(false);
     expect(isScopeLabel(scopeAgentLabel("a"))).toBe(true);
     expect(isScopeLabel(scopeGroupLabel("g"))).toBe(true);
     expect(isScopeLabel(SCOPE_ALL_LABEL)).toBe(true);
     expect(isScopeLabel(assignedLabel("a"))).toBe(false);
-    expect(isCircleLabel(circleLabel("engineering"))).toBe(true);
-    expect(isCircleLabel(scopeGroupLabel("engineering"))).toBe(false);
-    expect(isCircleLabel(assignedLabel("a"))).toBe(false);
+    expect(isGroupProposalLabel(groupProposalLabel("engineering"))).toBe(true);
+    expect(isGroupProposalLabel(scopeGroupLabel("engineering"))).toBe(false);
+    expect(isGroupProposalLabel(assignedLabel("a"))).toBe(false);
   });
 });
 
 describe("buildAgentRoutingLabels", () => {
-  it("returns the OR-set of labels an agent should match (harness#788: includes circle: labels)", () => {
+  it("returns the OR-set of labels an agent should match (harness#788: includes group: labels)", () => {
     expect(buildAgentRoutingLabels("rentals-agent", ["partnership"])).toStrictEqual([
       "assigned:rentals-agent",
       "scope:agent:rentals-agent",
       "scope:group:partnership",
-      "circle:partnership",
+      "group:partnership",
       "scope:all",
     ]);
   });
@@ -79,16 +79,16 @@ describe("buildAgentRoutingLabels", () => {
     ]);
   });
 
-  it("preserves group order and includes both scope:group: and circle: for each group", () => {
+  it("preserves group order and includes both scope:group: and group: for each group", () => {
     expect(buildAgentRoutingLabels("a", ["g1", "g2", "g3"])).toStrictEqual([
       "assigned:a",
       "scope:agent:a",
       "scope:group:g1",
       "scope:group:g2",
       "scope:group:g3",
-      "circle:g1",
-      "circle:g2",
-      "circle:g3",
+      "group:g1",
+      "group:g2",
+      "group:g3",
       "scope:all",
     ]);
   });
@@ -122,9 +122,9 @@ describe("isReservedLabel — Security H1 lateral-movement defense", () => {
     expect(isReservedLabel(VERIFICATION_FAILED_LABEL)).toBe(false);
   });
 
-  it("does NOT reserve circle:* (agents may write these to file group proposals)", () => {
-    expect(isReservedLabel(circleLabel("engineering"))).toBe(false);
-    expect(isReservedLabel(circleLabel("content"))).toBe(false);
+  it("does NOT reserve group:* (agents may write these to file group proposals)", () => {
+    expect(isReservedLabel(groupProposalLabel("engineering"))).toBe(false);
+    expect(isReservedLabel(groupProposalLabel("content"))).toBe(false);
   });
 
   it("does NOT reserve arbitrary operator labels", () => {

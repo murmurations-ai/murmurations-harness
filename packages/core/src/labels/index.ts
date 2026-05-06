@@ -87,18 +87,23 @@ export const scopeAgentLabel = (agentId: string): string => `scope:agent:${agent
 export const scopeGroupLabel = (groupId: string): string => `scope:group:${groupId}`;
 
 /**
- * Circle-membership label. Written by Source or agents when filing a
- * governance proposal meant for a specific group (e.g. S3 consent round,
- * tension, meeting agenda item). Matched by every agent that lists the
- * group in its `group_memberships` via the routing OR-set.
+ * Group-membership proposal label. Written by Source or agents when
+ * filing a governance proposal meant for a specific group (e.g. a
+ * consent round, tension, or meeting agenda item). Matched by every
+ * agent that lists the group in its `group_memberships` via the
+ * routing OR-set.
  *
- * NOT reserved — agents may write this label to file circle-scoped
+ * NOT reserved — agents may write this label to file group-scoped
  * proposals without requiring Source to fan out `assigned:<member>`
  * labels for each member individually.
  *
- * @example circleLabel("engineering") → "circle:engineering"
+ * Note: `scope:group:<groupId>` (reserved, Source-only via the
+ * directive CLI) and `group:<groupId>` (unreserved, agent-writable)
+ * both route to group members — they are complementary channels.
+ *
+ * @example groupProposalLabel("engineering") → "group:engineering"
  */
-export const circleLabel = (groupId: string): string => `circle:${groupId}`;
+export const groupProposalLabel = (groupId: string): string => `group:${groupId}`;
 
 // ---------------------------------------------------------------------------
 // Predicates + parsers — for matching and extraction.
@@ -110,8 +115,8 @@ export const isAssignedLabel = (label: string): boolean => label.startsWith("ass
 /** True if the label is any kind of `scope:<...>` directive routing label. */
 export const isScopeLabel = (label: string): boolean => label.startsWith("scope:");
 
-/** True if the label is any kind of `circle:<...>` group-membership proposal label. */
-export const isCircleLabel = (label: string): boolean => label.startsWith("circle:");
+/** True if the label is a `group:<...>` group-proposal routing label (unreserved, agent-writable). */
+export const isGroupProposalLabel = (label: string): boolean => label.startsWith("group:");
 
 /**
  * True if the label is reserved for Source / harness-internal use and
@@ -160,9 +165,9 @@ export const parseScopeAgentLabel = (label: string): string | null =>
 export const parseScopeGroupLabel = (label: string): string | null =>
   label.startsWith("scope:group:") ? label.slice("scope:group:".length) : null;
 
-/** Returns the group-id from `circle:<group-id>`, or null if not a match. */
-export const parseCircleLabel = (label: string): string | null =>
-  label.startsWith("circle:") ? label.slice("circle:".length) : null;
+/** Returns the group-id from `group:<group-id>`, or null if not a match. */
+export const parseGroupProposalLabel = (label: string): string | null =>
+  label.startsWith("group:") ? label.slice("group:".length) : null;
 
 // ---------------------------------------------------------------------------
 // Routing — membership-aware label set for an agent.
@@ -176,10 +181,14 @@ export const parseCircleLabel = (label: string): string | null =>
  *
  * Order: most-specific first (action items addressed to this agent),
  * then directive scopes (per-agent, per-group, broadcast). The
- * `circle:<groupId>` labels follow `scope:group:<groupId>` — they
- * match governance proposals filed by Source or agents with the
- * `circle:` convention (tension #788: proposals bypassing the
- * directive CLI weren't reaching circle members).
+ * `group:<groupId>` labels follow `scope:group:<groupId>` — they
+ * match governance proposals filed by Source or agents using the
+ * `group:` label convention. Unlike `scope:group:` (reserved,
+ * Source-only via the directive CLI), `group:` is unreserved so agents
+ * may write it when filing group-scoped proposals without requiring a
+ * Source fan-out (harness#788: group proposals were invisible to members
+ * because they lacked `scope:group:` labels and no agent-writable
+ * equivalent existed).
  *
  * The aggregator queries each label independently and dedupes by issue
  * number, so the order here doesn't affect correctness — it only
@@ -187,7 +196,7 @@ export const parseCircleLabel = (label: string): string | null =>
  *
  * @example buildAgentRoutingLabels("rentals-agent", ["partnership"])
  *   → ["assigned:rentals-agent", "scope:agent:rentals-agent",
- *      "scope:group:partnership", "circle:partnership", "scope:all"]
+ *      "scope:group:partnership", "group:partnership", "scope:all"]
  */
 export const buildAgentRoutingLabels = (
   agentId: string,
@@ -196,7 +205,7 @@ export const buildAgentRoutingLabels = (
   assignedLabel(agentId),
   scopeAgentLabel(agentId),
   ...groupIds.map(scopeGroupLabel),
-  ...groupIds.map(circleLabel),
+  ...groupIds.map(groupProposalLabel),
   SCOPE_ALL_LABEL,
 ];
 

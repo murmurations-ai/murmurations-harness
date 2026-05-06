@@ -805,6 +805,65 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
     );
     expect(matching).toHaveLength(1);
   });
+
+  it("multi-query anyLabel: dedupes issues matching both scope:group: and group: labels (harness#788)", async () => {
+    // An issue tagged with both `scope:group:engineering` AND `group:engineering`
+    // matches two fan-out queries in buildAgentRoutingLabels. The aggregator
+    // must deduplicate by issue key and emit it exactly once.
+    const proposal = fakeIssue({
+      n: 300,
+      labels: ["source-directive", "scope:group:engineering", "group:engineering"],
+    });
+    const fakeClient: GithubClient = {
+      async getIssue() {
+        return { ok: false, error: { code: "not-found" } as unknown as GithubClientError };
+      },
+      async listIssues(): Promise<Result<readonly GithubIssue[], GithubClientError>> {
+        return { ok: true, value: [proposal] };
+      },
+      async listIssueComments() {
+        return { ok: true, value: [] };
+      },
+      async listIssueLabels() {
+        return { ok: true, value: [] };
+      },
+      getRef: notFound,
+      getPullRequest: notFound,
+      listPullRequests: notFound,
+      getPullRequestFiles: notFound,
+      getCommit: notFound,
+      getFileAtRef: notFound,
+      async searchIssues() {
+        return { ok: true, value: [] };
+      },
+      createIssueComment: mutationDenied,
+      createIssue: mutationDenied,
+      createCommitOnBranch: mutationDenied,
+      addLabels: mutationDenied,
+      removeLabel: mutationDenied,
+      updateIssueState: mutationDenied,
+      lastRateLimit: () => null,
+    };
+
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: fakeClient,
+      githubScopes: [
+        {
+          repo: REPO,
+          anyLabel: ["scope:group:engineering", "group:engineering"],
+        },
+      ],
+    });
+
+    const result = await agg.aggregate(mkContext("engineering-agent"));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const matching = result.bundle.signals.filter(
+      (s) => s.kind === "github-issue" && s.number === 300,
+    );
+    expect(matching).toHaveLength(1);
+  });
   /* eslint-enable @typescript-eslint/require-await */
 
   /* eslint-disable @typescript-eslint/require-await -- fake clients mimic the async interface */
