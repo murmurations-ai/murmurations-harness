@@ -18,5 +18,11 @@ export interface LLMCostHook {
     readonly outputTokens: number;
     readonly cacheReadTokens?: number;
     readonly cacheWriteTokens?: number;
+    /** v0.7.1 (#280): subscription-CLI only. Absolute path of the CLI binary. */
+    readonly cliPath?: string;
+    /** v0.7.1 (#280): subscription-CLI only. Spawn-to-first-byte latency in ms. */
+    readonly spawnMs?: number;
+    /** v0.7.1 (#280): subscription-CLI only. Configured subprocess timeout in ms. */
+    readonly timeoutMs?: number;
   }): void;
 }

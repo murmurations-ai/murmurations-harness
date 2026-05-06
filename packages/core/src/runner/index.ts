@@ -96,6 +96,7 @@ export interface DefaultRunnerClients {
             content: string;
             inputTokens: number;
             outputTokens: number;
+            cacheReadTokens?: number;
             modelUsed: string;
             /** Number of LLM→tool round-trips. */
             steps?: number;
@@ -579,10 +580,12 @@ If you were asked to draft a proposal (e.g. an action item saying "draft proposa
 
     // 10. Parse self-reflection
     const reflection = parseSelfReflection(content);
+    const cacheReadTokens = result.value.cacheReadTokens ?? 0;
     const summaryLines = [
       `[${agentId}] wake ${wakeId}`,
       `  model: ${result.value.modelUsed}`,
       `  input_tokens: ${String(result.value.inputTokens)}`,
+      ...(cacheReadTokens > 0 ? [`  cache_read_tokens: ${String(cacheReadTokens)}`] : []),
       `  output_tokens: ${String(result.value.outputTokens)}`,
       `  steps: ${String(stepCount)} / ${String(stepBudget)}`,
       `  tool_calls: ${String(toolCallCount)}`,

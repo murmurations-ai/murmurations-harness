@@ -255,6 +255,9 @@ export const makeDaemonHook = (
         modelName: call.model,
         costMicros,
         ...(shadowCostMicros !== undefined ? { shadowCostMicros } : {}),
+        ...(call.cliPath !== undefined ? { cliPath: call.cliPath } : {}),
+        ...(call.spawnMs !== undefined ? { spawnMs: call.spawnMs } : {}),
+        ...(call.timeoutMs !== undefined ? { timeoutMs: call.timeoutMs } : {}),
       });
     },
   };
