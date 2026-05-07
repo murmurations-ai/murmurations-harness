@@ -876,6 +876,8 @@ export class Daemon {
             {
               actionItems: context.signals.actionItems,
               signals: context.signals.signals,
+              agentId: agent.agentId,
+              groupIds: agent.groupMemberships,
             },
             result,
             actionReceipts,

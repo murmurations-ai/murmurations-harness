@@ -1,5 +1,5 @@
 import type { WakeCostRecord } from "../cost/record.js";
-import { SOURCE_DIRECTIVE_LABEL } from "../labels/index.js";
+import { SOURCE_DIRECTIVE_LABEL, buildAgentRoutingLabels } from "../labels/index.js";
 
 /**
  * Agent execution — the pluggable boundary between the harness daemon and
@@ -647,7 +647,21 @@ const buildIssueReferenceMatchers = (issueNum: number): readonly RegExp[] => {
  * Used when no custom validator is configured.
  */
 export const validateWake = (
-  context: { actionItems: readonly Signal[]; signals: readonly Signal[] },
+  context: {
+    actionItems: readonly Signal[];
+    signals: readonly Signal[];
+    /**
+     * The waking agent's id and group memberships. Directives whose labels
+     * don't intersect this agent's routing set (assigned:<id>,
+     * scope:agent:<id>, scope:group:<gid>, scope:all) are treated as
+     * signal, not accountability, and do not count as unaddressed.
+     * Harness #354 (effectiveness scoring scope bug).
+     *
+     * Pass empty groupIds when the agent has no group memberships.
+     */
+    agentId: string;
+    groupIds: readonly string[];
+  },
   result: {
     actions: readonly WakeAction[];
     outputs: readonly AgentOutputArtifact[];
@@ -701,9 +715,16 @@ export const validateWake = (
   }
   const claimedGovEventIdx = new Set<number>();
 
+  // Routing set for this agent — directives whose labels don't intersect
+  // this set are visible signal (facilitator cross-visibility) but not
+  // this agent's accountability. Harness #354.
+  const agentRoutingSet = new Set(buildAgentRoutingLabels(context.agentId, context.groupIds));
+
   const allBundle: readonly Signal[] = [...context.signals, ...context.actionItems];
   for (const sig of allBundle) {
     if (!isSourceDirective(sig)) continue;
+    // Directive is signal, not work, for this agent — skip it.
+    if (!sig.labels.some((l) => agentRoutingSet.has(l))) continue;
     const issueNum = sig.number;
     if (seen.has(issueNum)) continue;
     seen.add(issueNum);
