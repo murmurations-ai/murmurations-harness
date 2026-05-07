@@ -2,7 +2,7 @@
 
 **Status:** Pending consent — Engineering circle
 **Date:** 2026-05-06
-**Related research:** `docs/research/agentic-engineering-resource-list-2026.md`, `docs/research/harness-engineering-video-applied.md`, `docs/research/harness-engineering-transcript.md`, `docs/research/how-to-build-effective-agents-transcript.md`, `docs/research/minerva-lessons-applied.md`, `docs/research/spike-langfuse-self-reflection.md`
+**Related research:** `docs/research/agentic-engineering-resource-list-2026.md`, `docs/research/harness-engineering-video-applied.md`, `docs/research/harness-engineering-transcript.md`, `docs/research/how-to-build-effective-agents-transcript.md`, `docs/research/minerva-lessons-applied.md`, `docs/research/spike-langfuse-self-reflection.md`, `docs/research/openclaw-applied.md`
 **Related proposals/ADRs:** Proposal 01 sandboxing, Proposal 03 observability, Proposal 04 durable execution, Proposal 06 MCP integration, ADR-0013 signal aggregation, ADR-0021 collaboration provider, ADR-0022 Langfuse self-reflection, ADR-0029 persistent memory
 
 ## Proposal Metadata (S3)
@@ -106,6 +106,14 @@ Useful agent telemetry is not only tokens and latency. The harness should also t
 ### Make memory two-tiered
 
 Raw episodic history should remain separate from curated semantic memory. The harness already moved toward persistent memory in ADR-0029; the next step is to wire memory into prompt assembly with clear provenance, token budgets, and validation against memory poisoning.
+
+### Separate stable and volatile prompt content with an explicit cache boundary
+
+OpenClaw (openclaw/openclaw, 250k+ GitHub stars) uses a `SYSTEM_PROMPT_CACHE_BOUNDARY` marker to explicitly split stable workspace context (identity, role, governance) from volatile context (signals, memory search results, health). This maximizes Anthropic's prompt KV cache reuse across wakes. The Murmurations PromptAssembler will produce this split naturally — but the boundary should be a named, explicit concept, not an accidental property of segment ordering. See `docs/research/openclaw-applied.md` §1.
+
+### The subtraction principle is convergently validated at scale
+
+The subtraction principle (no verifier agents) is confirmed by three independent sources: Stanford/Tsinghua benchmarks (−0.8 to −8.4 on benchmarks with verifiers), the Minerva 27-domain production experiment, and OpenClaw — a widely deployed production system with 250k+ GitHub stars that reached that scale with no internal verifier agents. This is not a preference; it is a repeatedly observed production outcome. The `WakeValidator` checking execution contract conditions is a deterministic contract check, not an LLM verifier call — that distinction holds.
 
 ## Current State
 
@@ -323,6 +331,11 @@ export interface PromptBundle {
   readonly messages: readonly LLMMessage[];
   readonly hash: string;
   readonly tokenEstimate: number;
+  // Index of the last stable segment — segments before this index are cache-stable across wakes;
+  // segments at or after are volatile (signals, memory, health). Enables explicit cache boundary
+  // optimization analogous to OpenClaw's SYSTEM_PROMPT_CACHE_BOUNDARY. Should be encoded in
+  // ADR-003X, not left to implementation convention.
+  readonly cacheAnchorIndex: number;
 }
 ```
 
@@ -335,6 +348,23 @@ Rules:
 - All signal rendering uses a single sanitizer/renderer.
 - `AgentSpawnContext.promptPath` / `promptRef` becomes the primary task prompt source after the field is added.
 - The prompt bundle hash is recorded in the run ledger and trace metadata.
+- **Canonical trust classification per segment kind** (to be encoded in ADR-003X, not left to convention):
+
+  | Segment kind | Trust level    | Rationale                                          |
+  | ------------ | -------------- | -------------------------------------------------- |
+  | `identity`   | `trusted`      | Harness-authored                                   |
+  | `role`       | `trusted`      | Operator-authored, version-controlled              |
+  | `contract`   | `trusted`      | Harness-assembled from role.md                     |
+  | `governance` | `trusted`      | GovernancePlugin output                            |
+  | `skills`     | `trusted`      | Harness-controlled skill scanner                   |
+  | `memory`     | `semi-trusted` | Agent-curated, sourced from prior wakes            |
+  | `health`     | `semi-trusted` | Harness-derived from agent state                   |
+  | `signals`    | `untrusted`    | GitHub issue bodies — external contributor content |
+  | `wake-task`  | `untrusted`    | Task prompt text from signal source                |
+
+  Comparison: OpenClaw uses context isolation and structured formatting as informal trust controls; it has no formal propagation model. For headless autonomous agents, formal classification is required. See `docs/research/openclaw-applied.md` §6.
+
+- **Stable/volatile split:** segments with kind `identity`, `role`, `contract`, `governance`, `skills` are stable across wakes for the same agent configuration. Segments with kind `signals`, `memory`, `health`, `wake-task` are volatile per wake. `PromptBundle.cacheAnchorIndex` marks the boundary.
 
 ### 3. Tool Boundary
 
@@ -447,6 +477,11 @@ Rules:
 - Environment spec is recorded by reference/hash in the ledger, with secret values redacted.
 - Until `ContainerExecutor` or equivalent OS controls enforce filesystem/network limits, those limits are declared policy plus tool-wrapper enforcement rather than hard isolation.
 - MCP server commands/configs should be allowlisted or pinned and recorded by hash.
+- **Policy precedence ladder** (Phase 7): each level narrows or restricts, never expands beyond its parent. The assembled EnvironmentSpec is the intersection of all applicable layers:
+  ```
+  Harness Default → Group Policy → Role Policy → Wake Override
+  ```
+  `secretGrants` follows the same ladder — the most restrictive applicable level wins. Reference: OpenClaw's sandbox policy precedence model (Tool Profile → Provider Profile → Global → Provider → Agent → Group → Sandbox). See `docs/research/openclaw-applied.md` §3.
 
 ### 5. Execution Contract
 
@@ -758,7 +793,13 @@ These are guardrails to encode in `CLAUDE.md` and `ARCHITECTURE.md` — not impl
 
 > Disciplined narrowing beats expensive broadening every time.
 
-Do not add verifier agents or multi-candidate search loops. The Stanford/Tsinghua research shows these actively degrade system performance (−0.8 to −8.4 on benchmarks). `WakeValidator` checking execution contract conditions is correct — it is a deterministic contract check, not an LLM verifier call.
+Do not add verifier agents or multi-candidate search loops. This principle is convergently validated by three independent sources:
+
+1. **Stanford/Tsinghua benchmarks**: verifier agents actively degrade system performance (−0.8 to −8.4 on benchmarks across 10 models).
+2. **Minerva (27-domain production experiment)**: verified that disciplined contracts and artifact-backed completion outperform added verifier layers.
+3. **OpenClaw (production runtime, 250k+ GitHub stars)**: reached wide deployment with no internal verifier agents — its architecture is model → tool → result → continue, with a serialized Command Queue for ordering rather than a verification layer.
+
+`WakeValidator` checking execution contract conditions is correct — it is a deterministic contract check, not an LLM verifier call. That distinction holds.
 
 ### Context Window is RAM
 
