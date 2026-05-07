@@ -2,7 +2,7 @@
 
 **Status:** Pending consent — Engineering circle
 **Date:** 2026-05-06
-**Related research:** `docs/research/agentic-engineering-resource-list-2026.md`, `docs/research/harness-engineering-video-applied.md`, `docs/research/harness-engineering-transcript.md`, `docs/research/how-to-build-effective-agents-transcript.md`, `docs/research/minerva-lessons-applied.md`, `docs/research/spike-langfuse-self-reflection.md`, `docs/research/openclaw-applied.md`
+**Related research:** `docs/research/agentic-engineering-resource-list-2026.md`, `docs/research/harness-engineering-video-applied.md`, `docs/research/harness-engineering-transcript.md`, `docs/research/how-to-build-effective-agents-transcript.md`, `docs/research/minerva-lessons-applied.md`, `docs/research/spike-langfuse-self-reflection.md`, `docs/research/openclaw-applied.md`, `docs/research/hermes-applied.md`
 **Related proposals/ADRs:** Proposal 01 sandboxing, Proposal 03 observability, Proposal 04 durable execution, Proposal 06 MCP integration, ADR-0013 signal aggregation, ADR-0021 collaboration provider, ADR-0022 Langfuse self-reflection, ADR-0029 persistent memory
 
 ## Proposal Metadata (S3)
@@ -106,6 +106,24 @@ Useful agent telemetry is not only tokens and latency. The harness should also t
 ### Make memory two-tiered
 
 Raw episodic history should remain separate from curated semantic memory. The harness already moved toward persistent memory in ADR-0029; the next step is to wire memory into prompt assembly with clear provenance, token budgets, and validation against memory poisoning.
+
+### Name skill poisoning as a threat; the trust model is the mitigation
+
+Hermes Agent (NousResearch, 103k+ GitHub stars, ICLR 2026) identified **skill poisoning** as a critical unresolved vulnerability in its own architecture: a single-turn prompt injection can cause the agent to write a malicious skill file that loads as trusted context on every future wake, creating a persistent, self-reinforcing compromise. Hermes has no mitigation beyond input filtering because it lacks a formal trust classification — all agent-curated content is implicitly trusted.
+
+This is the precise attack that Proposal 07's trust model prevents. Skills and memory are `semi-trusted` segments. A `semi-trusted` segment cannot grant tools, alter policy, request secrets, override completion criteria, or authorize mutation — regardless of what its content says. The propagation rule is the defense. ADR-003X (Prompt Boundary) should name this threat explicitly. See `docs/research/hermes-applied.md` §1.
+
+### Encode a memory consolidation trigger in role.md
+
+Hermes uses character-limit discipline for MEMORY.md: when the file exceeds 80% of its character budget, the agent consolidates — merging related facts, removing outdated entries, compressing content. This forces selectivity. The trigger is concrete and automatic, not left to agent discretion.
+
+Proposal 07 Phase 6 should encode this as a role.md field: `memory.consolidate_threshold: 0.8`. The `curate_memory` built-in tool should check this threshold on every wake and prompt curation when exceeded. See `docs/research/hermes-applied.md` §2.
+
+### The RunLedger is the substrate for any future self-improvement loop
+
+Hermes's GEPA mechanism (ICLR 2026 Oral) improves agent skills by analyzing complete execution traces — error messages, performance profiling, full reasoning chains. Agents with 20+ self-generated skills run 40% faster on repeated tasks in the same domain. GEPA is an external optimization loop that the harness enables by producing rich execution data.
+
+The `RunLedgerEntry` with `toolReceipts`, `actionReceipts`, `validation`, and `health` is precisely the substrate a GEPA-equivalent loop would consume. Building this ledger correctly in Phases 0–4 is what makes a future Murmurations self-improvement loop possible. The Langfuse self-reflection loop (Phase 5) and a GEPA-style trace analysis loop are complementary: Langfuse feeds architectural improvement through governance; GEPA would optimize task-level procedures autonomously. Phase 5 comes first; GEPA-equivalent is a post-Phase 6 direction. See `docs/research/hermes-applied.md` §3.
 
 ### Separate stable and volatile prompt content with an explicit cache boundary
 
@@ -586,7 +604,7 @@ The harness provides a `curate_memory` built-in tool that:
 2. Reads episodic digests for that range.
 3. Returns a proposed MEMORY.md delta for the agent to review and commit.
 
-`role.md` adds `memory.curate_on: "weekly"` to trigger curation prompts.
+`role.md` adds `memory.curate_on: "weekly"` and `memory.consolidate_threshold: 0.8` to trigger curation. When the agent's MEMORY.md exceeds 80% of its token budget, `curate_memory` is automatically invoked to merge related facts, remove outdated entries, and compress content before the next wake. This enforces selectivity rather than leaving consolidation to agent discretion (validated by Hermes Agent's character-limit discipline). See `docs/research/hermes-applied.md` §2.
 
 Prompt integration: the `PromptAssembler` injects MEMORY.md content as a `"memory"` segment with trust `"semi-trusted"` and an explicit token budget. Memory poisoning is mitigated, not eliminated, through provenance, source attribution, taint-aware curation, reviewable diffs, and write-scope enforcement.
 
@@ -615,6 +633,8 @@ export interface RunLedgerEntry {
 ```
 
 `RunLedgerEntry` should be an append-only projection of `AgentResult + WakeValidationResult + prompt/contract/tool metadata`, not a parallel replacement for those types. Early phases need this observational ledger for debugging and evals; resumable checkpoints and replay protection come later with durable execution.
+
+**Signed provenance for agent-written artifacts (Phase 6):** When Phase 6 enables agents to write skill or knowledge files, each file's `artifactRef` in the ledger should record the `wakeId`, `agentId`, and signal sources that produced it. This is the mitigation for Hermes's skill-poisoning gap — if a skill is later found to be malicious, the ledger identifies which wake and which signals produced it. Without this, autonomous skill generation is an unaudited trust escalation. See `docs/research/hermes-applied.md` §1.
 
 `WakeHealthActuals`:
 
@@ -730,6 +750,7 @@ Existing files become adapters:
 - Add `ToolInvocationRecorder` around every tool `execute` function passed to the LLM SDK.
 - Record normalized tool receipts.
 - Add MCP env migration controls (`ambientEnv` flag, explicit grants, warnings), then flip the default away from ambient `process.env`.
+- **MCP supply-chain:** MCP server commands/configs must be allowlisted or pinned and recorded by hash. Hermes's security review (103k+ star production deployment) explicitly warned that MCP's discovery surface "is the same surface that made npm a decade-long supply-chain problem." Allowlist-and-pin is required, not optional hardening. See `docs/research/hermes-applied.md` §4.
 - Add `budget_remaining()` built-in tool.
 
 ### Phase 4: Contract-backed completion
