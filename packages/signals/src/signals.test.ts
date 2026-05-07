@@ -13,6 +13,7 @@ import {
   makeRepoCoordinate,
   type GithubClient,
   type GithubClientError,
+  type GithubComment,
   type GithubIssue,
   type Result,
 } from "@murmurations-ai/github";
@@ -34,7 +35,7 @@ const fakeIssue = (
   title: overrides.title ?? "Test issue",
   body: overrides.body ?? "body content",
   state: overrides.state ?? "open",
-  labels: overrides.labels ?? ["test"],
+  labels: overrides.labels ?? ["assigned:alpha"],
   authorLogin: overrides.authorLogin ?? "xeeban",
   createdAt: overrides.createdAt ?? new Date("2026-04-09T10:00:00Z"),
   updatedAt: overrides.updatedAt ?? new Date("2026-04-09T11:00:00Z"),
@@ -133,6 +134,37 @@ const makeFailingGithub = (): GithubClient => ({
   updateIssueState: mutationDenied,
   lastRateLimit: () => null,
 });
+const fakeComment = (
+  overrides: Partial<GithubComment> & { readonly n?: number } = {},
+): GithubComment => ({
+  id: overrides.id ?? 1,
+  issueNumber: makeIssueNumber(overrides.n ?? 1),
+  authorLogin: overrides.authorLogin ?? "source",
+  body: overrides.body ?? "comment body",
+  createdAt: overrides.createdAt ?? new Date("2026-04-09T12:00:00Z"),
+  updatedAt: overrides.updatedAt ?? new Date("2026-04-09T12:00:00Z"),
+  htmlUrl: overrides.htmlUrl ?? "https://github.com/xeeban/emergent-praxis/issues/1#issuecomment-1",
+});
+
+/** Fake GitHub client that returns per-issue comment lists. */
+const makeFakeGithubWithComments = (
+  issues: readonly GithubIssue[],
+  commentsByIssueNumber: ReadonlyMap<number, readonly GithubComment[]>,
+): GithubClient => ({
+  ...makeFakeGithub(issues),
+  async listIssueComments(_repo, number) {
+    const comments = commentsByIssueNumber.get(number.value) ?? [];
+    return { ok: true, value: comments };
+  },
+});
+
+/** Fake GitHub client whose listIssueComments always errors. */
+const makeGithubWithFailingComments = (issues: readonly GithubIssue[]): GithubClient => ({
+  ...makeFakeGithub(issues),
+  async listIssueComments() {
+    return { ok: false, error: { code: "not-found" } as unknown as GithubClientError };
+  },
+});
 /* eslint-enable @typescript-eslint/require-await */
 
 const mkContext = (
@@ -140,15 +172,15 @@ const mkContext = (
   overrides: Partial<SignalAggregationContext> = {},
 ): SignalAggregationContext => ({
   wakeId: makeWakeId("wake-test"),
-  agentId: makeAgentId("07-wren"),
+  agentId: makeAgentId("alpha"),
   agentDir,
   frontmatter: {
-    agentId: makeAgentId("07-wren"),
-    name: "Wren",
+    agentId: makeAgentId("alpha"),
+    name: "Alpha",
     modelTier: "balanced",
-    groupMemberships: [makeGroupId("engineering")],
+    groupMemberships: [makeGroupId("circle-a")],
   },
-  groupMemberships: [makeGroupId("engineering")],
+  groupMemberships: [makeGroupId("circle-a")],
   wakeReason: { kind: "manual", invokedBy: "test" },
   now: new Date("2026-04-09T14:00:00Z"),
   ...overrides,
@@ -213,7 +245,7 @@ describe("DefaultSignalAggregator", () => {
       if (s?.kind === "github-issue") {
         expect(s.number).toBe(241);
         expect(s.title).toBe("Engineering Circle ratified");
-        expect(s.labels).toEqual(["test"]);
+        expect(s.labels).toEqual(["assigned:alpha"]);
       }
     }
   });
@@ -411,12 +443,13 @@ describe("DefaultSignalAggregator", () => {
       fakeIssue({
         n: 259,
         title: "Action: do something",
-        labels: ["action-item", "assigned:07-wren"],
+        labels: ["action-item", "assigned:alpha"],
       }),
+      // scope:all so the bundle sees it; assigned:beta so it is NOT this agent's action item
       fakeIssue({
         n: 260,
         title: "Action: other thing",
-        labels: ["action-item", "assigned:02-content"],
+        labels: ["action-item", "scope:all", "assigned:beta"],
       }),
       fakeIssue({ n: 100, title: "Regular issue", labels: ["bug"] }),
     ];
@@ -425,11 +458,11 @@ describe("DefaultSignalAggregator", () => {
       github: makeFakeGithub(issues),
       githubScopes: [{ repo: REPO }],
     });
-    const result = await agg.aggregate(mkContext("07-wren"));
+    const result = await agg.aggregate(mkContext("alpha"));
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.bundle.signals).toHaveLength(3);
-      // Only #259 is assigned to 07-wren
+      // Only #259 is assigned to alpha
       expect(result.bundle.actionItems).toHaveLength(1);
       const item = result.bundle.actionItems[0];
       expect(item?.kind).toBe("github-issue");
@@ -450,6 +483,252 @@ describe("DefaultSignalAggregator", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.bundle.actionItems).toHaveLength(0);
+    }
+  });
+
+  it("routing filter: mixed-agent pool — only this agent's issues and unlabeled pass through", async () => {
+    // Harness #353 core scenario: a shared aggregator pool contains issues
+    // for multiple agents. The per-agent filter must retain only:
+    //   - issues with routing labels matching this agent (assigned:alpha, scope:all)
+    //   - issues with NO routing labels (operational metadata visible to all)
+    // Issues with routing labels for OTHER agents are dropped.
+    const issues = [
+      fakeIssue({ n: 1, labels: ["assigned:alpha"] }),
+      fakeIssue({ n: 2, labels: ["assigned:beta"] }),
+      fakeIssue({ n: 3, labels: ["scope:all"] }),
+      fakeIssue({ n: 4, labels: ["bug"] }),
+      fakeIssue({ n: 5, labels: ["assigned:alpha", "scope:all"] }),
+      fakeIssue({ n: 6, labels: ["scope:agent:other-agent"] }),
+      fakeIssue({ n: 7, labels: ["bug", "scope:agent:other-agent"] }),
+    ];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const nums = result.bundle.signals
+        .filter((s) => s.kind === "github-issue")
+        .map((s) => (s as unknown as { number: number }).number)
+        .sort((a, b) => a - b);
+      // #1 (assigned:alpha) ✓, #2 (assigned:beta) ✗, #3 (scope:all) ✓,
+      // #4 (bug — no routing labels) ✓, #5 (assigned:alpha+scope:all) ✓,
+      // #6 (scope:agent:other-agent) ✗, #7 (bug+scope:agent:other) ✗
+      expect(nums).toEqual([1, 3, 4, 5]);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Comment enrichment (harness#350)
+  // -------------------------------------------------------------------------
+
+  it("comment enrichment: comments are appended to excerpt when commentCount > 0", async () => {
+    const issue = fakeIssue({
+      n: 42,
+      body: "Issue body text.",
+      commentCount: 2,
+      labels: ["assigned:alpha"],
+    });
+    const comments = [
+      fakeComment({
+        id: 1,
+        authorLogin: "source",
+        body: "First answer.",
+        createdAt: new Date("2026-04-10T09:00:00Z"),
+      }),
+      fakeComment({
+        id: 2,
+        authorLogin: "nori",
+        body: "Follow-up note.",
+        createdAt: new Date("2026-04-10T10:00:00Z"),
+      }),
+    ];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithubWithComments([issue], new Map([[42, comments]])),
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const signal = result.bundle.signals.find(
+        (s) => s.kind === "github-issue" && (s as unknown as { number: number }).number === 42,
+      );
+      expect(signal?.kind).toBe("github-issue");
+      if (signal?.kind === "github-issue") {
+        expect(signal.excerpt).toContain("Issue body text.");
+        expect(signal.excerpt).toContain("**Comments (2):**");
+        expect(signal.excerpt).toContain('<untrusted-comment author="@source"');
+        expect(signal.excerpt).toContain("First answer.");
+        expect(signal.excerpt).toContain('<untrusted-comment author="@nori"');
+        expect(signal.excerpt).toContain("Follow-up note.");
+      }
+    }
+  });
+
+  it("comment enrichment: no comment fetch when commentCount is 0", async () => {
+    // listIssueComments throws on this client — if called it would throw and
+    // the test would fail, proving the guard fires correctly.
+    const issue = fakeIssue({ n: 10, body: "body only", commentCount: 0, labels: ["bug"] });
+    const client: GithubClient = {
+      ...makeFakeGithub([issue]),
+      listIssueComments(): never {
+        throw new Error("listIssueComments must not be called when commentCount is 0");
+      },
+    };
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: client,
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const signal = result.bundle.signals.find(
+        (s) => s.kind === "github-issue" && (s as unknown as { number: number }).number === 10,
+      );
+      if (signal?.kind === "github-issue") {
+        expect(signal.excerpt).toBe("body only");
+      }
+    }
+  });
+
+  it("comment enrichment: cap at 20 comments per issue", async () => {
+    const issue = fakeIssue({ n: 7, body: "base", commentCount: 30, labels: ["assigned:alpha"] });
+    const thirtyComments = Array.from({ length: 30 }, (_, i) =>
+      fakeComment({ id: i + 1, body: `comment ${String(i + 1)}`, authorLogin: "source" }),
+    );
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithubWithComments([issue], new Map([[7, thirtyComments]])),
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const signal = result.bundle.signals.find(
+        (s) => s.kind === "github-issue" && (s as unknown as { number: number }).number === 7,
+      );
+      if (signal?.kind === "github-issue") {
+        expect(signal.excerpt).toContain("comment 20");
+        expect(signal.excerpt).not.toContain("comment 21");
+      }
+    }
+  });
+
+  it("comment enrichment: gracefully falls back to body-only when listIssueComments fails", async () => {
+    const issue = fakeIssue({
+      n: 5,
+      body: "original body",
+      commentCount: 3,
+      labels: ["assigned:alpha"],
+    });
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeGithubWithFailingComments([issue]),
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const signal = result.bundle.signals.find(
+        (s) => s.kind === "github-issue" && (s as unknown as { number: number }).number === 5,
+      );
+      if (signal?.kind === "github-issue") {
+        expect(signal.excerpt).toBe("original body");
+        expect(signal.excerpt).not.toContain("Comments");
+      }
+      // Failure must be surfaced as a bundle warning, not swallowed silently
+      expect(result.bundle.warnings.some((w) => w.includes("failed to fetch comments"))).toBe(true);
+    }
+  });
+
+  it("comment enrichment: falls back to body-only when commentCount > 0 but API returns empty (deleted comments)", async () => {
+    // GitHub's commentCount can reflect deleted comments — the API may return
+    // an empty array for an issue with commentCount > 0. The aggregator must
+    // not append an empty "Comments:" section in this case.
+    const issue = fakeIssue({
+      n: 9,
+      body: "original body",
+      commentCount: 1,
+      labels: ["assigned:alpha"],
+    });
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithubWithComments([issue], new Map([[9, []]])),
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const signal = result.bundle.signals.find(
+        (s) => s.kind === "github-issue" && (s as unknown as { number: number }).number === 9,
+      );
+      if (signal?.kind === "github-issue") {
+        expect(signal.excerpt).toBe("original body");
+        expect(signal.excerpt).not.toContain("Comments");
+      }
+    }
+  });
+
+  it("comment enrichment: count header reflects shown count with truncation note when total > 20", async () => {
+    // When commentCount exceeds MAX_COMMENTS_PER_ISSUE, the header must say
+    // "showing first N of M" so agents know the thread is truncated.
+    const issue = fakeIssue({ n: 11, body: "base", commentCount: 25, labels: ["assigned:alpha"] });
+    const twentyFiveComments = Array.from({ length: 25 }, (_, i) =>
+      fakeComment({ id: i + 1, body: `comment ${String(i + 1)}`, authorLogin: "source" }),
+    );
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithubWithComments([issue], new Map([[11, twentyFiveComments]])),
+      githubScopes: [{ repo: REPO }],
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const signal = result.bundle.signals.find(
+        (s) => s.kind === "github-issue" && (s as unknown as { number: number }).number === 11,
+      );
+      if (signal?.kind === "github-issue") {
+        // Header must show shown count and total, not just issue.commentCount
+        expect(signal.excerpt).toContain("showing first 20 of 25");
+      }
+    }
+  });
+
+  it("routing filter: filter runs before cap — agent's own issues survive even when cross-agent pool is large", async () => {
+    // The filter must apply to the raw pool BEFORE the githubIssue cap so
+    // cross-agent issues cannot crowd out this agent's directives.
+    const agentDirective = fakeIssue({
+      n: 999,
+      labels: ["source-directive", "assigned:alpha"],
+      updatedAt: new Date("2026-05-01T08:00:00Z"),
+    });
+    const crossAgentIssues = Array.from({ length: 10 }, (_, i) =>
+      fakeIssue({
+        n: 100 + i,
+        labels: ["assigned:beta"],
+        updatedAt: new Date(`2026-05-0${String(i + 2)}T12:00:00Z`), // newer than directive
+      }),
+    );
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub([agentDirective, ...crossAgentIssues]),
+      githubScopes: [{ repo: REPO }],
+      caps: { githubIssue: 5 },
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const directive = result.bundle.signals.find(
+        (s) => s.kind === "github-issue" && (s as unknown as { number: number }).number === 999,
+      );
+      expect(
+        directive,
+        "agent directive must survive even when cross-agent issues are newer",
+      ).toBeDefined();
     }
   });
 });
@@ -735,7 +1014,9 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       ],
     });
 
-    const result = await agg.aggregate(mkContext("rentals-agent"));
+    const result = await agg.aggregate(
+      mkContext("rentals-agent", { agentId: makeAgentId("rentals-agent") }),
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -797,7 +1078,9 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       githubScopes: [{ repo: REPO, anyLabel: ["assigned:rentals-agent", "scope:all"] }],
     });
 
-    const result = await agg.aggregate(mkContext("rentals-agent"));
+    const result = await agg.aggregate(
+      mkContext("rentals-agent", { agentId: makeAgentId("rentals-agent") }),
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const matching = result.bundle.signals.filter(
@@ -936,7 +1219,9 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       // truncation (older `assigned:` items came first).
       caps: { githubIssue: 3, total: 50 },
     });
-    const result = await agg.aggregate(mkContext("rentals-agent"));
+    const result = await agg.aggregate(
+      mkContext("rentals-agent", { agentId: makeAgentId("rentals-agent") }),
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const directive = result.bundle.signals.find(
@@ -1003,7 +1288,9 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
         },
       ],
     });
-    const result = await agg.aggregate(mkContext("rentals-agent"));
+    const result = await agg.aggregate(
+      mkContext("rentals-agent", { agentId: makeAgentId("rentals-agent") }),
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const failures = result.bundle.partialFailures ?? [];

@@ -340,6 +340,8 @@ export interface CallOptions {
   readonly bypassCache?: boolean;
   readonly costHook?: GithubCostHook;
   readonly signal?: AbortSignal;
+  /** Passed as `?per_page=N` for list endpoints that accept it (e.g. listIssueComments). */
+  readonly perPage?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -435,7 +437,10 @@ class GithubClientImpl implements GithubClient {
     number: IssueNumber,
     options: CallOptions = {},
   ): Promise<Result<readonly GithubComment[], GithubClientError>> {
-    const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/issues/${String(number.value)}/comments`;
+    const params = new URLSearchParams();
+    if (options.perPage !== undefined) params.set("per_page", String(options.perPage));
+    const qs = params.size > 0 ? `?${params.toString()}` : "";
+    const url = `${this.#baseUrl}/repos/${repo.owner.value}/${repo.name.value}/issues/${String(number.value)}/comments${qs}`;
     const raw = await this.#request(url, options);
     if (!raw.ok) return raw;
     return parseCommentArray(raw.value.body, number);

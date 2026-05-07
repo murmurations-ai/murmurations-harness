@@ -13,6 +13,9 @@ import {
   ACTION_ITEM_LABEL,
   SCOPE_ALL_LABEL,
   assignedLabel,
+  buildAgentRoutingLabels,
+  isAssignedLabel,
+  isScopeLabel,
   makeAgentId,
   type AgentId,
   type Signal,
@@ -397,14 +400,87 @@ export class DefaultSignalAggregator implements SignalAggregator {
       return b.issue.number.value - a.issue.number.value; // DESC by issue number
     });
 
-    let kept: typeof raw = raw;
-    if (raw.length > this.#caps.githubIssue) {
-      kept = raw.slice(0, this.#caps.githubIssue);
+    // Filter out issues that carry routing labels (assigned:* or scope:*)
+    // that belong to a different agent BEFORE applying the cap. Filtering
+    // first ensures the githubIssue cap applies to the agent-relevant pool,
+    // not the merged cross-agent pool (harness#353). Issues with NO routing
+    // labels pass through — they carry operational metadata (priority:*, bug,
+    // etc.) that every agent should see. Uses isAssignedLabel/isScopeLabel
+    // from the labels module so the predicate stays in sync with any future
+    // label vocabulary additions.
+    const agentRoutingSet = new Set(
+      buildAgentRoutingLabels(
+        context.agentId.value,
+        context.groupMemberships.map((g) => g.value),
+      ),
+    );
+    const agentFiltered = raw.filter(({ issue }) => {
+      const routingLabels = issue.labels.filter((l) => isAssignedLabel(l) || isScopeLabel(l));
+      if (routingLabels.length === 0) return true;
+      return routingLabels.some((l) => agentRoutingSet.has(l));
+    });
+    if (agentFiltered.length < raw.length) {
       warnings.push(
-        `github-issue source truncated to ${String(this.#caps.githubIssue)} of ${String(raw.length)} matches (cap, sorted by updatedAt desc)`,
+        `github-issue source: filtered ${String(raw.length - agentFiltered.length)} out-of-scope issue(s) for agent ${context.agentId.value}`,
       );
     }
-    return kept.map(({ issue, trust }) => issueToSignal(issue, trust, context.now));
+
+    let kept: typeof agentFiltered = agentFiltered;
+    if (agentFiltered.length > this.#caps.githubIssue) {
+      kept = agentFiltered.slice(0, this.#caps.githubIssue);
+      warnings.push(
+        `github-issue source truncated to ${String(this.#caps.githubIssue)} of ${String(agentFiltered.length)} matches (cap, sorted by updatedAt desc)`,
+      );
+    }
+
+    // harness#350: fetch comments for issues that have them so agents see
+    // Source answers posted as comments, not just the original body.
+    // Comments are wrapped in <untrusted-comment> tags so agents can distinguish
+    // user-contributed content from harness-structured signals (prompt injection
+    // boundary). Each comment fetch requests exactly MAX_COMMENTS_PER_ISSUE
+    // entries so we never pay for more than we use.
+    const MAX_COMMENTS_PER_ISSUE = 20;
+    const enrichedBodies = new Map<string, string>();
+    const issuesWithComments = kept.filter(({ issue }) => issue.commentCount > 0);
+    if (issuesWithComments.length > 0) {
+      await Promise.all(
+        issuesWithComments.map(async ({ issue }) => {
+          const key = `${issue.repo.owner.value}/${issue.repo.name.value}#${String(issue.number.value)}`;
+          const result = await client.listIssueComments(issue.repo, issue.number, {
+            perPage: MAX_COMMENTS_PER_ISSUE,
+          });
+          if (!result.ok) {
+            warnings.push(
+              `github-issue source: failed to fetch comments for ${key} (${result.error.code}); falling back to body-only`,
+            );
+            return;
+          }
+          const comments = result.value.slice(0, MAX_COMMENTS_PER_ISSUE);
+          if (comments.length === 0) return;
+          const shown = comments.length;
+          const truncationNote =
+            issue.commentCount > shown
+              ? ` — showing first ${String(shown)} of ${String(issue.commentCount)}`
+              : "";
+          const commentSection = comments
+            .map((c) => {
+              const date = c.createdAt.toISOString().split("T")[0] ?? "";
+              return `<untrusted-comment author="@${c.authorLogin}" date="${date}">\n${c.body}\n</untrusted-comment>`;
+            })
+            .join("\n\n");
+          const bodyPart = issue.body ?? "";
+          enrichedBodies.set(
+            key,
+            `${bodyPart}\n\n---\n**Comments (${String(shown)}${truncationNote}):**\n\n${commentSection}`,
+          );
+        }),
+      );
+    }
+
+    return kept.map(({ issue, trust }) => {
+      const key = `${issue.repo.owner.value}/${issue.repo.name.value}#${String(issue.number.value)}`;
+      return issueToSignal(issue, trust, context.now, enrichedBodies.get(key));
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -506,7 +582,12 @@ export class DefaultSignalAggregator implements SignalAggregator {
 const TITLE_MAX_CHARS = 200;
 const LABEL_MAX_CHARS = 100;
 
-const issueToSignal = (issue: GithubIssue, trust: SignalTrustLevel, fetchedAt: Date): Signal => ({
+const issueToSignal = (
+  issue: GithubIssue,
+  trust: SignalTrustLevel,
+  fetchedAt: Date,
+  enrichedBody?: string,
+): Signal => ({
   kind: "github-issue",
   id: `github-issue:${issue.repo.owner.value}/${issue.repo.name.value}#${String(issue.number.value)}`,
   trust,
@@ -515,7 +596,7 @@ const issueToSignal = (issue: GithubIssue, trust: SignalTrustLevel, fetchedAt: D
   title: sanitizeText(issue.title, TITLE_MAX_CHARS),
   url: issue.htmlUrl,
   labels: issue.labels.map((l) => sanitizeText(l, LABEL_MAX_CHARS)),
-  excerpt: sanitizeText(issue.body ?? "", EXCERPT_MAX_CHARS),
+  excerpt: sanitizeText(enrichedBody ?? issue.body ?? "", EXCERPT_MAX_CHARS),
 });
 
 const listMarkdownFiles = async (

@@ -16,6 +16,7 @@ import {
   type AgentResult,
   type CostBudget,
   type ResolvedModel,
+  type Signal,
 } from "./index.js";
 import { SpawnError, HandleUnknownError, InternalExecutorError } from "./index.js";
 
@@ -229,7 +230,23 @@ describe("parseWakeActions", () => {
 
 describe("validateWake", () => {
   const emptyResult = { actions: [], outputs: [], governanceEvents: [], wakeSummary: "" };
-  const emptyContext = { actionItems: [], signals: [] };
+
+  // Context builder — defaults agentId to "test" with no groups so that
+  // directives labeled "assigned:test" are counted as accountability.
+  // Pass agentId explicitly when the directive label differs (e.g. "architecture-agent").
+  const mkCtx = (
+    opts: {
+      actionItems?: readonly Signal[];
+      signals?: readonly Signal[];
+      agentId?: string;
+      groupIds?: readonly string[];
+    } = {},
+  ) => ({
+    actionItems: opts.actionItems ?? [],
+    signals: opts.signals ?? [],
+    agentId: opts.agentId ?? "test",
+    groupIds: opts.groupIds ?? [],
+  });
 
   const makeIssueSignal = (
     number: number,
@@ -247,7 +264,7 @@ describe("validateWake", () => {
   });
 
   it("marks wake as idle when no artifacts produced and no action items", () => {
-    const v = validateWake(emptyContext, emptyResult, []);
+    const v = validateWake(mkCtx(), emptyResult, []);
     expect(v.productive).toBe(false);
     expect(v.artifactCount).toBe(0);
     expect(v.directivesUnaddressed).toEqual([]);
@@ -258,7 +275,7 @@ describe("validateWake", () => {
     const receipts = [
       { action: { kind: "label-issue" as const, issueNumber: 1, label: "x" }, success: true },
     ];
-    const v = validateWake(emptyContext, emptyResult, receipts);
+    const v = validateWake(mkCtx(), emptyResult, receipts);
     expect(v.productive).toBe(true);
     expect(v.artifactCount).toBe(1);
   });
@@ -272,7 +289,7 @@ describe("validateWake", () => {
         success: true,
       },
     ];
-    const v = validateWake({ actionItems, signals: [] }, result, receipts);
+    const v = validateWake(mkCtx({ actionItems }), result, receipts);
     expect(v.actionItemsAssigned).toBe(1);
     expect(v.actionItemsAddressed).toBe(1);
     expect(v.productive).toBe(true);
@@ -284,7 +301,7 @@ describe("validateWake", () => {
       ...emptyResult,
       wakeSummary: "I have addressed #259 — review complete.",
     };
-    const v = validateWake({ actionItems, signals: [] }, result, []);
+    const v = validateWake(mkCtx({ actionItems }), result, []);
     expect(v.actionItemsAssigned).toBe(1);
     expect(v.actionItemsAddressed).toBe(0);
     expect(v.productive).toBe(false);
@@ -307,7 +324,7 @@ describe("validateWake", () => {
         error: "scope-violation",
       },
     ];
-    const v = validateWake({ actionItems, signals: [] }, result, receipts);
+    const v = validateWake(mkCtx({ actionItems }), result, receipts);
     expect(v.actionItemsAssigned).toBe(1);
     expect(v.actionItemsAddressed).toBe(0);
     expect(v.productive).toBe(false);
@@ -320,7 +337,7 @@ describe("validateWake", () => {
       ...emptyResult,
       actions: [{ kind: "comment-issue" as const, issueNumber: 101, body: "done" }],
     };
-    const v = validateWake({ actionItems, signals: [] }, result, []);
+    const v = validateWake(mkCtx({ actionItems }), result, []);
     expect(v.actionItemsAssigned).toBe(1);
     expect(v.actionItemsAddressed).toBe(0);
     expect(v.productive).toBe(false);
@@ -328,7 +345,7 @@ describe("validateWake", () => {
 
   it("flags unaddressed action items", () => {
     const actionItems = [makeIssueSignal(100, ["action-item", "assigned:test"])];
-    const v = validateWake({ actionItems, signals: [] }, emptyResult, []);
+    const v = validateWake(mkCtx({ actionItems }), emptyResult, []);
     expect(v.productive).toBe(false);
     expect(v.actionItemsAssigned).toBe(1);
     expect(v.actionItemsAddressed).toBe(0);
@@ -337,7 +354,7 @@ describe("validateWake", () => {
 
   it("counts governance events as artifacts", () => {
     const result = { ...emptyResult, governanceEvents: [{ kind: "tension", payload: {} }] };
-    const v = validateWake(emptyContext, result, []);
+    const v = validateWake(mkCtx(), result, []);
     expect(v.productive).toBe(true);
     expect(v.artifactCount).toBe(1);
   });
@@ -351,7 +368,7 @@ describe("validateWake", () => {
       { action: { kind: "label-issue" as const, issueNumber: 10, label: "ok" }, success: true },
     ];
     const v = validateWake(
-      { actionItems, signals: [] },
+      mkCtx({ actionItems }),
       { ...emptyResult, wakeSummary: "Addressed #10 but mentioned #20." },
       receipts,
     );
@@ -374,7 +391,11 @@ describe("validateWake", () => {
         success: true,
       },
     ];
-    const v = validateWake({ actionItems: [], signals: [directive] }, emptyResult, receipts);
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "architecture-agent" }),
+      emptyResult,
+      receipts,
+    );
     expect(v.directivesUnaddressed).toEqual([]);
     expect(v.productive).toBe(true);
   });
@@ -385,7 +406,11 @@ describe("validateWake", () => {
       ...emptyResult,
       wakeSummary: "I have posted my CONSENT to the proposal on issue #592.",
     };
-    const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "architecture-agent" }),
+      result,
+      [],
+    );
     expect(v.directivesUnaddressed).toEqual([{ issueNumber: 592, reason: "narrative-only-claim" }]);
     expect(v.productive).toBe(false);
     expect(v.reason).toContain("not addressed by structured evidence");
@@ -393,7 +418,11 @@ describe("validateWake", () => {
 
   it("flags a directive as no-structured-action when the wake produced nothing referring to it", () => {
     const directive = makeIssueSignal(571, ["source-directive", "assigned:architecture-agent"]);
-    const v = validateWake({ actionItems: [], signals: [directive] }, emptyResult, []);
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "architecture-agent" }),
+      emptyResult,
+      [],
+    );
     expect(v.directivesUnaddressed).toEqual([{ issueNumber: 571, reason: "no-structured-action" }]);
     expect(v.productive).toBe(false);
   });
@@ -407,7 +436,11 @@ describe("validateWake", () => {
         error: "scope-violation",
       },
     ];
-    const v = validateWake({ actionItems: [], signals: [directive] }, emptyResult, receipts);
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "architecture-agent" }),
+      emptyResult,
+      receipts,
+    );
     expect(v.directivesUnaddressed).toEqual([
       { issueNumber: 554, reason: "no-successful-receipt" },
     ]);
@@ -432,21 +465,25 @@ describe("validateWake", () => {
         },
       ],
     };
-    const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
+    const v = validateWake(mkCtx({ signals: [directive] }), result, []);
     expect(v.directivesUnaddressed).toEqual([]);
     expect(v.productive).toBe(true);
   });
 
   it("dedupes a directive that appears in both signals and actionItems", () => {
     const directive = makeIssueSignal(592, ["source-directive", "assigned:test"]);
-    const v = validateWake({ actionItems: [directive], signals: [directive] }, emptyResult, []);
+    const v = validateWake(
+      mkCtx({ actionItems: [directive], signals: [directive] }),
+      emptyResult,
+      [],
+    );
     expect(v.directivesUnaddressed).toHaveLength(1);
     expect(v.directivesUnaddressed[0]?.issueNumber).toBe(592);
   });
 
   it("does not flag non-directive issues as unaddressed directives", () => {
     const actionItem = makeIssueSignal(100, ["action-item", "assigned:test"]);
-    const v = validateWake({ actionItems: [actionItem], signals: [] }, emptyResult, []);
+    const v = validateWake(mkCtx({ actionItems: [actionItem] }), emptyResult, []);
     expect(v.directivesUnaddressed).toEqual([]);
   });
 
@@ -470,7 +507,7 @@ describe("validateWake", () => {
         },
       ],
     };
-    const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
+    const v = validateWake(mkCtx({ signals: [directive] }), result, []);
     expect(v.directivesUnaddressed).toEqual([{ issueNumber: 5, reason: "no-structured-action" }]);
   });
 
@@ -482,7 +519,7 @@ describe("validateWake", () => {
       ...emptyResult,
       wakeSummary: "I have posted CONSENT on #592",
     };
-    const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
+    const v = validateWake(mkCtx({ signals: [directive] }), result, []);
     expect(v.directivesUnaddressed).toEqual([{ issueNumber: 5, reason: "no-structured-action" }]);
   });
 
@@ -504,7 +541,7 @@ describe("validateWake", () => {
         },
       ],
     };
-    const v = validateWake({ actionItems: [], signals: [directive] }, result, []);
+    const v = validateWake(mkCtx({ signals: [directive] }), result, []);
     expect(v.directivesUnaddressed).toEqual([{ issueNumber: 59, reason: "no-structured-action" }]);
   });
 
@@ -532,7 +569,7 @@ describe("validateWake", () => {
         },
       ],
     };
-    const v = validateWake({ actionItems: [], signals: [dir1, dir2, dir3] }, result, []);
+    const v = validateWake(mkCtx({ signals: [dir1, dir2, dir3] }), result, []);
     // First directive (592) is claimed by the multi-reference event;
     // the other two are not claimed.
     expect(v.directivesUnaddressed).toHaveLength(2);
@@ -571,7 +608,7 @@ describe("validateWake", () => {
         },
       ],
     };
-    const v = validateWake({ actionItems: [], signals: [dir1, dir2] }, result, []);
+    const v = validateWake(mkCtx({ signals: [dir1, dir2] }), result, []);
     expect(v.directivesUnaddressed).toEqual([]);
   });
 
@@ -590,7 +627,57 @@ describe("validateWake", () => {
         },
       ],
     };
-    expect(() => validateWake({ actionItems: [], signals: [directive] }, result, [])).not.toThrow();
+    expect(() => validateWake(mkCtx({ signals: [directive] }), result, [])).not.toThrow();
+  });
+
+  // Routing filter tests (harness#354 regression coverage)
+
+  it("skips a directive scoped to a different agent — does not count as unaddressed", () => {
+    const directive = makeIssueSignal(100, ["source-directive", "assigned:other-agent"]);
+    const v = validateWake(mkCtx({ signals: [directive] }), emptyResult, []);
+    // Directive is not in this agent's routing set → not counted as accountability
+    expect(v.directivesUnaddressed).toEqual([]);
+  });
+
+  it("counts a scope:all directive as this agent's accountability regardless of agentId", () => {
+    const directive = makeIssueSignal(200, ["source-directive", "scope:all"]);
+    const v = validateWake(mkCtx({ signals: [directive] }), emptyResult, []);
+    expect(v.directivesUnaddressed).toEqual([{ issueNumber: 200, reason: "no-structured-action" }]);
+  });
+
+  it("counts a scope:group directive as accountability when agent is in that group", () => {
+    const directive = makeIssueSignal(300, ["source-directive", "scope:group:circle-a"]);
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "alpha", groupIds: ["circle-a"] }),
+      emptyResult,
+      [],
+    );
+    expect(v.directivesUnaddressed).toEqual([{ issueNumber: 300, reason: "no-structured-action" }]);
+  });
+
+  it("skips a scope:group directive when agent is NOT in that group", () => {
+    const directive = makeIssueSignal(300, ["source-directive", "scope:group:circle-b"]);
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "alpha", groupIds: ["circle-a"] }),
+      emptyResult,
+      [],
+    );
+    expect(v.directivesUnaddressed).toEqual([]);
+  });
+
+  it("multi-group agent: counts directives for any of its groups", () => {
+    const d1 = makeIssueSignal(401, ["source-directive", "scope:group:circle-a"]);
+    const d2 = makeIssueSignal(402, ["source-directive", "scope:group:circle-b"]);
+    const d3 = makeIssueSignal(403, ["source-directive", "scope:group:circle-c"]);
+    const v = validateWake(
+      mkCtx({ signals: [d1, d2, d3], agentId: "alpha", groupIds: ["circle-a", "circle-b"] }),
+      emptyResult,
+      [],
+    );
+    // circle-c is not in this agent's groups → d3 skipped
+    expect(v.directivesUnaddressed.map((d) => d.issueNumber).sort((a, b) => a - b)).toEqual([
+      401, 402,
+    ]);
   });
 });
 
