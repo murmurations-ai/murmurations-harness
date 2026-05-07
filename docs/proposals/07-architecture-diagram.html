@@ -128,22 +128,22 @@
   }
 
   /* Colors per step */
-  .observe .step-icon  { background: #1e3a5f; color: #60a5fa; }
-  .decide  .step-icon  { background: #1a3a2a; color: #34d399; }
-  .act     .step-icon  { background: #3a2a1e; color: #f59e0b; }
-  .validate .step-icon { background: #2a1e3a; color: #a78bfa; }
+  .observe  .step-icon { background: #1e3a5f; color: #60a5fa; }
+  .decide   .step-icon { background: #1a3a2a; color: #34d399; }
+  .act      .step-icon { background: #3a2a1e; color: #f59e0b; }
+  .record   .step-icon { background: #2a1e3a; color: #a78bfa; }
   .evaluate .step-icon { background: #1e3030; color: #2dd4bf; }
 
   .observe  .step-name { color: #60a5fa; }
   .decide   .step-name { color: #34d399; }
   .act      .step-name { color: #f59e0b; }
-  .validate .step-name { color: #a78bfa; }
+  .record   .step-name { color: #a78bfa; }
   .evaluate .step-name { color: #2dd4bf; }
 
   .observe  .step-tag { background: #1e3a5f; color: #60a5fa; }
   .decide   .step-tag { background: #1a3a2a; color: #34d399; }
   .act      .step-tag { background: #3a2a1e; color: #f59e0b; }
-  .validate .step-tag { background: #2a1e3a; color: #a78bfa; }
+  .record   .step-tag { background: #2a1e3a; color: #a78bfa; }
   .evaluate .step-tag { background: #1e3030; color: #2dd4bf; }
 
   /* ── Runtime Assembly Stack ── */
@@ -183,6 +183,8 @@
   }
 
   .l-source    { background: #1a1a2e; border-color: #6366f1; }
+  .l-memory    { background: #1e1a2e; border-color: #a78bfa; }
+  .l-context   { background: #1a1e2e; border-color: #475569; border-style: dashed; }
   .l-env       { background: #1a2e1a; border-color: #22c55e; }
   .l-prompt    { background: #1a2a3a; border-color: #3b82f6; }
   .l-tools     { background: #2e2a1a; border-color: #f59e0b; }
@@ -191,6 +193,8 @@
   .l-ledger    { background: #2e1a1a; border-color: #ef4444; }
 
   .l-source   .layer-name { color: #818cf8; }
+  .l-memory   .layer-name { color: #a78bfa; }
+  .l-context  .layer-name { color: #64748b; }
   .l-env      .layer-name { color: #4ade80; }
   .l-prompt   .layer-name { color: #60a5fa; }
   .l-tools    .layer-name { color: #fbbf24; }
@@ -199,12 +203,22 @@
   .l-ledger   .layer-name { color: #f87171; }
 
   .l-source   .layer-badge { background: #2e2e5e; color: #818cf8; }
+  .l-memory   .layer-badge { background: #2a1e4a; color: #a78bfa; }
+  .l-context  .layer-badge { background: #1a2030; color: #64748b; }
   .l-env      .layer-badge { background: #1a3a1a; color: #4ade80; }
   .l-prompt   .layer-badge { background: #1a3050; color: #60a5fa; }
   .l-tools    .layer-badge { background: #3a2e1a; color: #fbbf24; }
   .l-model    .layer-badge { background: #3a1a3a; color: #c084fc; }
   .l-contract .layer-badge { background: #1a3838; color: #22d3ee; }
   .l-ledger   .layer-badge { background: #3a1a1a; color: #f87171; }
+
+  .stack-divider {
+    font-size: 10px;
+    color: #334155;
+    text-align: center;
+    padding: 2px 0;
+    letter-spacing: 0.5px;
+  }
 
   /* ── Trust Classification ── */
   .trust-table {
@@ -414,15 +428,15 @@
         </div>
       </div>
 
-      <div class="odare-step validate">
+      <div class="odare-step record">
         <div class="step-left">
           <div class="step-icon">✓</div>
           <div class="step-connector-line"></div>
         </div>
         <div class="step-body">
-          <div class="step-name">Validate</div>
-          <div class="step-desc">WakeValidator checks contract — outcome (artifacts exist?) AND behavioral (tool sequence policy-compliant?). Result written, not hidden in logs.</div>
-          <span class="step-tag">WakeValidationResult · WakeValidator</span>
+          <div class="step-name">Record</div>
+          <div class="step-desc">WakeValidator checks contract — outcome (artifacts exist?) AND behavioral (tool sequence policy-compliant?). Derive WakeHealthMetrics. Commit RunLedgerEntry (hash-chained). Write committed artifacts → Agent Memory.</div>
+          <span class="step-tag">WakeValidationResult · WakeHealthMetrics · RunLedger</span>
         </div>
       </div>
 
@@ -431,9 +445,9 @@
           <div class="step-icon">📊</div>
         </div>
         <div class="step-body">
-          <div class="step-name">Record</div>
-          <div class="step-desc">Derive WakeHealthMetrics (deterministic — no model call). Commit RunLedgerEntry (hash-chained). Apply HealthState policy. Notify GovernancePlugin on threshold events.</div>
-          <span class="step-tag">WakeHealthMetrics · RunLedger · AgentStateStore</span>
+          <div class="step-name">Evaluate</div>
+          <div class="step-desc">Apply HealthState policy (idle/low-eff decay). Notify GovernancePlugin on threshold events. Update AgentStateStore for next wake's OBSERVE. Deterministic — no model call.</div>
+          <span class="step-tag">HealthState · AgentStateStore · GovernancePlugin</span>
         </div>
       </div>
 
@@ -447,13 +461,31 @@
 
       <div class="layer l-source">
         <div class="layer-name">Source</div>
-        <div class="layer-detail">Human intent · strategy · bright lines</div>
+        <div class="layer-detail">Human intent · strategy · bright lines · operator configuration</div>
         <span class="layer-badge">human</span>
       </div>
 
+      <div class="layer l-memory">
+        <div class="layer-name">Agent Memory</div>
+        <div class="layer-detail">Agent-written, cross-wake persistent · Tier 1 Episodic: digests/ · logs/ · Tier 2 Semantic: MEMORY.md · knowledge/*.md · Written by RECORD → Read by OBSERVE as <code style="font-size:10px;background:#2a1e4a;padding:1px 4px;border-radius:3px">memory</code> segment (semi-trusted)</div>
+        <span class="layer-badge">G7 · Phase 6</span>
+      </div>
+
+      <div class="layer l-context">
+        <div class="layer-name">Context Sources <span style="font-size:10px;font-weight:400;color:#475569">(external, tool-accessible)</span></div>
+        <div class="layer-detail">
+          <span style="color:#60a5fa">Operator-configured:</span> Obsidian vault · internal docs · PDFs → EnvironmentSpec + trusted MCP tools · content treated as semi-trusted<br>
+          <span style="color:#f87171">Ad-hoc retrieval:</span> web search · external APIs · fetched during ACT · content treated as untrusted<br>
+          <span style="color:#64748b;font-style:italic">Not part of Agent Memory — agent reads but does not write to these sources</span>
+        </div>
+        <span class="layer-badge">via tools</span>
+      </div>
+
+      <div class="stack-divider">── AgentRuntime assembly boundary ──</div>
+
       <div class="layer l-env">
         <div class="layer-name">Environment Layer</div>
-        <div class="layer-detail">SignalBundle · GitHub issues + comments · dependency graph · health actuals · Langfuse metrics</div>
+        <div class="layer-detail">SignalBundle · GitHub issues + comments · dependency graph · WakeHealthMetrics (from AgentStateStore) · Langfuse metrics</div>
         <span class="layer-badge">G1 · G6</span>
       </div>
 

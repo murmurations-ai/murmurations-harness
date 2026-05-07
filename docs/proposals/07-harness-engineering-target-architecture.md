@@ -254,7 +254,9 @@ The harness executes a five-phase loop on every wake. Each phase is named, typed
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  OBSERVE   Read SignalBundle from Environment Layer.         │
-│            Apply signal routing filter. Build actionItemGraph│
+│            Apply routing filter. Build actionItemGraph.      │
+│            Load Agent Memory (MEMORY.md + knowledge/) as    │
+│            semi-trusted context for the Prompt Layer.        │
 ├─────────────────────────────────────────────────────────────┤
 │  DECIDE    Assemble PromptBundle from AgentRuntime.          │
 │            Select tools from Toolset (deny-by-default).      │
@@ -262,21 +264,22 @@ The harness executes a five-phase loop on every wake. Each phase is named, typed
 ├─────────────────────────────────────────────────────────────┤
 │  ACT       ToolInvocationRecorder wraps each tool execute(). │
 │            Policy check → approval gate → execute → receipt. │
-│            All ToolCallReceipts written to ledger immediately│
+│            ToolCallReceipts written in real time.            │
 ├─────────────────────────────────────────────────────────────┤
-│  VALIDATE  WakeValidator checks ExecutionContract:           │
-│            outcome (required artifacts exist?) AND           │
-│            behavioral (tool call sequence policy-compliant?) │
-│            WakeValidationResult written — not hidden in logs. │
+│  RECORD    WakeValidator checks contract — outcome AND       │
+│            behavioral (tool sequence policy-compliant?).     │
+│            Compute WakeHealthMetrics. Commit RunLedgerEntry  │
+│            (hash-chained, complete snapshot, includes both). │
+│            Write committed artifacts → Agent Memory tier 1.  │
 ├─────────────────────────────────────────────────────────────┤
-│  RECORD    Derive WakeHealthMetrics from receipts + result.  │
-│            Commit RunLedgerEntry (hash-chained, complete).   │
-│            Apply HealthState policy (idle/low-eff decay).    │
+│  EVALUATE  Apply HealthState policy (idle/low-eff decay).    │
 │            Notify GovernancePlugin on threshold events.      │
+│            Update AgentStateStore for next wake's OBSERVE.   │
+│            All deterministic — no model call.                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-VALIDATE and RECORD are distinct. VALIDATE is structured evidence: did the agent produce the required outputs via policy-compliant tool calls? RECORD is deterministic harness bookkeeping: persist the complete wake record and determine whether the health pattern warrants a governance response. Neither phase calls the model — the Subtraction Principle applies here too.
+RECORD and EVALUATE are both deterministic — neither calls the model. RECORD computes and persists: run the contract check, derive health metrics, commit the complete ledger entry. EVALUATE applies policy consequences: does the accumulated health pattern warrant a circuit-breaker pause or a governance event? The distinction matters because RECORD's outputs (validation result, health metrics, artifact refs) are in the ledger; EVALUATE's outputs (HealthState updates, governance events) act on the system outside the ledger.
 
 ### AgentRuntime Assembly Layers
 
@@ -284,45 +287,53 @@ VALIDATE and RECORD are distinct. VALIDATE is structured evidence: did the agent
 ┌─────────────────────────────────────────────────────────────┐
 │  Source (human)  — intent, strategy, bright lines            │
 ├─────────────────────────────────────────────────────────────┤
-│  Environment Layer  (what the agent perceives)               │
+│  Agent Memory  (cross-wake persistent knowledge)             │
+│  Tier 1 Episodic: agents/<id>/digests/ · logs/              │
+│  Tier 2 Semantic: agents/<id>/MEMORY.md · knowledge/*.md     │
+│  Written by RECORD (committed artifacts) each wake ↑        │
+│  Read by OBSERVE → injected into Prompt as `memory` segment  │
+├─────────────────────────────────────────────────────────────┤
+│  Environment Layer  (what the agent perceives this wake)     │
 │  SignalBundle: GitHub issues (with comments),                │
 │  dependency graph (actionable vs. blocked),                  │
-│  health actuals, Langfuse metrics signal,                    │
-│  private notes, inbox messages                               │
+│  WakeHealthMetrics (from AgentStateStore), Langfuse metrics  │
 ├─────────────────────────────────────────────────────────────┤
 │  Prompt Layer  (what the agent is told)                      │
 │  PromptBundle: typed PromptSegments with trust levels,       │
-│  token budgets, source refs, hash                            │
-│  Segments: identity · role · signals · memory ·              │
-│            skills · contract · governance · health           │
+│  token budgets, cacheAnchorIndex, hash                       │
+│  Segments: identity · role · contract · governance · skills  │
+│            ── cache boundary ──                              │
+│            signals · memory · health · wake-task             │
 ├─────────────────────────────────────────────────────────────┤
 │  Tools Layer  (what the agent can do)                        │
 │  ToolRegistry: MCP · extension · CLI · built-ins             │
-│  Policy: deny-by-default, per-agent allowlists,              │
-│  mutability, verification requirements                       │
-│  ToolCallReceipts: auditable outcome log                     │
+│  Policy: deny-by-default · per-agent allowlists ·            │
+│  mutability · verification · ApprovalPolicy                  │
+│  ToolCallReceipts: auditable, ordered by timestamp           │
 ├─────────────────────────────────────────────────────────────┤
 │  Model Layer                                                 │
 │  LLMClient (Vercel AI SDK) · pricing catalog                 │
-│  Langfuse telemetry tagged: agentId, wakeId, wakeMode,       │
-│  groupIds, promptHash, contractHash                          │
+│  Langfuse telemetry: agentId · wakeId · promptHash ·         │
+│  contractHash · wakeMode · groupIds                          │
 ├─────────────────────────────────────────────────────────────┤
 │  Execution Contract  (validation frame applied post-model)   │
-│  Obligation (required outputs, completion conditions) ·      │
-│  Permission (allowed side effects, budget) ·                 │
-│  Action Items (machine-readable) · Verification Steps        │
-│  WakeValidator checks both outcome AND behavioral surfaces   │
+│  Obligation (required outputs · completion conditions) ·     │
+│  Permission (allowed side effects · budget) ·                │
+│  WakeValidator: outcome check AND behavioral check           │
 ├─────────────────────────────────────────────────────────────┤
 │  Ledger  (what was recorded)                                 │
 │  promptHash · toolReceipts · actionReceipts ·                │
 │  WakeValidationResult · WakeHealthMetrics ·                  │
 │  WakeCostRecord · artifactRefs · status (pending|committed)  │
 └─────────────────────────────────────────────────────────────┘
+         ↑ Agent Memory is populated from Ledger artifactRefs
 ```
 
-Note: `ExecutionContract` appears in two places in the runtime. As a **spawn-time input**, its obligation and permission clauses are injected as a `trusted` prompt segment, so the model knows what it must produce and what it may do. As a **post-wake validation frame**, `WakeValidator` checks the model's actual output against the same contract — this is why it sits below the Model Layer in the assembly diagram. This duality is the core of the obligation/permission split described in §5 below.
+**Reading the diagram:** The stack shows the within-wake assembly from top (intent) to bottom (record). Agent Memory is the only cross-wake persistent layer — written by the RECORD phase as committed artifacts, read by the OBSERVE phase on the next wake. It is the agent's PKM: digests and logs in Tier 1 (episodic, raw), MEMORY.md and knowledge files in Tier 2 (semantic, curated). The `memory` segment in the Prompt Layer is Tier 2 content injected at OBSERVE time.
 
-**`AgentStateStore` — harness infrastructure, not a per-wake primitive:** `AgentStateStore` is the inter-wake bridge. It is not part of `AgentRuntime` (which is assembled fresh each wake) — it is persistent harness infrastructure that lives outside any single wake. It persists `HealthState`, rolling idle counts, action closure rates, tool error density, and effectiveness decay across wakes. The RECORD phase reads the prior `AgentStateStore` state, derives `WakeHealthMetrics`, updates the store, and makes the metrics available to the next wake's signal bundle. This is why `WakeHealthMetrics` appears in `SignalBundle` (OBSERVE phase input) — the RECORD phase from the prior wake wrote it. The `AgentStateStore` already exists in the harness; this proposal gives it an explicit named role in the architecture.
+**`ExecutionContract` dual lifecycle:** As a spawn-time input, its obligation and permission clauses are injected as a `trusted` prompt segment. As a post-wake validation frame, `WakeValidator` checks the model's actual output against the same contract — this is why it sits below the Model Layer. This duality is the core of the obligation/permission split described in §5 below.
+
+**`AgentStateStore` — harness infrastructure, not a per-wake primitive:** `AgentStateStore` is the inter-wake bridge for health state. It is not part of `AgentRuntime` (assembled fresh each wake) — it is persistent harness infrastructure that lives outside any single wake. The EVALUATE phase updates it; the next wake's OBSERVE phase reads it into `SignalBundle.health`. The `AgentStateStore` already exists in the harness; this proposal gives it an explicit named role.
 
 ### 1. AgentRuntime
 
