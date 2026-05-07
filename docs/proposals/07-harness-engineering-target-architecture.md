@@ -2,7 +2,7 @@
 
 **Status:** Pending consent — Engineering circle
 **Date:** 2026-05-06
-**Related research:** `docs/research/agentic-engineering-resource-list-2026.md`, `docs/research/harness-engineering-video-applied.md`, `docs/research/harness-engineering-transcript.md`, `docs/research/how-to-build-effective-agents-transcript.md`, `docs/research/minerva-lessons-applied.md`, `docs/research/spike-langfuse-self-reflection.md`, `docs/research/openclaw-applied.md`, `docs/research/hermes-applied.md`
+**Related research:** `docs/research/agentic-engineering-resource-list-2026.md`, `docs/research/harness-engineering-video-applied.md`, `docs/research/harness-engineering-transcript.md`, `docs/research/how-to-build-effective-agents-transcript.md`, `docs/research/minerva-lessons-applied.md`, `docs/research/spike-langfuse-self-reflection.md`, `docs/research/openclaw-applied.md`, `docs/research/hermes-applied.md`, `docs/research/langgraph-applied.md`, `docs/research/agentic-security-threats-applied.md`, `docs/research/beyond-task-completion-applied.md`
 **Related proposals/ADRs:** Proposal 01 sandboxing, Proposal 03 observability, Proposal 04 durable execution, Proposal 06 MCP integration, ADR-0013 signal aggregation, ADR-0021 collaboration provider, ADR-0022 Langfuse self-reflection, ADR-0029 persistent memory
 
 ## Proposal Metadata (S3)
@@ -70,6 +70,28 @@ This proposal is filed for consent as **direction and phased architecture**, not
 
 This is an architectural commitment, not a delivery commitment for every named interface.
 
+### Research Convergence: Three Independent Derivations of AgentRuntime
+
+The `AgentRuntime = Model + Prompt + Toolset + Environment + ExecutionContract + Ledger` decomposition has been independently derived three times:
+
+1. **Barry Zhang / Anthropic (practitioner):** The atomic wake unit should decompose into model, context, tools, environment, contracts, and ledger — derived from production patterns at scale.
+2. **Tsinghua NLAH (academic):** The five execution contract elements (required inputs, budgets, permissions, completion conditions, output paths) map directly onto the same decomposition — derived from formal agent evaluation research.
+3. **arXiv 2512.12791 "Beyond Task Completion" (evaluation framework):** A 4-pillar framework for evaluating agentic systems — LLM, Memory, Tools, Environment — independently derives the same four-layer structure. The correspondence is not incidental; it reflects the actual structure of the problem.
+
+Three independent convergences on the same structure is strong validation. See `docs/research/beyond-task-completion-applied.md` §1.
+
+### The Quantified Case for ExecutionContract
+
+The "Beyond Task Completion" paper (arXiv 2512.12791) ran production CloudOps experiments and found:
+
+- **100% task completion rate** (conventional metric)
+- **33% policy adherence** (behavioral metric)
+- **13.1% memory recall** (memory metric)
+
+An agent can complete every task while doing two-thirds of them incorrectly from a policy standpoint and failing to recall nearly 90% of relevant memory. Conventional outcome metrics are blind to these failures. The paper's conclusion: **completion contracts must encode _how_ tasks execute, not just _whether_ they finish.**
+
+The 67-point gap between apparent completion (100%) and actual policy compliance (33%) is the cost of not having contracts. This is the strongest academic argument for G2 in this proposal. Without an ExecutionContract, the harness will produce agents that appear to complete work while routinely violating policy and ignoring memory. See `docs/research/beyond-task-completion-applied.md` §2.
+
 ## Research Synthesis
 
 ### Keep the agent loop simple
@@ -124,6 +146,78 @@ Proposal 07 Phase 6 should encode this as a role.md field: `memory.consolidate_t
 Hermes's GEPA mechanism (ICLR 2026 Oral) improves agent skills by analyzing complete execution traces — error messages, performance profiling, full reasoning chains. Agents with 20+ self-generated skills run 40% faster on repeated tasks in the same domain. GEPA is an external optimization loop that the harness enables by producing rich execution data.
 
 The `RunLedgerEntry` with `toolReceipts`, `actionReceipts`, `validation`, and `health` is precisely the substrate a GEPA-equivalent loop would consume. Building this ledger correctly in Phases 0–4 is what makes a future Murmurations self-improvement loop possible. The Langfuse self-reflection loop (Phase 5) and a GEPA-style trace analysis loop are complementary: Langfuse feeds architectural improvement through governance; GEPA would optimize task-level procedures autonomously. Phase 5 comes first; GEPA-equivalent is a post-Phase 6 direction. See `docs/research/hermes-applied.md` §3.
+
+### Completion ≠ correctness: behavioral validation requires both outcome and behavioral checks
+
+The "Beyond Task Completion" evaluation framework distinguishes two validation surfaces that P07's WakeValidator must address:
+
+- **Outcome validation**: required artifacts exist, completion conditions are satisfied (post-wake check against the contract)
+- **Behavioral validation**: tool calls during the wake were policy-compliant (intermediate-state check via `ToolCallReceipts`)
+
+The 100%/33%/13.1% finding shows these surfaces diverge badly in practice. `ToolCallReceipts` ordered by timestamp is the mechanism for behavioral validation — the ledger records every tool call with its policy decision, enabling post-wake replay analysis to verify that policy-compliant tool sequences were used. WakeValidator must check both surfaces; checking only whether artifacts exist is not sufficient.
+
+The paper also identifies tool sequencing as a distinct evaluation dimension: "diagnostic-before-action ordering." Agents that skip diagnostic read calls before taking mutating write actions fail on sequencing even if the final outcome appears correct. `ToolDescriptor.mutability` already captures read-only vs. mutating; Phase 4/5 should add a sequencing check to WakeValidator: mutating tool calls should be preceded by relevant read calls unless the contract explicitly permits direct mutation. See `docs/research/beyond-task-completion-applied.md` §2–3.
+
+### Operational agent security: six named threats and three system-level primitives
+
+The threat taxonomy (arXiv 2603.01564, arXiv 2510.23883) identifies six attack categories and three security primitives, all of which map directly to Proposal 07 components.
+
+**Six threat categories** (for ADR-003X opening threat model section):
+
+| Threat                | Maps to P07 component               | Current mitigation                                    |
+| --------------------- | ----------------------------------- | ----------------------------------------------------- |
+| Prompt Abuse          | PromptBundle trust levels           | `trusted/semi-trusted/untrusted` classification       |
+| Environment Injection | SignalBundle (GitHub issue bodies)  | `untrusted` signal classification, sanitizer          |
+| Memory Attacks        | Tier 2 memory, agent-written skills | `semi-trusted` memory segments, RunLedger provenance  |
+| Toolchain Abuse       | ToolRegistry, EnvironmentSpec       | Deny-by-default, ToolGrant allowlists, ApprovalPolicy |
+| Model Tampering       | ResolvedModel                       | Outside harness scope — note in ARCHITECTURE.md       |
+| Agent Network Attacks | Signal routing, GovernancePlugin    | Per-agent routing filter (harness#353 fix)            |
+
+**Agent Network Attacks** is the formal name for the harness#353/354 bug class (routing inversion and effectiveness scoring scope). The field evidence from Chinook Wind agents — surfacing these bugs themselves in their own voice — maps exactly onto this named threat category. ADR-003X should cite the taxonomy as the threat model rather than describing the trust classification as a defensive engineering preference.
+
+**Environment Injection** is the most underweighted threat in current P07 language. GitHub issue bodies are external, adversarial content by default. The `untrusted` signal classification is correct, but the rationale — environment injection, not just prompt hygiene — should be stated. The taxonomy states: the web is an untrusted and adversarial environment by default.
+
+**Three system-level security primitives** (for ARCHITECTURE.md):
+
+1. **Identity & Authorization** → `AgentId`-keyed isolation + `GovernancePlugin` + `ToolGrant.allowedAgentIds` + `EnvironmentSpec.secretGrants`. Together these implement delegation constraints.
+2. **Provenance & Traceability** → `RunLedger` (hash-chained, append-only) + `ToolCallReceipts` (policy decision, input/output hashes, approval metadata) + `artifactRefs`. The RunLedger IS the provenance and traceability implementation.
+3. **Ecosystem Response** → `HealthState` circuit breaker + `GovernancePlugin` tension protocol + manual Source-intervention path. This is the blast-radius containment mechanism.
+
+**Dangerous tool compositions:** The taxonomy specifically warns about "dangerous chains of innocent tools" — individual tool calls that are each benign but whose composition causes harm (e.g., `read_file` + `send_email` chains that exfiltrate data without any single call being flagged). `ToolDescriptor.requiresVerification` is the correct defense per call, but `ExecutionContract.allowedSideEffects` should be evaluated against the _entire tool call sequence_ within a wake, not per-call. Phase 3 addition: `ToolInvocationRecorder` should track which tools were called in what order within a wake, enabling post-wake composition analysis. See `docs/research/agentic-security-threats-applied.md` §1–3.
+
+**Multi-agent shared-memory poisoning:** Multiple agents reading from the same GitHub repository (shared signal channel) means a poisoned directive committed to the repo could affect all agents that consume it. Per-agent routing isolation (harness#353) should be understood not only as a correctness fix but as a memory-attack defense primitive — cross-agent directive isolation prevents one agent's compromised memory from propagating to others. RunLedger provenance is the forensic mechanism for identifying and revoking poisoned content. See `docs/research/agentic-security-threats-applied.md` §4.
+
+### LangGraph checkpoint contract: RunLedger interface design and durable wake patterns
+
+LangGraph (the most widely adopted production multi-agent framework in 2026, 100k+ GitHub stars) uses a `BaseCheckpointSaver` interface as its state persistence contract. The design patterns are directly applicable to RunLedger:
+
+**RunLedger as a pluggable interface:** `RunLedgerHandle` should expand to a full abstract interface (storage-agnostic: in-memory for tests, filesystem for local, database for production):
+
+```ts
+export interface RunLedger {
+  append(entry: RunLedgerEntry): Promise<void>;
+  get(wakeId: WakeId): Promise<RunLedgerEntry | undefined>;
+  list(
+    agentId: AgentId,
+    filter?: RunLedgerFilter,
+    before?: WakeId,
+    limit?: number,
+  ): AsyncIterable<RunLedgerEntry>;
+  delete(agentId: AgentId): Promise<void>;
+}
+```
+
+**Two-phase write model:** LangGraph separates pending writes from confirmed state via `put_writes` (intent recorded before confirmation) and `put` (committed after all writes in a superstep are applied). The RunLedger equivalent: `RunLedgerEntry` should carry `status: "pending" | "committed"`. A `ToolCallReceipt` for an approval-required tool is recorded as `pending` before the human approves, then `committed` when approval is confirmed. This enables interrupt recovery, human-in-the-loop review, and idempotent retry.
+
+**INTERRUPT/RESUME approval pattern (Phase 7):** When an `ApprovalPolicy: required` tool is about to execute, the wake should NOT block indefinitely. Instead: write a pending ledger entry → create a GitHub issue requesting Source approval → terminate the wake normally. On Source's approval (comment or label), a new wake fires with the approved action pre-authorized as a RESUME-equivalent signal. The ledger links the two wakes via `parentWakeId`. This is the Murmurations-native equivalent of LangGraph's INTERRUPT/RESUME pattern.
+
+**Full snapshots, not deltas:** LangGraph checkpoints are complete state snapshots — not diffs from the prior state. This makes any checkpoint independently inspectable without reconstructing state from a chain. `RunLedgerEntry` must be a complete wake record, not an incremental update. Already implied by the current interface design, but state it explicitly as a constraint.
+
+**UUID v6 for WakeId:** LangGraph uses monotonic UUID v6 (time-ordered) rather than random UUID v4. Time-ordered IDs enable chronological ledger traversal without a separate sequence field. `WakeId` should use UUID v6.
+
+**Prevent signal replay via actionItemVersions (Phase 1):** LangGraph's `versions_seen` pattern maps to a gap in the current P07 design: agents may re-process already-acted-on signals if a signal reappears in their bundle (e.g., an issue with `status: open` that was acted on in a prior wake but not yet closed). An `actionItemVersions` field in `SignalBundle` — recording which signal IDs and their versions were processed in the prior wake — prevents this duplicate execution.
+
+**Pregel/BSP model as a named design principle:** LangGraph runs on the Pregel model: agents communicate only through channels (shared state slots), and no agent can observe another's writes during the same superstep — writes only become visible at the superstep boundary (the checkpoint). Murmurations already uses GitHub as the equivalent of LangGraph's channels: agents write to GitHub issues/files, and reads happen on the next wake. This is a superstep model. This should be stated explicitly in ARCHITECTURE.md as a design principle, not left as an incidental implementation detail. The harness#353 routing inversion bug was a violation of this principle (one agent's signal bundle contained items addressed to other nodes). See `docs/research/langgraph-applied.md`.
 
 ### Separate stable and volatile prompt content with an explicit cache boundary
 
@@ -225,6 +319,39 @@ Budgets are declared in `role.md` and enforced at breach. Agents have no way to 
 
 ## Target Architecture
 
+### The Agent Loop (ODARE)
+
+The harness executes a five-phase loop on every wake. Each phase is named, typed, and has a distinct responsibility:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  OBSERVE   Read SignalBundle from Environment Layer.         │
+│            Apply signal routing filter. Build actionItemGraph│
+├─────────────────────────────────────────────────────────────┤
+│  DECIDE    Assemble PromptBundle from AgentRuntime.          │
+│            Select tools from Toolset (deny-by-default).      │
+│            Model generates structured WakeActions.           │
+├─────────────────────────────────────────────────────────────┤
+│  ACT       ToolInvocationRecorder wraps each tool execute(). │
+│            Policy check → approval gate → execute → receipt. │
+│            All ToolCallReceipts written to ledger immediately│
+├─────────────────────────────────────────────────────────────┤
+│  VALIDATE  WakeValidator checks ExecutionContract:           │
+│            outcome (required artifacts exist?) AND           │
+│            behavioral (tool call sequence policy-compliant?) │
+│            WakeValidationResult written — not hidden in logs. │
+├─────────────────────────────────────────────────────────────┤
+│  EVALUATE  WakeHealthActuals derived from receipts + result. │
+│            RunLedgerEntry committed (hash-chained, complete).│
+│            HealthState policy applied (idle/low-eff decay).  │
+│            GovernancePlugin notified if threshold events.    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Validate and Evaluate are distinct. Validate is structured evidence: did the agent produce the required outputs via policy-compliant tool calls? Evaluate is systemic: does the pattern of this wake's health actuals warrant a governance response?
+
+### AgentRuntime Assembly Layers
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Source (human)  — intent, strategy, bright lines            │
@@ -247,22 +374,27 @@ Budgets are declared in `role.md` and enforced at breach. Agents have no way to 
 │  mutability, verification requirements                       │
 │  ToolCallReceipts: auditable outcome log                     │
 ├─────────────────────────────────────────────────────────────┤
-│  Execution Contract                                          │
-│  Required Outputs · Action Items (machine-readable) ·        │
-│  Allowed Side Effects · Budget · Completion Conditions ·     │
-│  Verification Steps                                          │
-├─────────────────────────────────────────────────────────────┤
 │  Model Layer                                                 │
 │  LLMClient (Vercel AI SDK) · pricing catalog                 │
 │  Langfuse telemetry tagged: agentId, wakeId, wakeMode,       │
 │  groupIds, promptHash, contractHash                          │
 ├─────────────────────────────────────────────────────────────┤
+│  Execution Contract  (validation frame applied post-model)   │
+│  Obligation (required outputs, completion conditions) ·      │
+│  Permission (allowed side effects, budget) ·                 │
+│  Action Items (machine-readable) · Verification Steps        │
+│  WakeValidator checks both outcome AND behavioral surfaces   │
+├─────────────────────────────────────────────────────────────┤
 │  Ledger  (what was recorded)                                 │
 │  promptHash · toolReceipts · actionReceipts ·                │
 │  WakeValidationResult · WakeHealthActuals ·                  │
-│  WakeCostRecord · artifactRefs                               │
+│  WakeCostRecord · artifactRefs · status (pending|committed)  │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+Note: `ExecutionContract` appears in two places in the runtime. As a **spawn-time input**, its obligation and permission clauses are injected as a `trusted` prompt segment, so the model knows what it must produce and what it may do. As a **post-wake validation frame**, `WakeValidator` checks the model's actual output against the same contract — this is why it sits below the Model Layer in the assembly diagram. This duality is the core of the obligation/permission split described in §5 below.
+
+**Named cross-wake primitive — AgentStateStore:** The `AgentStateStore` is the inter-wake bridge. It persists `HealthState`, rolling idle counts, action closure rates, tool error density, and effectiveness decay across wakes. It is the source of `WakeHealthActuals` for the next wake's signal bundle. Without `AgentStateStore`, each wake is blind to the pattern of prior wakes; with it, the circuit breaker and health escalation policies have memory. Name it explicitly in ARCHITECTURE.md.
 
 ### 1. AgentRuntime
 
@@ -503,13 +635,21 @@ Rules:
 
 ### 5. Execution Contract
 
-Every wake should carry a contract that says what useful completion means:
+Every wake should carry a contract that says what useful completion means. `ExecutionContract` encodes two distinct concerns that must be explicitly separated:
+
+- **Obligation** — what the agent _must_ produce to satisfy the contract (`requiredOutputs`, `completionConditions`, `verification`). These are checked post-wake by `WakeValidator`.
+- **Permission** — what the agent _is allowed to do_ during the wake (`allowedSideEffects`, `budget`, `approval`). These are checked pre-action by the policy layer and `ApprovalPolicy`.
+
+Conflating obligation and permission obscures which part of the contract was violated in a failed wake. ADR-003Y should name these as two sub-contracts with distinct enforcement points.
+
+The `ExecutionContract` also has a **dual lifecycle**: it is injected as a `trusted` prompt segment at spawn time (so the model knows what it must produce and what it may do), and it serves as the validation frame applied post-model by `WakeValidator`. This is not redundant — the injection encodes intent for the model; the validation checks what actually happened.
 
 ```ts
 export interface ExecutionContract {
   readonly wakeReason: WakeReason;
   readonly wakeMode: WakeMode;
   readonly objective: string;
+  // Obligation sub-contract — checked by WakeValidator post-wake
   readonly requiredOutputs: readonly {
     readonly kind:
       | "summary"
@@ -523,10 +663,11 @@ export interface ExecutionContract {
     readonly description: string;
   }[];
   readonly actionItems: readonly ActionItemRef[];
-  readonly allowedSideEffects: readonly ToolPermission[];
-  readonly budget: CostBudget;
   readonly completionConditions: readonly CompletionCondition[];
   readonly verification: readonly VerificationStep[];
+  // Permission sub-contract — checked by policy layer pre-action
+  readonly allowedSideEffects: readonly ToolPermission[];
+  readonly budget: CostBudget;
   readonly approval: ApprovalPolicy;
 }
 ```
@@ -537,6 +678,8 @@ Rules:
 - A wake that only summarizes should be valid only if the contract permits summary-only completion.
 - Mutating actions must produce receipts.
 - Verification failures should not disappear into logs; they should be part of the result.
+- `WakeValidator` checks **both** outcome validation (required artifacts exist, completion conditions met) and behavioral validation (tool call sequence was policy-compliant per `ToolCallReceipts`). Checking only whether artifacts exist is insufficient — the 100%/33%/13.1% finding shows outcome metrics are blind to behavioral compliance failures.
+- `ExecutionContract.allowedSideEffects` is evaluated against the **entire tool call sequence** within a wake, not per-call. If a combination of permitted side effects creates an exfiltration path (e.g., `read` + `network` in the same wake), the validator should flag it even if each individual permission is allowed. See `docs/research/agentic-security-threats-applied.md` §3.
 
 `role.md` operator-facing declaration:
 
@@ -575,6 +718,9 @@ export interface SignalBundle {
   };
   readonly health: WakeHealthActuals; // rolling window from AgentStateStore
   readonly langfuseMetrics?: LangfuseMetricsSignal; // present if Langfuse configured + 7+ days data
+  // Maps signal ID → version processed in the prior wake (LangGraph versions_seen pattern).
+  // Prevents re-processing already-acted-on signals when an issue remains open after action.
+  readonly actionItemVersions?: Readonly<Record<string, string>>;
 }
 ```
 
@@ -610,7 +756,27 @@ Prompt integration: the `PromptAssembler` injects MEMORY.md content as a `"memor
 
 ### 8. Ledger and Observability Boundary
 
-Run artifacts should evolve into a run ledger:
+Run artifacts should evolve into a run ledger. The `RunLedger` is the harness's implementation of all three system-level security primitives from the threat taxonomy: Provenance & Traceability (hash-chained entries), Identity & Authorization (per-agent scoped), and Ecosystem Response (health escalation from ledger data).
+
+**RunLedger as a pluggable interface (validated by LangGraph's `BaseCheckpointSaver` pattern):**
+
+```ts
+export interface RunLedger {
+  append(entry: RunLedgerEntry): Promise<void>;
+  get(wakeId: WakeId): Promise<RunLedgerEntry | undefined>;
+  list(
+    agentId: AgentId,
+    filter?: RunLedgerFilter,
+    before?: WakeId,
+    limit?: number,
+  ): AsyncIterable<RunLedgerEntry>;
+  delete(agentId: AgentId): Promise<void>;
+}
+```
+
+Storage implementations: in-memory (tests), filesystem `runs.ts` (local/current), database (production Phase 7+). The interface is the contract; the storage is pluggable.
+
+**`RunLedgerEntry` — full snapshots, pending/committed status, and provenance:**
 
 ```ts
 export interface RunLedgerEntry {
@@ -618,7 +784,9 @@ export interface RunLedgerEntry {
   readonly sequence: number;
   readonly previousEntryHash?: string;
   readonly entryHash: string;
-  readonly wakeId: WakeId;
+  readonly wakeId: WakeId; // UUID v6 (time-ordered) — enables chronological traversal
+  readonly parentWakeId?: WakeId; // set on RESUME wakes (approval-gated continuation)
+  readonly status: "pending" | "committed"; // pending until approval confirmed (LangGraph INTERRUPT pattern)
   readonly agentId: AgentId;
   readonly promptHash: string;
   readonly contractHash: string;
@@ -632,9 +800,16 @@ export interface RunLedgerEntry {
 }
 ```
 
+**Design constraints:**
+
+- **Full snapshots, not deltas.** Every `RunLedgerEntry` is a complete wake record. No incremental diffs. This makes any entry independently inspectable, auditable, and usable as a GEPA-style analysis input without reconstructing state from a chain. (Validated by LangGraph's checkpoint design.)
+- **UUID v6 for `WakeId`.** Time-ordered IDs enable chronological ledger traversal and cross-wake ordering without a separate sequence field. Do not use random UUID v4.
+- **`status: "pending"` for approval-gated wakes.** When an `ApprovalPolicy: required` tool is about to execute, the wake writes a `pending` ledger entry, creates a GitHub issue requesting Source approval, and terminates normally. On approval, a new wake fires as a RESUME wake with `parentWakeId` linking the two. The pending entry is committed on confirmation.
+- **`toolReceipts` ordered by timestamp** enables sequencing validation. Post-wake, the receipt sequence can be checked against diagnostic-before-action ordering for known task types (Phase 4/5 enhancement).
+
 `RunLedgerEntry` should be an append-only projection of `AgentResult + WakeValidationResult + prompt/contract/tool metadata`, not a parallel replacement for those types. Early phases need this observational ledger for debugging and evals; resumable checkpoints and replay protection come later with durable execution.
 
-**Signed provenance for agent-written artifacts (Phase 6):** When Phase 6 enables agents to write skill or knowledge files, each file's `artifactRef` in the ledger should record the `wakeId`, `agentId`, and signal sources that produced it. This is the mitigation for Hermes's skill-poisoning gap — if a skill is later found to be malicious, the ledger identifies which wake and which signals produced it. Without this, autonomous skill generation is an unaudited trust escalation. See `docs/research/hermes-applied.md` §1.
+**Signed provenance for agent-written artifacts (Phase 6):** When Phase 6 enables agents to write skill or knowledge files, each file's `artifactRef` in the ledger should record the `wakeId`, `agentId`, and signal sources that produced it. This is the mitigation for Hermes's skill-poisoning gap — if a skill is later found to be malicious, the ledger identifies which wake and which signals produced it. Without this, autonomous skill generation is an unaudited trust escalation. The RunLedger IS the provenance and traceability primitive. See `docs/research/hermes-applied.md` §1 and `docs/research/agentic-security-threats-applied.md` §2.
 
 `WakeHealthActuals`:
 
@@ -651,6 +826,11 @@ export interface WakeHealthActuals {
   readonly idleWake: boolean;
   readonly selfReportedEffectiveness?: "high" | "medium" | "low";
   readonly costPerArtifactMicros?: number;
+  // Phase 5/6 addition: did the agent reference its memory segment during the wake?
+  // The "Beyond Task Completion" paper found 13.1% memory recall in production — agents with
+  // MEMORY.md present but whose LLM traces show no reference to memory content produce output
+  // that ignores prior learning. This flag enables tracking that failure mode.
+  readonly memorySegmentReferenced?: boolean;
 }
 ```
 
@@ -751,6 +931,7 @@ Existing files become adapters:
 - Record normalized tool receipts.
 - Add MCP env migration controls (`ambientEnv` flag, explicit grants, warnings), then flip the default away from ambient `process.env`.
 - **MCP supply-chain:** MCP server commands/configs must be allowlisted or pinned and recorded by hash. Hermes's security review (103k+ star production deployment) explicitly warned that MCP's discovery surface "is the same surface that made npm a decade-long supply-chain problem." Allowlist-and-pin is required, not optional hardening. See `docs/research/hermes-applied.md` §4.
+- **Dangerous tool composition tracking:** `ToolInvocationRecorder` should track which tools were called in what order within a wake. Individual innocent tool calls can compose into harmful chains (e.g., `read_file` + `send_email` = data exfiltration without either call being individually flagged). Post-wake analysis (or real-time analysis during the Validate phase) should check the full call sequence against `ExecutionContract.allowedSideEffects` as a combined permission set, not per-call. See `docs/research/agentic-security-threats-applied.md` §3.
 - Add `budget_remaining()` built-in tool.
 
 ### Phase 4: Contract-backed completion
@@ -758,10 +939,13 @@ Existing files become adapters:
 - Expand minimal execution contracts into full contract generation in `buildSpawnContext`.
 - Map signal action items into `ExecutionContract.actionItems`.
 - Allow role frontmatter to declare required outputs and completion conditions.
-- Replace shallow productivity validation with contract-backed validation.
+- Replace shallow productivity validation with contract-backed validation with **both** validation surfaces:
+  - **Outcome validation**: required artifacts exist, completion conditions met
+  - **Behavioral validation**: `ToolCallReceipts` ordered by timestamp checked for policy compliance and diagnostic-before-action sequencing
 - Include validation results in `RunArtifactIndexEntry`.
+- Add `actionItemVersions` to `SignalBundle` — prevent duplicate action on signals already processed in prior wakes.
 
-**ADR required:** ADR-003Y "Execution Contracts" — five elements and enforcement semantics.
+**ADR required:** ADR-003Y "Execution Contracts" — five elements, obligation/permission split, and dual validation surfaces.
 
 ### Phase 5: Health metrics and self-reflection
 
@@ -786,9 +970,11 @@ Existing files become adapters:
 - Implement Proposal 04 using the run ledger as the durable history.
 - Store checkpoint references for prompt, contract, tool receipts, action receipts, validation, and artifacts.
 - Make mutating tools idempotent where possible through request IDs, receipt lookup, and hash-chained ledger entries.
+- Implement the **INTERRUPT/RESUME approval pattern** for `ApprovalPolicy: required` tools: when an approval-required tool is about to execute, write a `pending` ledger entry, create a GitHub issue requesting Source approval, and terminate the wake normally. On Source approval, a new wake fires with `parentWakeId` linking back to the interrupted wake. This avoids blocking the executor indefinitely and is the Murmurations-native equivalent of LangGraph's INTERRUPT/RESUME pattern. See `docs/research/langgraph-applied.md` §2 and §5.
 - Implement Proposal 01 `ContainerExecutor`.
 - Apply `EnvironmentSpec` to filesystem, env, network, CPU, memory, and output limits.
 - Prefer sandboxed execution for untrusted or high-permission agents.
+- Implement the `RunLedger` pluggable interface with filesystem (current `runs.ts`) and database backends.
 
 Phase 7 gates on Phase 3 (tool contracts) and Phase 4 (environment specs) being stable.
 
@@ -882,19 +1068,37 @@ Start with signal completeness, minimal execution contracts, and the typed runti
 
 ## Appendix: Research → Implementation Map
 
-| Research finding                                          | Primary implementation location                                                                         |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Execution contracts / 5 elements (NLAH)                   | `core/runtime/execution-contract.ts` + `core/identity/` schema + `core/validation/wake-validator.ts`    |
-| File-backed state (NLAH)                                  | Already correct — GitHub issues + JSONL. Reinforce, don't replace.                                      |
-| Prompt trust segmentation (NLAH)                          | `core/runtime/prompt-assembler.ts`                                                                      |
-| Tool receipts + registry (NLAH)                           | `core/tools/registry.ts` + `core/tools/receipts.ts`                                                     |
-| Ambient observability (Minerva)                           | `core/validation/health.ts` + `core/daemon/` (HealthState policy)                                       |
-| Task dependency graph (Minerva)                           | `packages/signals/src/index.ts`, with a future split into a GitHub-specific aggregator module if needed |
-| Two-tier memory (Minerva)                                 | `core/tools/builtins.ts` (`curate_memory`) + `core/identity/` schema                                    |
-| Langfuse telemetry tags (spike)                           | `packages/llm/src/adapters/vercel-adapter.ts` + spawn context threading                                 |
-| Langfuse metrics as signal (spike)                        | `packages/signals/src/` (new `LangfuseMetricsSource`)                                                   |
-| Self-reflection skill (spike)                             | `skills/self-reflection/SKILL.md`                                                                       |
-| Environment + Tools + Prompt as atomic loop (Barry Zhang) | `core/runtime/agent-runtime.ts` (types), then phases 2–4 (implementations)                              |
-| Budget introspection (Barry Zhang)                        | `core/tools/builtins.ts` (`budget_remaining()` tool)                                                    |
-| Context window discipline (Barry Zhang)                   | `PromptSegment.tokenBudget` + `jcodemunch-mcp` policy in `CLAUDE.md`                                    |
-| Harness as transferable IP (Meta Harness)                 | `role.md` + `soul.md` schema stability + execution contract formalization                               |
+| Research finding                                                       | Primary implementation location                                                                          |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Execution contracts / 5 elements (NLAH)                                | `core/runtime/execution-contract.ts` + `core/identity/` schema + `core/validation/wake-validator.ts`     |
+| File-backed state (NLAH)                                               | Already correct — GitHub issues + JSONL. Reinforce, don't replace.                                       |
+| Prompt trust segmentation (NLAH)                                       | `core/runtime/prompt-assembler.ts`                                                                       |
+| Tool receipts + registry (NLAH)                                        | `core/tools/registry.ts` + `core/tools/receipts.ts`                                                      |
+| Ambient observability (Minerva)                                        | `core/validation/health.ts` + `core/daemon/` (HealthState policy)                                        |
+| Task dependency graph (Minerva)                                        | `packages/signals/src/index.ts`, with a future split into a GitHub-specific aggregator module if needed  |
+| Two-tier memory (Minerva)                                              | `core/tools/builtins.ts` (`curate_memory`) + `core/identity/` schema                                     |
+| Langfuse telemetry tags (spike)                                        | `packages/llm/src/adapters/vercel-adapter.ts` + spawn context threading                                  |
+| Langfuse metrics as signal (spike)                                     | `packages/signals/src/` (new `LangfuseMetricsSource`)                                                    |
+| Self-reflection skill (spike)                                          | `skills/self-reflection/SKILL.md`                                                                        |
+| Environment + Tools + Prompt as atomic loop (Barry Zhang)              | `core/runtime/agent-runtime.ts` (types), then phases 2–4 (implementations)                               |
+| Budget introspection (Barry Zhang)                                     | `core/tools/builtins.ts` (`budget_remaining()` tool)                                                     |
+| Context window discipline (Barry Zhang)                                | `PromptSegment.tokenBudget` + `jcodemunch-mcp` policy in `CLAUDE.md`                                     |
+| Harness as transferable IP (Meta Harness)                              | `role.md` + `soul.md` schema stability + execution contract formalization                                |
+| Completion ≠ correctness — 100%/33%/13.1% (arXiv 2512.12791)           | Consent Framing (quantified argument) + `core/validation/wake-validator.ts` (dual validation surfaces)   |
+| 4-pillar framework — 3rd derivation of AgentRuntime (arXiv 2512.12791) | Consent Framing + ARCHITECTURE.md (convergence validation)                                               |
+| Tool sequencing — diagnostic-before-action (arXiv 2512.12791)          | Phase 4/5 — `ToolCallReceipts` ordered by timestamp; WakeValidator sequencing check                      |
+| `memorySegmentReferenced` (arXiv 2512.12791)                           | Phase 5/6 — `WakeHealthActuals.memorySegmentReferenced` field                                            |
+| Six named threat categories (arXiv 2603.01564)                         | ADR-003X opening section — threat model; maps each category to P07 component                             |
+| Three system-level security primitives (arXiv 2603.01564)              | ARCHITECTURE.md — Identity/Auth, Provenance/Traceability, Ecosystem Response                             |
+| Dangerous tool composition (arXiv 2603.01564)                          | Phase 3 — `ToolInvocationRecorder` call sequence; `ExecutionContract.allowedSideEffects` composite check |
+| Multi-agent memory poisoning (arXiv 2603.01564)                        | ADR-003X — per-agent routing isolation as security primitive, not just correctness fix                   |
+| RunLedger as pluggable interface (LangGraph)                           | Phase 7 — `RunLedger` abstract interface with `append/get/list/delete`                                   |
+| Two-phase write / pending + committed (LangGraph)                      | `RunLedgerEntry.status` field + Phase 7 INTERRUPT/RESUME approval pattern                                |
+| UUID v6 for `WakeId` (LangGraph)                                       | Phase 0 types — time-ordered IDs, chronological ledger traversal                                         |
+| Full snapshots not deltas (LangGraph)                                  | Phase 7 spec — stated explicitly as `RunLedgerEntry` constraint                                          |
+| `actionItemVersions` (LangGraph versions_seen)                         | Phase 1/4 — `SignalBundle.actionItemVersions`; prevent signal replay                                     |
+| INTERRUPT/RESUME approval gate (LangGraph)                             | Phase 7 + ADR-003Y — approval-required tools create pending wake + GitHub issue, resume on approval      |
+| Pregel/BSP superstep model (LangGraph)                                 | ARCHITECTURE.md — GitHub-as-channel is a superstep model; names why per-wake isolation is correct        |
+| Obligation vs permission split (architectural review)                  | §5 ExecutionContract, ADR-003Y — two sub-contracts with distinct enforcement points                      |
+| ODARE loop with Validate phase (architectural review)                  | Target Architecture §ODARE — Validate between Act and Record; distinct from Evaluate                     |
+| AgentStateStore as named inter-wake primitive (architectural review)   | ARCHITECTURE.md + Target Architecture — inter-wake health state bridge                                   |
