@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proposal 07 — Murmurations Harness Architecture</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    padding: 40px 32px;
+    min-height: 100vh;
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #f8fafc;
+    margin-bottom: 6px;
+    letter-spacing: -0.3px;
+  }
+
+  .subtitle {
+    font-size: 13px;
+    color: #64748b;
+    margin-bottom: 48px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    max-width: 1200px;
+  }
+
+  .panel {
+    background: #161b27;
+    border: 1px solid #1e2a3a;
+    border-radius: 12px;
+    padding: 24px;
+  }
+
+  .panel-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #475569;
+    margin-bottom: 20px;
+  }
+
+  /* ── ODARE Loop ── */
+  .odare-loop {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    position: relative;
+  }
+
+  .odare-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    position: relative;
+    padding-bottom: 0;
+  }
+
+  .odare-step:not(:last-child) .step-connector {
+    display: block;
+  }
+
+  .step-left {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+    width: 36px;
+  }
+
+  .step-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+
+  .step-connector-line {
+    width: 2px;
+    flex: 1;
+    min-height: 28px;
+    background: #1e2a3a;
+    margin: 4px 0;
+  }
+
+  .step-body {
+    flex: 1;
+    padding-bottom: 28px;
+  }
+
+  .step-name {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 3px;
+  }
+
+  .step-desc {
+    font-size: 12px;
+    color: #64748b;
+    line-height: 1.5;
+  }
+
+  .step-tag {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    margin-top: 5px;
+    font-weight: 500;
+  }
+
+  /* Colors per step */
+  .observe .step-icon  { background: #1e3a5f; color: #60a5fa; }
+  .decide  .step-icon  { background: #1a3a2a; color: #34d399; }
+  .act     .step-icon  { background: #3a2a1e; color: #f59e0b; }
+  .validate .step-icon { background: #2a1e3a; color: #a78bfa; }
+  .evaluate .step-icon { background: #1e3030; color: #2dd4bf; }
+
+  .observe  .step-name { color: #60a5fa; }
+  .decide   .step-name { color: #34d399; }
+  .act      .step-name { color: #f59e0b; }
+  .validate .step-name { color: #a78bfa; }
+  .evaluate .step-name { color: #2dd4bf; }
+
+  .observe  .step-tag { background: #1e3a5f; color: #60a5fa; }
+  .decide   .step-tag { background: #1a3a2a; color: #34d399; }
+  .act      .step-tag { background: #3a2a1e; color: #f59e0b; }
+  .validate .step-tag { background: #2a1e3a; color: #a78bfa; }
+  .evaluate .step-tag { background: #1e3030; color: #2dd4bf; }
+
+  /* ── Runtime Assembly Stack ── */
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .layer {
+    border-radius: 8px;
+    padding: 12px 14px;
+    border-left: 3px solid;
+    position: relative;
+  }
+
+  .layer-name {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 3px;
+  }
+
+  .layer-detail {
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.5;
+  }
+
+  .layer-badge {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 500;
+  }
+
+  .l-source    { background: #1a1a2e; border-color: #6366f1; }
+  .l-env       { background: #1a2e1a; border-color: #22c55e; }
+  .l-prompt    { background: #1a2a3a; border-color: #3b82f6; }
+  .l-tools     { background: #2e2a1a; border-color: #f59e0b; }
+  .l-model     { background: #2e1a2e; border-color: #a855f7; }
+  .l-contract  { background: #1a2e2e; border-color: #06b6d4; }
+  .l-ledger    { background: #2e1a1a; border-color: #ef4444; }
+
+  .l-source   .layer-name { color: #818cf8; }
+  .l-env      .layer-name { color: #4ade80; }
+  .l-prompt   .layer-name { color: #60a5fa; }
+  .l-tools    .layer-name { color: #fbbf24; }
+  .l-model    .layer-name { color: #c084fc; }
+  .l-contract .layer-name { color: #22d3ee; }
+  .l-ledger   .layer-name { color: #f87171; }
+
+  .l-source   .layer-badge { background: #2e2e5e; color: #818cf8; }
+  .l-env      .layer-badge { background: #1a3a1a; color: #4ade80; }
+  .l-prompt   .layer-badge { background: #1a3050; color: #60a5fa; }
+  .l-tools    .layer-badge { background: #3a2e1a; color: #fbbf24; }
+  .l-model    .layer-badge { background: #3a1a3a; color: #c084fc; }
+  .l-contract .layer-badge { background: #1a3838; color: #22d3ee; }
+  .l-ledger   .layer-badge { background: #3a1a1a; color: #f87171; }
+
+  /* ── Trust Classification ── */
+  .trust-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .trust-table th {
+    text-align: left;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #475569;
+    padding: 0 8px 10px 0;
+    border-bottom: 1px solid #1e2a3a;
+  }
+
+  .trust-table td {
+    padding: 8px 8px 8px 0;
+    border-bottom: 1px solid #111827;
+    vertical-align: middle;
+  }
+
+  .trust-badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+
+  .trusted     { background: #14301a; color: #4ade80; }
+  .semi        { background: #2a2a14; color: #fbbf24; }
+  .untrusted   { background: #301414; color: #f87171; }
+
+  .seg-name {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    color: #94a3b8;
+    background: #1e2a3a;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  /* ── Phase Timeline ── */
+  .phases {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .phase-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .phase-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #1e2a3a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: #64748b;
+    flex-shrink: 0;
+  }
+
+  .phase-num.active {
+    background: #1e3a5f;
+    color: #60a5fa;
+  }
+
+  .phase-bar {
+    flex: 1;
+    height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .phase-bar-label { flex: 1; }
+  .phase-bar-tag {
+    font-size: 10px;
+    opacity: 0.7;
+    font-family: 'SF Mono', monospace;
+  }
+
+  .p0 { background: #1a1a2e; color: #818cf8; }
+  .p1 { background: #1a2e1a; color: #4ade80; }
+  .p2 { background: #1e2a3a; color: #60a5fa; }
+  .p3 { background: #2a2a1a; color: #fbbf24; }
+  .p4 { background: #2a1a2a; color: #c084fc; }
+  .p5 { background: #1a2a2a; color: #2dd4bf; }
+  .p6 { background: #2a1a1a; color: #f87171; }
+  .p7 { background: #1e1e1e; color: #94a3b8; }
+
+  .phase-gate {
+    font-size: 10px;
+    color: #ef4444;
+    background: #2a1414;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+  }
+
+  /* ── Threat Taxonomy ── */
+  .threat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .threat-card {
+    background: #111827;
+    border-radius: 8px;
+    padding: 10px 12px;
+    border-left: 3px solid #1e2a3a;
+  }
+
+  .threat-card.high { border-color: #ef4444; }
+  .threat-card.med  { border-color: #f59e0b; }
+  .threat-card.low  { border-color: #22c55e; }
+
+  .threat-name {
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 3px;
+    color: #e2e8f0;
+  }
+
+  .threat-mitigation {
+    font-size: 10px;
+    color: #64748b;
+    line-height: 1.4;
+  }
+
+  .threat-card.high .threat-name { color: #f87171; }
+  .threat-card.med  .threat-name { color: #fbbf24; }
+
+  /* ── Wide panel ── */
+  .panel-wide {
+    grid-column: 1 / -1;
+  }
+
+  .footer {
+    margin-top: 40px;
+    font-size: 11px;
+    color: #334155;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>Murmurations Harness — Target Architecture</h1>
+<p class="subtitle">Proposal 07 · Engineering circle consent · v0.7.2 baseline</p>
+
+<div class="grid">
+
+  <!-- ODARE Loop -->
+  <div class="panel">
+    <div class="panel-title">Agent Loop — ODARE</div>
+    <div class="odare-loop">
+
+      <div class="odare-step observe">
+        <div class="step-left">
+          <div class="step-icon">👁</div>
+          <div class="step-connector-line"></div>
+        </div>
+        <div class="step-body">
+          <div class="step-name">Observe</div>
+          <div class="step-desc">Read SignalBundle from Environment. Apply routing filter. Build actionItemGraph (actionable vs. blocked).</div>
+          <span class="step-tag">SignalBundle · actionItemVersions</span>
+        </div>
+      </div>
+
+      <div class="odare-step decide">
+        <div class="step-left">
+          <div class="step-icon">🧠</div>
+          <div class="step-connector-line"></div>
+        </div>
+        <div class="step-body">
+          <div class="step-name">Decide</div>
+          <div class="step-desc">Assemble PromptBundle. Select tools from Toolset (deny-by-default). Model generates structured WakeActions.</div>
+          <span class="step-tag">PromptBundle · cacheAnchorIndex · ResolvedModel</span>
+        </div>
+      </div>
+
+      <div class="odare-step act">
+        <div class="step-left">
+          <div class="step-icon">⚡</div>
+          <div class="step-connector-line"></div>
+        </div>
+        <div class="step-body">
+          <div class="step-name">Act</div>
+          <div class="step-desc">ToolInvocationRecorder wraps each execute(). Policy check → approval gate → execute → receipt. All receipts written immediately.</div>
+          <span class="step-tag">ToolCallReceipts · ApprovalPolicy · ToolGrant</span>
+        </div>
+      </div>
+
+      <div class="odare-step validate">
+        <div class="step-left">
+          <div class="step-icon">✓</div>
+          <div class="step-connector-line"></div>
+        </div>
+        <div class="step-body">
+          <div class="step-name">Validate</div>
+          <div class="step-desc">WakeValidator checks contract — outcome (artifacts exist?) AND behavioral (tool sequence policy-compliant?). Result written, not hidden in logs.</div>
+          <span class="step-tag">WakeValidationResult · WakeValidator</span>
+        </div>
+      </div>
+
+      <div class="odare-step evaluate">
+        <div class="step-left">
+          <div class="step-icon">📊</div>
+        </div>
+        <div class="step-body">
+          <div class="step-name">Record</div>
+          <div class="step-desc">Derive WakeHealthMetrics (deterministic — no model call). Commit RunLedgerEntry (hash-chained). Apply HealthState policy. Notify GovernancePlugin on threshold events.</div>
+          <span class="step-tag">WakeHealthMetrics · RunLedger · AgentStateStore</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Runtime Assembly Stack -->
+  <div class="panel">
+    <div class="panel-title">AgentRuntime Assembly Layers</div>
+    <div class="stack">
+
+      <div class="layer l-source">
+        <div class="layer-name">Source</div>
+        <div class="layer-detail">Human intent · strategy · bright lines</div>
+        <span class="layer-badge">human</span>
+      </div>
+
+      <div class="layer l-env">
+        <div class="layer-name">Environment Layer</div>
+        <div class="layer-detail">SignalBundle · GitHub issues + comments · dependency graph · health actuals · Langfuse metrics</div>
+        <span class="layer-badge">G1 · G6</span>
+      </div>
+
+      <div class="layer l-prompt">
+        <div class="layer-name">Prompt Layer</div>
+        <div class="layer-detail">PromptBundle · typed PromptSegments · trust levels · token budgets · cacheAnchorIndex · hash</div>
+        <span class="layer-badge">G3 · ADR-003X</span>
+      </div>
+
+      <div class="layer l-tools">
+        <div class="layer-name">Tools Layer</div>
+        <div class="layer-detail">ToolRegistry · MCP · extension · CLI · built-ins · deny-by-default · ToolCallReceipts</div>
+        <span class="layer-badge">G4 · G5</span>
+      </div>
+
+      <div class="layer l-model">
+        <div class="layer-name">Model Layer</div>
+        <div class="layer-detail">LLMClient (Vercel AI SDK) · pricing catalog · Langfuse telemetry: agentId · wakeId · promptHash · contractHash</div>
+        <span class="layer-badge">G8</span>
+      </div>
+
+      <div class="layer l-contract">
+        <div class="layer-name">Execution Contract</div>
+        <div class="layer-detail">Obligation (required outputs · completion conditions) · Permission (allowed side effects · budget) · WakeValidator checks both surfaces post-model</div>
+        <span class="layer-badge">G2 · ADR-003Y</span>
+      </div>
+
+      <div class="layer l-ledger">
+        <div class="layer-name">Ledger</div>
+        <div class="layer-detail">RunLedger · promptHash · toolReceipts · WakeValidationResult · WakeHealthMetrics · WakeCostRecord · artifactRefs · status pending|committed</div>
+        <span class="layer-badge">Phase 7</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Prompt Trust Classification -->
+  <div class="panel">
+    <div class="panel-title">Prompt Trust Classification (ADR-003X)</div>
+    <table class="trust-table">
+      <thead>
+        <tr>
+          <th>Segment</th>
+          <th>Trust</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="seg-name">identity</span></td>
+          <td><span class="trust-badge trusted">trusted</span></td>
+          <td style="font-size:11px;color:#64748b">Harness-authored</td>
+        </tr>
+        <tr>
+          <td><span class="seg-name">role</span></td>
+          <td><span class="trust-badge trusted">trusted</span></td>
+          <td style="font-size:11px;color:#64748b">Operator · version-controlled</td>
+        </tr>
+        <tr>
+          <td><span class="seg-name">contract</span></td>
+          <td><span class="trust-badge trusted">trusted</span></td>
+          <td style="font-size:11px;color:#64748b">Harness-assembled from role.md</td>
+        </tr>
+        <tr>
+          <td><span class="seg-name">governance</span></td>
+          <td><span class="trust-badge trusted">trusted</span></td>
+          <td style="font-size:11px;color:#64748b">GovernancePlugin output</td>
+        </tr>
+        <tr>
+          <td><span class="seg-name">skills</span></td>
+          <td><span class="trust-badge trusted">trusted</span></td>
+          <td style="font-size:11px;color:#64748b">Harness-controlled scanner</td>
+        </tr>
+        <tr>
+          <td><span class="seg-name">memory</span></td>
+          <td><span class="trust-badge semi">semi-trusted</span></td>
+          <td style="font-size:11px;color:#64748b">Agent-curated · prior wakes</td>
+        </tr>
+        <tr>
+          <td><span class="seg-name">health</span></td>
+          <td><span class="trust-badge semi">semi-trusted</span></td>
+          <td style="font-size:11px;color:#64748b">Harness-derived · agent state</td>
+        </tr>
+        <tr>
+          <td><span class="seg-name">signals</span></td>
+          <td><span class="trust-badge untrusted">untrusted</span></td>
+          <td style="font-size:11px;color:#64748b">GitHub issue bodies · external</td>
+        </tr>
+        <tr>
+          <td><span class="seg-name">wake-task</span></td>
+          <td><span class="trust-badge untrusted">untrusted</span></td>
+          <td style="font-size:11px;color:#64748b">Task prompt from signal source</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top:14px;font-size:11px;color:#475569;line-height:1.5">
+      Untrusted text cannot grant tools, alter policy, request secrets, override completion criteria, or authorize mutation.
+    </div>
+  </div>
+
+  <!-- Phase Timeline -->
+  <div class="panel">
+    <div class="panel-title">Migration Phases</div>
+    <div class="phases">
+      <div class="phase-row">
+        <div class="phase-num active">0</div>
+        <div class="phase-bar p0"><span class="phase-bar-label">Spec &amp; no-op types</span><span class="phase-bar-tag">types only</span></div>
+      </div>
+      <div class="phase-row">
+        <div class="phase-num active">1</div>
+        <div class="phase-bar p1"><span class="phase-bar-label">Signal quality + minimal contracts</span><span class="phase-bar-tag">v0.7.2 ✓</span></div>
+      </div>
+      <div class="phase-row">
+        <div class="phase-num">2</div>
+        <div class="phase-bar p2">
+          <span class="phase-bar-label">Prompt boundary cleanup</span>
+          <span class="phase-gate">ADR-003X</span>
+        </div>
+      </div>
+      <div class="phase-row">
+        <div class="phase-num">3</div>
+        <div class="phase-bar p3"><span class="phase-bar-label">Tool boundary + ToolRegistry</span><span class="phase-bar-tag">MCP supply-chain</span></div>
+      </div>
+      <div class="phase-row">
+        <div class="phase-num">4</div>
+        <div class="phase-bar p4">
+          <span class="phase-bar-label">Contract-backed completion</span>
+          <span class="phase-gate">ADR-003Y</span>
+        </div>
+      </div>
+      <div class="phase-row">
+        <div class="phase-num">5</div>
+        <div class="phase-bar p5"><span class="phase-bar-label">Health metrics + self-reflection</span><span class="phase-bar-tag">Langfuse</span></div>
+      </div>
+      <div class="phase-row">
+        <div class="phase-num">6</div>
+        <div class="phase-bar p6"><span class="phase-bar-label">Two-tier memory + self-improvement</span><span class="phase-bar-tag">curate_memory</span></div>
+      </div>
+      <div class="phase-row">
+        <div class="phase-num">7</div>
+        <div class="phase-bar p7"><span class="phase-bar-label">Durable execution + isolation</span><span class="phase-bar-tag">ContainerExecutor</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Security Threat Taxonomy -->
+  <div class="panel panel-wide">
+    <div class="panel-title">Security Threat Taxonomy → Harness Mitigations</div>
+    <div class="threat-grid">
+      <div class="threat-card high">
+        <div class="threat-name">Environment Injection</div>
+        <div class="threat-mitigation">GitHub issue bodies are adversarial by default. Mitigation: <code>untrusted</code> signal classification · sanitizer/renderer · no tool grants from untrusted text.</div>
+      </div>
+      <div class="threat-card high">
+        <div class="threat-name">Memory Attacks · Skill Poisoning</div>
+        <div class="threat-mitigation">Single-turn injection → persistent malicious skill (Hermes gap). Mitigation: <code>semi-trusted</code> memory/skills segments · RunLedger signed provenance · Phase 6 security scan on write.</div>
+      </div>
+      <div class="threat-card med">
+        <div class="threat-name">Toolchain Abuse · Dangerous Compositions</div>
+        <div class="threat-mitigation">Innocent tools chained into harm (read + send = exfiltrate). Mitigation: deny-by-default · ToolGrant allowlists · ToolInvocationRecorder tracks call sequence · composite allowedSideEffects check.</div>
+      </div>
+      <div class="threat-card med">
+        <div class="threat-name">Agent Network Attacks</div>
+        <div class="threat-mitigation">Cross-agent directive injection (harness#353/354). Mitigation: per-agent routing filter in DefaultSignalAggregator · agentId-keyed isolation · GovernancePlugin tension protocol.</div>
+      </div>
+      <div class="threat-card low">
+        <div class="threat-name">Prompt Abuse</div>
+        <div class="threat-mitigation">Directive overrides · jailbreak · instruction hierarchy bypass. Mitigation: trust propagation rules — untrusted/semi-trusted text cannot alter policy or grant permissions. ADR-003X.</div>
+      </div>
+      <div class="threat-card low">
+        <div class="threat-name">Multi-Agent Memory Poisoning</div>
+        <div class="threat-mitigation">Shared GitHub repo as signal channel — one poisoned directive affects all agents. Mitigation: routing isolation (security primitive, not just correctness) · RunLedger forensic trace.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Research Convergence -->
+  <div class="panel panel-wide">
+    <div class="panel-title">Research Convergence — Three Independent Derivations of AgentRuntime</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+
+      <div style="background:#111827;border-radius:8px;padding:14px 16px;border-top:3px solid #3b82f6">
+        <div style="font-size:11px;font-weight:600;color:#60a5fa;margin-bottom:6px">Barry Zhang / Anthropic</div>
+        <div style="font-size:11px;color:#64748b;line-height:1.5">Practitioner derivation from production patterns at scale. Atomic wake unit = model + context + tools + environment + contracts + ledger.</div>
+      </div>
+
+      <div style="background:#111827;border-radius:8px;padding:14px 16px;border-top:3px solid #a855f7">
+        <div style="font-size:11px;font-weight:600;color:#c084fc;margin-bottom:6px">Tsinghua NLAH</div>
+        <div style="font-size:11px;color:#64748b;line-height:1.5">Academic derivation from formal agent evaluation. Five contract elements (inputs, budgets, permissions, completion conditions, outputs) map directly onto the same decomposition.</div>
+      </div>
+
+      <div style="background:#111827;border-radius:8px;padding:14px 16px;border-top:3px solid #06b6d4">
+        <div style="font-size:11px;font-weight:600;color:#22d3ee;margin-bottom:6px">arXiv 2512.12791</div>
+        <div style="font-size:11px;color:#64748b;line-height:1.5">"Beyond Task Completion" evaluation framework. 4-pillar (LLM · Memory · Tools · Environment) independently maps to the same four-layer structure. Empirical finding: 100% completion / 33% policy adherence.</div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  Proposal 07 · Murmurations Harness Engineering Target Architecture · Consent round closes 2026-05-20
+</div>
+
+</body>
+</html>
