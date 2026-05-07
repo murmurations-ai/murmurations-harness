@@ -3,6 +3,32 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.2] - 2026-05-07
+
+**Signal routing correctness — agents now see their own directives, score only their own accountability, and read Source answers posted as comments.**
+
+Three bugs surfaced by Chinook Wind agents in their own consent responses during the 27→9 consolidation round; all three mapped precisely to named gaps in Proposal 07. Field evidence that the execution contracts work: agents with the right identity docs file the right tensions in the right shape.
+
+### Fixed
+
+- **`scope:agent:<id>` routing inversion** (#353). Agents received directives scoped to _other_ agents and zero of their own. Root cause: the shared `DefaultSignalAggregator` pool had no per-agent filter — all agents saw the same merged issue set. Fix: added a routing filter to `#collectGithub` that runs on the raw pool **before** the `githubIssue` cap. Issues carrying routing labels (`assigned:*` / `scope:*`) for a different agent are stripped; issues with no routing labels (priority:\*, bug, etc.) pass through to all agents. Uses `isAssignedLabel`/`isScopeLabel` from `@murmurations-ai/core` so the filter stays in sync with label vocabulary changes.
+
+- **Effectiveness scoring penalised cross-domain agents** (#354). Facilitator-agent self-reported `effectiveness: high` (correctly) but the harness downgraded it to `low` because three out-of-scope directives in its bundle were counted as unaddressed. Root cause: `validateWake` had no agent identity context and counted all visible directives as accountability. Fix: `agentId` and `groupIds` are now required context fields on `validateWake`; directives not in the agent's routing set are skipped during effectiveness scoring.
+
+- **Signal aggregator omitted issue comments** (#350). Agents saw only the issue body, missing Source answers posted as comments. Fix: `#collectGithub` now calls `listIssueComments` (with `?per_page=20` to avoid over-fetching) for issues with `commentCount > 0`, after filter+cap so only agent-relevant issues incur the API cost. Comments are wrapped in `<untrusted-comment author="@login" date="...">` tags as a prompt injection boundary, capped at 20 per issue. The count header shows shown vs. total when truncated ("Comments (20 — showing first 20 of 50):"). Fetch failures emit a `bundle.warnings` entry and fall back to body-only.
+
+### Changed
+
+- **`CallOptions.perPage`** — new optional field on the `GithubClient.CallOptions` interface; wired through `listIssueComments` URL construction. No effect on existing callers.
+- **`validateWake` context** — `agentId` and `groupIds` are now required (previously optional). All callers in the codebase updated; a `mkCtx` test helper removes the boilerplate at call sites.
+- **Test fixtures genericised** — all signals tests now use a generic `"alpha"` agent identity instead of the EP-specific `"07-wren"`. EP-specific names have no place in `packages/`.
+
+### Internals
+
+- 1097 tests passing across 71 test files (up from 1084 before v0.7.2; 13 new tests).
+- Architecture, QA, and security review incorporated: warning on comment fetch failure, accurate count header, `<untrusted-comment>` prompt injection boundary, deleted-comment edge case test, truncation note test, `per_page` on wire.
+- Issues closed: [#350](https://github.com/murmurations-ai/murmurations-harness/issues/350), [#353](https://github.com/murmurations-ai/murmurations-harness/issues/353), [#354](https://github.com/murmurations-ai/murmurations-harness/issues/354).
+
 ## [0.5.1] - 2026-04-30
 
 **Boundary 5 hardening — agents actually call tools instead of narrating about them, and stop wasting tokens on operations whose state already exists.**
