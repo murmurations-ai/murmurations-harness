@@ -900,10 +900,12 @@ describe("renderSignalForPrompt", () => {
     excerpt: "",
   };
 
-  it("renders trusted signals as bare JSON", () => {
+  it("renders trusted signals as bare rich text (no XML wrapper)", () => {
     const result = renderSignalForPrompt({ ...baseSignal, trust: "trusted" });
-    expect(result).not.toContain("<");
-    expect(result).toContain('"kind"');
+    expect(result).not.toContain("<untrusted-signal>");
+    expect(result).not.toContain("<semi-trusted-signal>");
+    expect(result).toContain("[gh-issue #1]");
+    expect(result).toContain("Test");
   });
 
   it("wraps untrusted signals in delimiters", () => {

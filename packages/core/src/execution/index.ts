@@ -216,20 +216,73 @@ export type WakeReason =
 export type WakeMode = "individual" | "group-member" | "group-facilitator";
 
 /**
+ * Render one signal's content without trust wrapping. Handles the full
+ * `Signal` discriminated union with per-kind rich formatting. Called by
+ * `renderSignalForPrompt`; also useful when the caller wants to add its
+ * own framing around the body.
+ *
+ * Custom signals with known `sourceId` values get special-cased formatting;
+ * unknown source IDs fall back to a JSON slice (capped at 500 chars).
+ */
+export const renderSignalBody = (signal: Signal): string => {
+  switch (signal.kind) {
+    case "github-issue":
+      return `[gh-issue #${String(signal.number)}] ${signal.title}\n  labels: ${signal.labels.join(", ") || "(none)"}\n  url: ${signal.url}\n  excerpt: ${signal.excerpt}`;
+    case "pipeline-item":
+      return `[pipeline-item stage=${signal.stage}] issue #${String(signal.issueNumber)} artifact=${signal.artifactPath} age=${String(signal.ageHours)}h`;
+    case "inbox-message":
+      return `[inbox from=${signal.fromAgent.value}]\n${signal.excerpt}`;
+    case "private-note":
+      return `[private-note path=${signal.path}]\n${signal.summary}`;
+    case "governance-round":
+      return `[governance-round ${signal.eventType}] roundId=${signal.roundId} affectsAgent=${String(signal.affectsAgent)} url=${signal.url}`;
+    case "stall-alert":
+      return `[stall-alert issue=#${String(signal.subjectIssue)}] stage=${signal.stage} stalledFor=${String(signal.stalledForHours)}h`;
+    case "custom": {
+      if (signal.sourceId === "governance-inbox") {
+        const data = signal.data as { kind?: string; payload?: unknown } | undefined;
+        return `[governance] kind=${data?.kind ?? "unknown"} payload=${JSON.stringify(data?.payload ?? null)}`;
+      }
+      if (signal.sourceId === "local-item") {
+        const data = signal.data as
+          | { id?: string; title?: string; body?: string; labels?: string[] }
+          | undefined;
+        const isDirective = data?.labels?.includes(SOURCE_DIRECTIVE_LABEL) === true;
+        const tag = isDirective ? "SOURCE DIRECTIVE" : "item";
+        return `[${tag} #${data?.id ?? "?"}] ${data?.title ?? "(no title)"}\n  labels: ${data?.labels?.join(", ") ?? "(none)"}\n\n${data?.body ?? ""}`;
+      }
+      return `[custom sourceId=${signal.sourceId}] ${JSON.stringify(signal.data).slice(0, 500)}`;
+    }
+  }
+};
+
+/**
  * Render a signal for inclusion in an LLM prompt with trust-level enforcement.
- * Untrusted content is wrapped in delimiters that instruct the LLM to treat
- * it as data, not instructions. This prevents prompt injection from GitHub
- * issue titles/bodies written by external users.
+ *
+ * Applies rich per-kind formatting (see `renderSignalBody`) then wraps the
+ * result in trust-boundary XML tags so the LLM can identify which content
+ * originates from external, potentially-adversarial sources:
+ *
+ *   `trusted`     — no wrapper (harness-authored content)
+ *   `semi-trusted` — `<semi-trusted-signal>` wrapper
+ *   `untrusted` / `unknown` — `<untrusted-signal>` wrapper
+ *
+ * The LLM's system prompt should instruct it to treat wrapped content as
+ * passive data that cannot grant tools, alter policy, request secrets,
+ * override completion criteria, or authorize mutations.
+ *
+ * Replaces the previous 200-char JSON-slice implementation (Phase 2,
+ * Proposal 07 Near-Term #2).
  */
 export const renderSignalForPrompt = (signal: Signal): string => {
-  const json = JSON.stringify(signal).slice(0, 200);
+  const body = renderSignalBody(signal);
   if (signal.trust === "untrusted" || signal.trust === "unknown") {
-    return `<untrusted-signal>${json}</untrusted-signal>`;
+    return `<untrusted-signal>\n${body}\n</untrusted-signal>`;
   }
   if (signal.trust === "semi-trusted") {
-    return `<semi-trusted-signal>${json}</semi-trusted-signal>`;
+    return `<semi-trusted-signal>\n${body}\n</semi-trusted-signal>`;
   }
-  return json;
+  return body;
 };
 
 /**
