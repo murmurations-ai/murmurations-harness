@@ -843,7 +843,7 @@ GOVERNANCE_EVENT: Editorial Calendar did not provide a brief.`;
     expect(r.governanceEvent).toBe("Editorial Calendar did not provide a brief.");
   });
 
-  it("parses legacy TENSION format", () => {
+  it("does not parse bare TENSION: format (legacy format removed — use GOVERNANCE_EVENT:)", () => {
     const text = `## Self-Reflection
 EFFECTIVENESS: medium
 OBSERVATION: Partially completed.
@@ -851,7 +851,7 @@ TENSION: Pipeline is blocked by missing QA artifact.`;
 
     const r = parseSelfReflection(text);
     expect(r.effectiveness).toBe("medium");
-    expect(r.governanceEvent).toBe("Pipeline is blocked by missing QA artifact.");
+    expect(r.governanceEvent).toBeNull();
   });
 
   it("returns null governanceEvent when none filed", () => {

@@ -1018,13 +1018,11 @@ export interface SelfReflection {
  *   EFFECTIVENESS: high / medium / low
  *   OBSERVATION: one sentence
  *   GOVERNANCE_EVENT: none — OR a description
- *
- * Also accepts legacy TENSION: format for backwards compatibility.
  */
 export const parseSelfReflection = (text: string): SelfReflection => {
   const effectivenessMatch = /EFFECTIVENESS:\s*(high|medium|low)/i.exec(text);
   const observationMatch = /OBSERVATION:\s*(.+)/i.exec(text);
-  const govMatch = /GOVERNANCE_EVENT:\s*(.+)/i.exec(text) ?? /TENSION:\s*(.+)/i.exec(text);
+  const govMatch = /GOVERNANCE_EVENT:\s*(.+)/i.exec(text);
 
   const effectiveness = (effectivenessMatch?.[1]?.toLowerCase() ??
     "unknown") as SelfReflection["effectiveness"];
