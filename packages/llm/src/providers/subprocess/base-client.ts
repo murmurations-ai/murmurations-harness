@@ -356,13 +356,17 @@ export class SubprocessAdapter implements LLMAdapter {
           // word "limit" which would also match auth heuristics. Check
           // rate-limit first so a throttled session doesn't get flagged
           // as an auth failure.
+          //
+          // T-CLI-3 (harness#347): scrub vendor-format secrets from stderr
+          // before they appear in error messages that may be logged upstream.
+          const scrubbedStderr = scrubValuePatterns(stderr.trim());
           const rl = looksLikeRateLimit(stderr);
           if (rl !== null) {
             settle({
               ok: false,
               error: {
                 kind: "rate-limit-error",
-                message: stderr.trim() || `CLI exited ${String(code)} (rate limit suspected)`,
+                message: scrubbedStderr || `CLI exited ${String(code)} (rate limit suspected)`,
                 retryAfterSeconds: rl.retryAfterSeconds,
                 ...(typeof code === "number" ? { exitCode: code } : {}),
               },
@@ -374,7 +378,7 @@ export class SubprocessAdapter implements LLMAdapter {
               ok: false,
               error: {
                 kind: "auth-error",
-                message: stderr.trim() || `CLI exited ${String(code)} (auth failure suspected)`,
+                message: scrubbedStderr || `CLI exited ${String(code)} (auth failure suspected)`,
                 ...(typeof code === "number" ? { exitCode: code } : {}),
               },
             });
@@ -385,7 +389,7 @@ export class SubprocessAdapter implements LLMAdapter {
             ok: false,
             error: {
               kind: "spawn-error",
-              message: stderr.trim() || `CLI exited with code ${String(code)}`,
+              message: scrubbedStderr || `CLI exited with code ${String(code)}`,
               ...(typeof code === "number" ? { exitCode: code } : {}),
             },
           });
