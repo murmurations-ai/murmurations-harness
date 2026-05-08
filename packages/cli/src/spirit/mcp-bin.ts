@@ -13,6 +13,17 @@
 
 import { runSpiritMcpServer } from "./mcp-server.js";
 
+// CF-E (harness#277): scrub credentials from the inherited env before any
+// server code runs. The MCP config's `env` field is additive — the parent
+// Spirit process env (including provider API keys) leaks in. We only need
+// MURMURATION_ROOT to reach the daemon socket; strip the rest.
+const CREDENTIAL_PATTERN = /API_KEY|_TOKEN|_SECRET|_PASSWORD|_CREDENTIAL/i;
+for (const key of Object.keys(process.env)) {
+  if (CREDENTIAL_PATTERN.test(key)) {
+    Reflect.deleteProperty(process.env, key);
+  }
+}
+
 const main = async (): Promise<void> => {
   const rootDir = process.env.MURMURATION_ROOT;
   if (!rootDir) {
