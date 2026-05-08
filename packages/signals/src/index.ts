@@ -15,6 +15,7 @@ import {
   assignedLabel,
   buildAgentRoutingLabels,
   isAssignedLabel,
+  isGroupProposalLabel,
   isScopeLabel,
   makeAgentId,
   type AgentId,
@@ -415,7 +416,9 @@ export class DefaultSignalAggregator implements SignalAggregator {
       ),
     );
     const agentFiltered = raw.filter(({ issue }) => {
-      const routingLabels = issue.labels.filter((l) => isAssignedLabel(l) || isScopeLabel(l));
+      const routingLabels = issue.labels.filter(
+        (l) => isAssignedLabel(l) || isScopeLabel(l) || isGroupProposalLabel(l),
+      );
       if (routingLabels.length === 0) return true;
       return routingLabels.some((l) => agentRoutingSet.has(l));
     });

@@ -947,15 +947,15 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
 
   /* eslint-disable @typescript-eslint/require-await -- fake clients mimic the async interface */
   it("multi-query anyLabel: source-directive scoped to agent reaches the bundle (harness#331/#233)", async () => {
-    // Repro for chinook-wind 2026-05-05: a directive filed as
-    // `source-directive` + `scope:agent:rentals-agent` was invisible to
+    // Repro for harness#331/#233: a directive filed as
+    // `source-directive` + `scope:agent:test-agent` was invisible to
     // the aggregator because the configured filter was AND-only with
-    // `assigned:rentals-agent`. With anyLabel routing, the issue should
+    // `assigned:test-agent`. With anyLabel routing, the issue should
     // now show up in the bundle.
-    const directiveForRentals = fakeIssue({
+    const directiveForAgent = fakeIssue({
       n: 100,
       title: "[DIRECTIVE] bootstrap",
-      labels: ["source-directive", "scope:agent:rentals-agent"],
+      labels: ["source-directive", "scope:agent:test-agent"],
     });
     // Track which label-set each query was asked for, so we can assert
     // the multi-query fan-out happened.
@@ -970,9 +970,9 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       async listIssues(_repo, filter): Promise<Result<readonly GithubIssue[], GithubClientError>> {
         queriedFilters.push(filter?.labels);
         // Mimic GitHub's AND-semantics: return the directive only when
-        // the query asks for `scope:agent:rentals-agent`.
-        const wantsScopeAgent = filter?.labels?.includes("scope:agent:rentals-agent") ?? false;
-        return { ok: true, value: wantsScopeAgent ? [directiveForRentals] : [] };
+        // the query asks for `scope:agent:test-agent`.
+        const wantsScopeAgent = filter?.labels?.includes("scope:agent:test-agent") ?? false;
+        return { ok: true, value: wantsScopeAgent ? [directiveForAgent] : [] };
       },
       async listIssueComments() {
         return { ok: true, value: [] };
@@ -1005,8 +1005,8 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
         {
           repo: REPO,
           anyLabel: [
-            "assigned:rentals-agent",
-            "scope:agent:rentals-agent",
+            "assigned:test-agent",
+            "scope:agent:test-agent",
             "scope:group:partnership",
             "scope:all",
           ],
@@ -1015,7 +1015,7 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
     });
 
     const result = await agg.aggregate(
-      mkContext("rentals-agent", { agentId: makeAgentId("rentals-agent") }),
+      mkContext("test-agent", { agentId: makeAgentId("test-agent") }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -1035,7 +1035,7 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
     // two queries; the aggregator should emit it once.
     const issue = fakeIssue({
       n: 200,
-      labels: ["assigned:rentals-agent", "scope:all"],
+      labels: ["assigned:test-agent", "scope:all"],
     });
     const fakeClient: GithubClient = {
       async getIssue() {
@@ -1075,11 +1075,11 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
     const agg = new DefaultSignalAggregator({
       rootDir,
       github: fakeClient,
-      githubScopes: [{ repo: REPO, anyLabel: ["assigned:rentals-agent", "scope:all"] }],
+      githubScopes: [{ repo: REPO, anyLabel: ["assigned:test-agent", "scope:all"] }],
     });
 
     const result = await agg.aggregate(
-      mkContext("rentals-agent", { agentId: makeAgentId("rentals-agent") }),
+      mkContext("test-agent", { agentId: makeAgentId("test-agent") }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -1139,7 +1139,12 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       ],
     });
 
-    const result = await agg.aggregate(mkContext("engineering-agent"));
+    const result = await agg.aggregate(
+      mkContext("test-agent", {
+        agentId: makeAgentId("test-agent"),
+        groupMemberships: [makeGroupId("engineering")],
+      }),
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const matching = result.bundle.signals.filter(
@@ -1159,7 +1164,7 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
     const recentDirective = fakeIssue({
       n: 999,
       title: "[DIRECTIVE] urgent",
-      labels: ["source-directive", "scope:agent:rentals-agent"],
+      labels: ["source-directive", "scope:agent:test-agent"],
       // Most recent — must survive the cap.
       updatedAt: new Date("2026-05-05T12:00:00Z"),
     });
@@ -1167,7 +1172,7 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       fakeIssue({
         n: 100 + i,
         title: `Old action ${String(i)}`,
-        labels: ["assigned:rentals-agent", "action-item"],
+        labels: ["assigned:test-agent", "action-item"],
         // All older than the directive.
         updatedAt: new Date(`2026-05-0${String(i + 1)}T08:00:00Z`),
       }),
@@ -1177,8 +1182,8 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
         return { ok: false, error: { code: "not-found" } as unknown as GithubClientError };
       },
       async listIssues(_repo, filter): Promise<Result<readonly GithubIssue[], GithubClientError>> {
-        const wantsAssigned = filter?.labels?.includes("assigned:rentals-agent") ?? false;
-        const wantsScopeAgent = filter?.labels?.includes("scope:agent:rentals-agent") ?? false;
+        const wantsAssigned = filter?.labels?.includes("assigned:test-agent") ?? false;
+        const wantsScopeAgent = filter?.labels?.includes("scope:agent:test-agent") ?? false;
         if (wantsAssigned) return { ok: true, value: olderActionItems };
         if (wantsScopeAgent) return { ok: true, value: [recentDirective] };
         return { ok: true, value: [] };
@@ -1212,7 +1217,7 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       githubScopes: [
         {
           repo: REPO,
-          anyLabel: ["assigned:rentals-agent", "scope:agent:rentals-agent", "scope:all"],
+          anyLabel: ["assigned:test-agent", "scope:agent:test-agent", "scope:all"],
         },
       ],
       // Cap of 3 — would have dropped the directive under collection-order
@@ -1220,7 +1225,7 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       caps: { githubIssue: 3, total: 50 },
     });
     const result = await agg.aggregate(
-      mkContext("rentals-agent", { agentId: makeAgentId("rentals-agent") }),
+      mkContext("test-agent", { agentId: makeAgentId("test-agent") }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -1243,7 +1248,7 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
         return { ok: false, error: { code: "not-found" } as unknown as GithubClientError };
       },
       async listIssues(_repo, filter): Promise<Result<readonly GithubIssue[], GithubClientError>> {
-        const failOn = "scope:agent:rentals-agent";
+        const failOn = "scope:agent:test-agent";
         if (filter?.labels?.includes(failOn) ?? false) {
           return {
             ok: false,
@@ -1284,19 +1289,19 @@ describe("DefaultSignalAggregator + priorityBundle", () => {
       githubScopes: [
         {
           repo: REPO,
-          anyLabel: ["assigned:rentals-agent", "scope:agent:rentals-agent", "scope:all"],
+          anyLabel: ["assigned:test-agent", "scope:agent:test-agent", "scope:all"],
         },
       ],
     });
     const result = await agg.aggregate(
-      mkContext("rentals-agent", { agentId: makeAgentId("rentals-agent") }),
+      mkContext("test-agent", { agentId: makeAgentId("test-agent") }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const failures = result.bundle.partialFailures ?? [];
     expect(failures).toHaveLength(1);
     expect(failures[0]?.source).toBe("github");
-    expect(failures[0]?.anyLabel).toBe("scope:agent:rentals-agent");
+    expect(failures[0]?.anyLabel).toBe("scope:agent:test-agent");
     expect(failures[0]?.code).toBe("rate-limited");
     // The string warning is still there too — same info, both surfaces.
     expect(result.bundle.warnings.some((w) => w.includes("rate-limited"))).toBe(true);
