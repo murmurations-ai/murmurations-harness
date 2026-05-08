@@ -91,7 +91,7 @@ import { validateHarnessYaml } from "./harness-config.js";
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 import { registerRunningSocket, unregisterRunningSocket } from "./running-sessions.js";
-import { writeSpiritMcpConfig } from "./spirit/mcp-config.js";
+import { writeAgentMcpConfig } from "./spirit/mcp-config.js";
 
 // ---------------------------------------------------------------------------
 // CLI binary resolution — launchd / cron safe (harness#XXX)
@@ -518,12 +518,16 @@ const buildAgentClients = ({
         // posting to GitHub. Codex/gemini fall through (no `--mcp-config`
         // analogue today) and remain text-only until per-CLI MCP support
         // lands.
+        // harness#355: use writeAgentMcpConfig (instead of writeSpiritMcpConfig)
+        // so that MCP servers declared in role.md `tools.mcp` are merged into
+        // the per-agent config file alongside the Spirit bridge. Agents without
+        // `tools.mcp` entries get a config identical to the Spirit-only file.
         // Escape hatch: setting MURMURATION_DISABLE_AGENT_MCP=1 falls back
         // to text-only wakes (no `--mcp-config`). Useful if a future CLI
         // version regresses MCP startup or to isolate provider-side bugs.
         const mcpConfigPath =
           cli === "claude" && process.env.MURMURATION_DISABLE_AGENT_MCP !== "1"
-            ? writeSpiritMcpConfig(rootDir)
+            ? writeAgentMcpConfig(rootDir, agent.agentId, agent.tools.mcp)
             : undefined;
         result.llm = createSubscriptionCliClient({
           cli,
