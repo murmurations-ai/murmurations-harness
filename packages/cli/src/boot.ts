@@ -529,6 +529,12 @@ const buildAgentClients = ({
           cli === "claude" && process.env.MURMURATION_DISABLE_AGENT_MCP !== "1"
             ? writeAgentMcpConfig(rootDir, agent.agentId, agent.tools.mcp)
             : undefined;
+        // harness#357: pre-authorise declared MCP servers so the claude
+        // subprocess can invoke their tools without interactive prompts in
+        // headless -p mode. Each tools.mcp entry maps to an
+        // `--allowedTools mcp__<name>__*` flag on the claude CLI call.
+        const allowedMcpServerNames =
+          mcpConfigPath !== undefined ? agent.tools.mcp.map((s) => s.name) : undefined;
         result.llm = createSubscriptionCliClient({
           cli,
           model,
@@ -537,6 +543,7 @@ const buildAgentClients = ({
             ? { permissionMode: effectiveLlm.permissionMode }
             : {}),
           ...(mcpConfigPath !== undefined ? { mcpConfigPath } : {}),
+          ...(allowedMcpServerNames !== undefined ? { allowedMcpServerNames } : {}),
           ...(costHook !== undefined ? { defaultCostHook: costHook } : {}),
           ...(resolvedCliPath !== undefined ? { cliPath: resolvedCliPath } : {}),
         });

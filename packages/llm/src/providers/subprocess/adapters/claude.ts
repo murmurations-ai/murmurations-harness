@@ -98,6 +98,14 @@ export interface ClaudeCliAdapterConfig {
    * packages/cli/src/spirit/mcp-server.ts.
    */
   readonly mcpConfigPath?: string;
+  /**
+   * Names of MCP servers declared in the agent's role.md `tools.mcp` block.
+   * When set, each name is emitted as `--allowedTools mcp__<name>__*` so the
+   * claude subprocess can invoke those tools without interactive permission
+   * prompts (harness#357). Only covers declared servers — built-in tool
+   * permissions are unaffected.
+   */
+  readonly allowedMcpServerNames?: readonly string[];
   /** ADR-0036: only `trusted` emits Claude's native auto-approve flag. */
   readonly permissionMode?: SubscriptionCliPermissionMode;
   /**
@@ -115,11 +123,13 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
   public readonly providerId = "claude-cli";
 
   readonly #mcpConfigPath: string | undefined;
+  readonly #allowedMcpServerNames: readonly string[];
   readonly #permissionMode: SubscriptionCliPermissionMode;
 
   public constructor(config: ClaudeCliAdapterConfig = {}) {
     this.command = config.cliPath ?? "claude";
     this.#mcpConfigPath = config.mcpConfigPath;
+    this.#allowedMcpServerNames = config.allowedMcpServerNames ?? [];
     this.#permissionMode = config.permissionMode ?? "restricted";
   }
 
@@ -140,6 +150,10 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
     }
     if (this.#mcpConfigPath) {
       flags.push("--mcp-config", this.#mcpConfigPath);
+    }
+    if (this.#allowedMcpServerNames.length > 0) {
+      const mcpTools = this.#allowedMcpServerNames.map((n) => `mcp__${n}__*`).join(",");
+      flags.push("--allowedTools", mcpTools);
     }
     if (req.sessionId) {
       flags.push("--resume", req.sessionId);

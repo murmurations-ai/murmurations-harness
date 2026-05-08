@@ -82,6 +82,12 @@ export interface SubscriptionCliClientConfig {
    */
   readonly mcpConfigPath?: string;
   /**
+   * Names of MCP servers included in mcpConfigPath. Each name becomes an
+   * `--allowedTools mcp__<name>__*` entry so the CLI can invoke those tools
+   * without interactive prompts in headless `-p` mode (harness#357).
+   */
+  readonly allowedMcpServerNames?: readonly string[];
+  /**
    * ADR-0036: native vendor CLI execution authority. Defaults to
    * `restricted`, which omits dangerous/yolo/bypass flags. `trusted`
    * must be selected explicitly for dogfooding environments.
@@ -105,6 +111,9 @@ const buildAdapter = (
     case "claude":
       return new ClaudeCliAdapter({
         ...(config.mcpConfigPath !== undefined ? { mcpConfigPath: config.mcpConfigPath } : {}),
+        ...(config.allowedMcpServerNames !== undefined
+          ? { allowedMcpServerNames: config.allowedMcpServerNames }
+          : {}),
         ...(config.permissionMode !== undefined ? { permissionMode: config.permissionMode } : {}),
         ...(config.cliPath !== undefined ? { cliPath: config.cliPath } : {}),
       });
