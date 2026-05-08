@@ -425,8 +425,8 @@ export function createDefaultRunner(
             ref: commitResult.value.url ?? commitResult.value.path,
           });
         }
-      } catch {
-        // Commit is best-effort
+      } catch (err) {
+        summaryLines.push(`  commit_error: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
