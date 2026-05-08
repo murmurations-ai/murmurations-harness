@@ -13,7 +13,7 @@ import type { LLMRequest } from "../../types.js";
 import { ClaudeCliAdapter } from "./adapters/claude.js";
 import { CodexCliAdapter } from "./adapters/codex.js";
 import { GeminiCliAdapter } from "./adapters/gemini.js";
-import { looksLikeRateLimit } from "./base-client.js";
+import { buildSubprocessEnv, looksLikeRateLimit } from "./base-client.js";
 import { createSubscriptionCliClient } from "./index.js";
 import type { SubprocessLLMAdapter } from "./types.js";
 
@@ -825,5 +825,121 @@ describe("looksLikeRateLimit (subscription rate-limit detection)", () => {
   it("returns null retry hint when no time is parseable", () => {
     const result = looksLikeRateLimit("rate limit reached, please wait");
     expect(result).toEqual({ retryAfterSeconds: null });
+  });
+});
+
+describe("buildSubprocessEnv (harness#300)", () => {
+  it("includes PATH, HOME, USER, SHELL, TMPDIR", () => {
+    const env = buildSubprocessEnv();
+    // These vars are always present in CI and dev; just check the function
+    // doesn't drop the ones that exist in the current process.
+    for (const key of ["PATH", "HOME"] as const) {
+      if (process.env[key] !== undefined) {
+        expect(env[key]).toBe(process.env[key]);
+      }
+    }
+  });
+
+  it("excludes ANTHROPIC_API_KEY", () => {
+    const original = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test-secret";
+    try {
+      const env = buildSubprocessEnv();
+      expect(env).not.toHaveProperty("ANTHROPIC_API_KEY");
+    } finally {
+      if (original === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = original;
+    }
+  });
+
+  it("excludes GITHUB_TOKEN", () => {
+    const original = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = "ghp_test_secret";
+    try {
+      const env = buildSubprocessEnv();
+      expect(env).not.toHaveProperty("GITHUB_TOKEN");
+    } finally {
+      if (original === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = original;
+    }
+  });
+
+  it("excludes OPENAI_API_KEY", () => {
+    const original = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "sk-test-secret";
+    try {
+      const env = buildSubprocessEnv();
+      expect(env).not.toHaveProperty("OPENAI_API_KEY");
+    } finally {
+      if (original === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = original;
+    }
+  });
+
+  it("excludes GOOGLE_API_KEY", () => {
+    const original = process.env.GOOGLE_API_KEY;
+    process.env.GOOGLE_API_KEY = "AIzatest";
+    try {
+      const env = buildSubprocessEnv();
+      expect(env).not.toHaveProperty("GOOGLE_API_KEY");
+    } finally {
+      if (original === undefined) delete process.env.GOOGLE_API_KEY;
+      else process.env.GOOGLE_API_KEY = original;
+    }
+  });
+
+  it("includes MURMURATION_ROOT when set", () => {
+    const original = process.env.MURMURATION_ROOT;
+    process.env.MURMURATION_ROOT = "/tmp/test-murmuration";
+    try {
+      const env = buildSubprocessEnv();
+      expect(env.MURMURATION_ROOT).toBe("/tmp/test-murmuration");
+    } finally {
+      if (original === undefined) delete process.env.MURMURATION_ROOT;
+      else process.env.MURMURATION_ROOT = original;
+    }
+  });
+
+  it("excludes vars matching /API_KEY|_TOKEN|_SECRET|_PASSWORD|_CREDENTIAL/i pattern", () => {
+    const originals: Record<string, string | undefined> = {};
+    const testVars = [
+      "MY_CUSTOM_API_KEY",
+      "SOME_SERVICE_TOKEN",
+      "APP_SECRET",
+      "DB_PASSWORD",
+      "VAULT_CREDENTIAL",
+    ];
+    for (const v of testVars) {
+      originals[v] = process.env[v];
+      process.env[v] = "should-not-pass";
+    }
+    try {
+      const env = buildSubprocessEnv();
+      for (const v of testVars) {
+        expect(env, `${v} should be excluded`).not.toHaveProperty(v);
+      }
+    } finally {
+      for (const v of testVars) {
+        if (originals[v] === undefined) Reflect.deleteProperty(process.env, v);
+        else process.env[v] = originals[v];
+      }
+    }
+  });
+
+  it("includes LANG and LC_ALL when set", () => {
+    const origLang = process.env.LANG;
+    const origLcAll = process.env.LC_ALL;
+    process.env.LANG = "en_US.UTF-8";
+    process.env.LC_ALL = "en_US.UTF-8";
+    try {
+      const env = buildSubprocessEnv();
+      expect(env.LANG).toBe("en_US.UTF-8");
+      expect(env.LC_ALL).toBe("en_US.UTF-8");
+    } finally {
+      if (origLang === undefined) delete process.env.LANG;
+      else process.env.LANG = origLang;
+      if (origLcAll === undefined) delete process.env.LC_ALL;
+      else process.env.LC_ALL = origLcAll;
+    }
   });
 });

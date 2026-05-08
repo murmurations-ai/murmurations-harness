@@ -69,6 +69,33 @@ const DEFAULT_CAPABILITIES: LLMClientCapabilities = {
 };
 
 // ---------------------------------------------------------------------------
+// Subprocess environment allowlist (harness#300)
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a subprocess environment that excludes credential-shaped vars.
+ *
+ * The subprocess CLI runs operator-supplied prompts and therefore must not
+ * receive harness credentials. Any env var matching the pattern
+ * /API_KEY|_TOKEN|_SECRET|_PASSWORD|_CREDENTIAL/i is excluded. Everything
+ * else (PATH, HOME, LANG, LC_*, XDG_*, MURMURATION_ROOT, etc.) passes through
+ * so the CLI binary has the shell context it needs to function.
+ *
+ * MURMURATION_ROOT is safe to pass — it is a filesystem path, not a secret,
+ * and the Spirit MCP server requires it (see mcp-bin.ts:17).
+ */
+export function buildSubprocessEnv(): NodeJS.ProcessEnv {
+  const credentialPattern = /API_KEY|_TOKEN|_SECRET|_PASSWORD|_CREDENTIAL/i;
+  const env: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (credentialPattern.test(key)) continue;
+    env[key] = value;
+  }
+  return env;
+}
+
+// ---------------------------------------------------------------------------
 // Adapter implementation
 // ---------------------------------------------------------------------------
 
@@ -207,6 +234,7 @@ export class SubprocessAdapter implements LLMAdapter {
           stdio: ["pipe", "pipe", "pipe"],
           shell: false,
           detached: true,
+          env: buildSubprocessEnv(),
         });
       } catch (err) {
         settle({
