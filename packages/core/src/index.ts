@@ -63,3 +63,8 @@ export * from "./metrics/effectiveness.js";
 export * from "./metrics/observations.js";
 export * from "./metrics/disk-snapshot.js";
 export * from "./labels/index.js";
+// Proposal 07 Phase 0 — AgentRuntime boundary types
+export * from "./runtime/index.js";
+export * from "./tools/index.js";
+export * from "./environment/index.js";
+export * from "./validation/index.js";

@@ -316,6 +316,25 @@ export type Signal =
       readonly data: unknown;
     });
 
+// ---------------------------------------------------------------------------
+// Phase 1 — Dependency-aware action item graph (Proposal 07 §6)
+// ---------------------------------------------------------------------------
+
+/**
+ * An action item that cannot be started because one or more upstream
+ * issues are still open. Surfaced in `SignalBundle.actionItemGraph.blocked`
+ * so agents can reason about blockers without re-parsing issue bodies.
+ *
+ * Added in Phase 1 (Proposal 07). The blocking issue numbers are extracted
+ * from `Depends on: #XXX` / `Blocks: #YYY` lines in the issue body.
+ */
+export interface BlockedActionItem {
+  readonly signal: Signal;
+  /** Issue numbers (as strings for JSON-safe transport) that must close
+   *  before this item becomes actionable. */
+  readonly blockedBy: readonly string[];
+}
+
 /**
  * The full bundle handed to the agent on wake. Assembled by the
  * Signal Aggregator (core component, not pluggable) and passed through
@@ -332,6 +351,11 @@ export interface SignalBundle {
    * unless the agent is blocked by upstream work, governance, or Source.
    *
    * This is harness-level behavior, not governance-model-specific.
+   *
+   * Migration note (Proposal 07 Phase 1): when `actionItemGraph` is present
+   * and populated by the aggregator, prefer `actionItemGraph.actionable`.
+   * This field is retained for compatibility until the aggregator ships
+   * dependency-graph extraction.
    */
   readonly actionItems: readonly Signal[];
   /**
@@ -354,6 +378,34 @@ export interface SignalBundle {
    * (tests, daemon hello-world path) may omit it.
    */
   readonly partialFailures?: readonly SignalAggregationFailure[];
+  /**
+   * Dependency-aware action item metadata (Proposal 07 Phase 1, §6).
+   *
+   * - `actionable`: action items with no unresolved `Depends-on` blockers.
+   * - `blocked`: action items blocked by one or more open upstream issues.
+   *
+   * Optional — absent until the aggregator populates dependency graphs
+   * (Phase 1 aggregator work). Consumers should fall back to `actionItems`
+   * when this field is absent.
+   */
+  readonly actionItemGraph?: {
+    readonly actionable: readonly Signal[];
+    readonly blocked: readonly BlockedActionItem[];
+  };
+  /**
+   * Maps signal id → version string processed in the prior wake
+   * (LangGraph `versions_seen` pattern, Proposal 07 Phase 1 §6).
+   *
+   * Prevents re-processing already-acted-on signals when an issue remains
+   * open after the agent acted on it. The version is the issue's
+   * `updatedAt` ISO string or etag — anything that changes when the issue
+   * changes. Absent when no prior-wake version data is available.
+   *
+   * P0 correctness: this is Phase 1, not deferred, because without it
+   * agents in a tight wake cycle repeatedly re-act on issues they already
+   * handled, creating duplicate comments and labels.
+   */
+  readonly actionItemVersions?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -507,6 +559,34 @@ export interface AgentSpawnContext {
    * spawned session but MUST NOT interpret them.
    */
   readonly environment: Readonly<Record<string, string>>;
+  /**
+   * Path to the agent's primary task prompt file, relative to the identity
+   * root. Derived from `role.md prompt.ref` when present, otherwise falls
+   * back to `agents/<agentDir>/prompts/wake.md`. Near-Term #1 (Proposal 07).
+   *
+   * When set, `DefaultRunner` uses this file as the primary task prompt
+   * source. When absent, the runner falls back to legacy prompt construction.
+   */
+  readonly promptPath?: string;
+  /**
+   * Stable reference string for the prompt source (e.g. a git sha or
+   * content hash). Used for prompt-level deduplication in `PromptBundle.hash`.
+   * Near-Term #1 (Proposal 07).
+   */
+  readonly promptRef?: string;
+  /**
+   * Minimal execution contract scaffold (Near-Term #9, Proposal 07).
+   *
+   * In Phase 0/1, only `objective`, `doneWhen`, and `allowedSideEffects`
+   * are populated. Phase 4 expands this to the full `ExecutionContract`.
+   * Optional so pre-Phase-1 callers (tests, examples) do not need to
+   * populate it.
+   */
+  readonly contract?: {
+    readonly objective: string;
+    readonly doneWhen: readonly string[];
+    readonly allowedSideEffects: readonly string[];
+  };
 }
 
 // ---------------------------------------------------------------------------

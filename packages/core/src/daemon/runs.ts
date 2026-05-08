@@ -111,6 +111,33 @@ export interface RunArtifactIndexEntry {
   };
   /** Path to the digest file, relative to the run root. */
   readonly digestPath: string;
+  /**
+   * Whether the wake was considered productive by `validateWake`.
+   * Optional — absent on entries written before Proposal 07 Phase 1.
+   */
+  readonly productive?: boolean;
+  /**
+   * Number of artifacts produced (successful action receipts + outputs +
+   * governance events). Mirrors `WakeValidationResult.artifactCount`.
+   * Near-Term #4 (Proposal 07 Phase 1).
+   */
+  readonly artifactCount?: number;
+  /**
+   * Machine-readable validation outcome for dashboard and eval queries.
+   * `productive` — wake produced artifacts and addressed any directives.
+   * `idle` — wake ran but produced no artifacts.
+   * `unaddressed-directives` — one or more source-directives were not
+   *   backed by structured evidence.
+   * `unknown` — validation data unavailable (legacy entry or failed wake).
+   * Near-Term #4 (Proposal 07 Phase 1).
+   */
+  readonly validationStatus?: "productive" | "idle" | "unaddressed-directives" | "unknown";
+  /**
+   * Count of source-directives that were in the signal bundle but not
+   * addressed with a successful action receipt (Boundary 5).
+   * `0` means all directives were addressed. Absent when none present.
+   */
+  readonly directivesUnaddressed?: number;
 }
 
 export class RunArtifactWriter {
