@@ -81,7 +81,16 @@ export interface DefaultRunnerClients {
         tools?: readonly RunnerToolDefinition[];
         maxSteps?: number;
       },
-      extra?: { signal?: AbortSignal },
+      extra?: {
+        signal?: AbortSignal;
+        /** Langfuse telemetry enrichment (Near-Term #8 / ADR-0022 §1). */
+        telemetryContext?: {
+          readonly agentId: string;
+          readonly wakeId: string;
+          readonly groupIds: readonly string[];
+          readonly wakeMode: string;
+        };
+      },
     ): Promise<
       | {
           ok: true;
@@ -329,7 +338,15 @@ export function createDefaultRunner(
           temperature: 0.3,
           ...(passToolsOnRequest ? { tools, maxSteps: options.maxSteps ?? 256 } : {}),
         },
-        ...(signal ? [{ signal }] : []),
+        {
+          ...(signal ? { signal } : {}),
+          telemetryContext: {
+            agentId,
+            wakeId,
+            groupIds: [],
+            wakeMode: spawn.wakeMode,
+          },
+        },
       );
       process.stderr.write(
         `${JSON.stringify({ ts: new Date().toISOString(), level: "info", event: "runner.llm.complete.end", wakeId, agentId, ok: result.ok, ...(result.ok ? { inputTokens: result.value.inputTokens, outputTokens: result.value.outputTokens, contentBytes: result.value.content.length } : { errorCode: result.error.code, errorMessage: result.error.message }) })}\n`,
