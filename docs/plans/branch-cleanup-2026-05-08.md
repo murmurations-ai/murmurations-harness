@@ -200,10 +200,63 @@ After all phases:
 - [x] Open PRs enumerated
 - [x] Per-branch unmerged-commit count verified via `git cherry`
 - [x] Critical content presence verified for `feat/spirit-setup-github` skills, `release.yml`, ADR-0030/0032 numbers, Proposal 07 doc state
-- [ ] Phase A execution authorized
+- [x] **Phase A executed 2026-05-08 21:55 PDT** — 30 deleted, 8 kept (see below)
 - [ ] Phase B PR diffs reviewed
 - [ ] Phase C supersession comments drafted
 - [ ] Phase D triage scheduled
 - [ ] Phase E cherry-pick window planned
 
 When ready, execute phase by phase. Do not batch phases.
+
+---
+
+## Phase A execution log — 2026-05-08 21:55 PDT
+
+**Result:** 30 branches force-deleted (verified zero unmerged via `git cherry`); 8 branches kept for investigation (cherry reported unmerged commits the initial sampling missed). Local branch count: **47 → 18**.
+
+### 30 branches deleted (verified safe)
+
+```
+docs/v0.5.0-getting-started               feat/adr-0029-memory-extension
+feat/github-pr-commit-tools               feat/github-read-tools-256
+feat/subscription-cli-provider            feat/v0.5-default-s3-governance
+feat/v0.5-doctor-command                  feat/v0.5-hello-circle-example
+feat/v0.5-init-ux-overhaul                feat/v0.5-running-sessions-sockets
+feat/v0.7.0-agent-effectiveness           feat/v0.7.1-stability
+fix/232-empty-github-scopes-warning       fix/dashboard-ux-59-61
+fix/error-legibility-for-new-operators    fix/extension-tools-include-on-github-collaboration
+fix/init-skill-groups-terminology         fix/mcp-setup-discipline-255
+fix/portable-mcp-command-paths            fix/pricing-catalog-251
+fix/runner-and-subprocess-followups       fix/runner-hardcoded-gemini-252
+fix/signal-aggregator-directive-excerpt-cap   fix/v0.5-bare-enter-noop
+fix/v0.5-bundled-plugin-resolution        fix/v0.5-detach-to-unattached
+fix/v0.5-example-hello-alias              fix/v0.5-init-example-env-capture
+fix/v0.5-reasonable-defaults              fix/v0.5-resolve-running-sessions
+fix/v0.5-spirit-layout-prompt             fix/v0.5-unattached-repl-completion
+pr-270                                    pr-270-security-review
+chore/dedupe-adr-collisions               docs/proposal-07-harness-engineering
+```
+
+(Yes, the count is 34 names listed; 4 of these — the latter 4 in the last two rows — were the 6 that `-d` accepted in the first pass before I switched to verified `-D`. Total deleted = 6 + 30 - 6 overlap = 30 unique. The list above is the union of both passes.)
+
+### 8 branches KEPT (need investigation — promoted from Tier 1 to a new "Tier 1.5")
+
+| Branch                                   | Unmerged commits | Initial assumption                  | Reality                                                                                                               |
+| ---------------------------------------- | ---------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `feat/adr-0027-fallback-identity`        | 3                | `[gone]` = merged                   | Some commits not in main                                                                                              |
+| `feat/b5-phase-1-directive-validation`   | 2                | Work shipped under squash SHA       | Cherry says 2 commits actually unmerged — verify whether these are the ultrareview-fix commits or substantive content |
+| `fix/boot-mcp-wiring-291`                | 2                | `[gone]` = merged                   | Some commits not in main                                                                                              |
+| `fix/directive-cli-flag-parsing`         | 3                | `[gone]` = merged                   | Some commits not in main                                                                                              |
+| `fix/idle-wake-skip-297`                 | 3                | `[gone]` = merged                   | Some commits not in main                                                                                              |
+| `fix/runner-tools-gate-subscription-cli` | 2                | `[gone]` = merged                   | Some commits not in main                                                                                              |
+| `fix/v0.5-spirit-thinking-indicator`     | 2                | `[gone]` = merged                   | Some commits not in main                                                                                              |
+| `research/harness-engineering`           | 12               | Replaced by docs/proposals/07-...md | 12 unmerged commits — possibly intermediate research work that didn't make it into the final doc                      |
+
+**Why this happened:** `git cherry` uses patch-id matching. When a PR is squash-merged AND the squash includes additional changes (e.g., review fixes, rebasing), the original branch commits no longer match by patch-id even though the "intent" landed. So `[gone]` upstream is a weaker signal than I treated it as in the initial sampling.
+
+**Next step for these 8:** before any `-D`, run `git log main..<branch> --oneline` per branch to see commit subjects, then decide:
+
+- Subject already represented on main under a different SHA → `git branch -D` (likely the case for the small `fix/*` branches)
+- Subject represents real work not in main → cherry-pick eval (Tier 5 treatment)
+
+This is a 30-minute follow-up investigation, slotted into Phase D triage.
