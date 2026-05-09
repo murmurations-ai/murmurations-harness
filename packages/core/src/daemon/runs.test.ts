@@ -12,7 +12,11 @@ import {
   makeWakeId,
   type AgentResult,
 } from "../execution/index.js";
-import { RunArtifactWriter, type RunArtifactIndexEntry } from "./runs.js";
+import {
+  RunArtifactWriter,
+  type RunArtifactIndexEntry,
+  type SubscriptionCliAuditContext,
+} from "./runs.js";
 
 const WAKE_START = new Date("2026-04-12T18:00:00.000Z");
 const WAKE_END = new Date("2026-04-12T18:00:03.500Z");
@@ -223,5 +227,94 @@ describe("RunArtifactWriter", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.event).toBe("daemon.runs.write.failed");
     expect(warnings[0]?.data.wakeId).toBe(WAKE_ID);
+  });
+
+  describe("subscriptionCli audit context (T-CLI-9 / harness#301)", () => {
+    const auditContext: SubscriptionCliAuditContext = {
+      cliName: "claude",
+      resolvedPath: "/usr/local/bin/claude",
+      permissionMode: "restricted",
+      allowedTools: ["mcp__murmuration-spirit__*"],
+      envAllowlistApplied: true,
+    };
+
+    it("includes subscriptionCli block in index.jsonl when configured", async () => {
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+        subscriptionCli: auditContext,
+      });
+      await writer.record(makeResult(), makeCostRecord());
+
+      const indexPath = join(rootDir, "index.jsonl");
+      const indexContents = await readFile(indexPath, "utf8");
+      const entry = JSON.parse(indexContents.trim()) as RunArtifactIndexEntry;
+
+      expect(entry.subscriptionCli).toEqual(auditContext);
+      expect(entry.subscriptionCli?.cliName).toBe("claude");
+      expect(entry.subscriptionCli?.permissionMode).toBe("restricted");
+      expect(entry.subscriptionCli?.resolvedPath).toBe("/usr/local/bin/claude");
+      expect(entry.subscriptionCli?.allowedTools).toEqual(["mcp__murmuration-spirit__*"]);
+      expect(entry.subscriptionCli?.envAllowlistApplied).toBe(true);
+    });
+
+    it("omits subscriptionCli block from index.jsonl when not a subscription-CLI wake", async () => {
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+      });
+      await writer.record(makeResult(), makeCostRecord());
+
+      const indexPath = join(rootDir, "index.jsonl");
+      const indexContents = await readFile(indexPath, "utf8");
+      const entry = JSON.parse(indexContents.trim()) as RunArtifactIndexEntry;
+
+      expect(entry.subscriptionCli).toBeUndefined();
+    });
+
+    it("records trusted permissionMode when configured as trusted", async () => {
+      const trustedContext: SubscriptionCliAuditContext = {
+        ...auditContext,
+        permissionMode: "trusted",
+      };
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+        subscriptionCli: trustedContext,
+      });
+      await writer.record(makeResult(), makeCostRecord());
+
+      const indexPath = join(rootDir, "index.jsonl");
+      const indexContents = await readFile(indexPath, "utf8");
+      const entry = JSON.parse(indexContents.trim()) as RunArtifactIndexEntry;
+
+      expect(entry.subscriptionCli?.permissionMode).toBe("trusted");
+    });
+
+    it("persists subscriptionCli block across multiple wakes on the same writer", async () => {
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+        subscriptionCli: auditContext,
+      });
+      await writer.record(
+        makeResult({ wakeId: makeWakeId("aaaaaaaa-0000-0000-0000-000000000001") }),
+        makeCostRecord(),
+      );
+      await writer.record(
+        makeResult({ wakeId: makeWakeId("aaaaaaaa-0000-0000-0000-000000000002") }),
+        makeCostRecord(),
+      );
+
+      const indexPath = join(rootDir, "index.jsonl");
+      const indexContents = await readFile(indexPath, "utf8");
+      const lines = indexContents.trim().split("\n");
+      expect(lines).toHaveLength(2);
+      for (const line of lines) {
+        const entry = JSON.parse(line) as RunArtifactIndexEntry;
+        expect(entry.subscriptionCli?.cliName).toBe("claude");
+        expect(entry.subscriptionCli?.envAllowlistApplied).toBe(true);
+      }
+    });
   });
 });

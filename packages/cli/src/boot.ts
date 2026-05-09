@@ -52,6 +52,7 @@ import {
   type RegisteredAgent,
   type SecretDeclaration,
   type SecretKey,
+  type SubscriptionCliAuditContext,
   type USDMicros,
   type SignalAggregator,
   type SubprocessCommand,
@@ -1015,14 +1016,49 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     ? { provider, declaration }
     : undefined;
 
+  // Resolve subscription-CLI binary path once at boot (T-CLI-9 / harness#301).
+  // launchd / cron / systemd start daemons with a minimal PATH that may omit
+  // user-install locations (e.g. ~/.local/bin). Resolving here — before the
+  // writer map and agent loop — lets both use the cached absolute path rather
+  // than re-running PATH lookups per wake. Uses `which` first (works in
+  // interactive shells), then probes common install locations as a fallback.
+  const harnessCliName = config.llm.provider === "subscription-cli" ? config.llm.cli : undefined;
+  const resolvedCliPath: string | undefined = harnessCliName
+    ? ((await resolveCliBinaryPath(harnessCliName)) ?? undefined)
+    : undefined;
+  if (harnessCliName && resolvedCliPath) {
+    logger.info("daemon.cli.resolved", { cli: harnessCliName, path: resolvedCliPath });
+  } else if (harnessCliName && !resolvedCliPath) {
+    logger.warn("daemon.cli.not-found", {
+      cli: harnessCliName,
+      message: `"${harnessCliName}" not found via PATH or common install locations; wakes will fail with ENOENT`,
+    });
+  }
+
   // Per-agent run artifact writers. Each agent gets its own writer
   // at `<rootDir>/runs/<agentId>/`.
   const writerMap = new Map<string, RunArtifactWriter>();
   for (const agent of allRegistered) {
+    const agentCli =
+      agent.llm?.provider === "subscription-cli" ? (agent.llm.cli ?? harnessCliName) : undefined;
+    const subscriptionCliContext: SubscriptionCliAuditContext | undefined =
+      agentCli === "claude" || agentCli === "gemini" || agentCli === "codex"
+        ? {
+            cliName: agentCli,
+            resolvedPath: resolvedCliPath ?? agentCli,
+            permissionMode: agent.llm?.permissionMode ?? "restricted",
+            allowedTools:
+              agentCli === "claude" ? agent.tools.mcp.map((s) => `mcp__${s.name}__*`) : [],
+            envAllowlistApplied: true,
+          }
+        : undefined;
     writerMap.set(
       agent.agentId,
       new RunArtifactWriter({
         rootDir: resolve(exampleRoot, "runs", agent.agentId),
+        ...(subscriptionCliContext !== undefined
+          ? { subscriptionCli: subscriptionCliContext }
+          : {}),
       }),
     );
   }
@@ -1340,25 +1376,6 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   const compositions: AgentComposition[] = [];
   const ollamaBaseUrl = process.env.OLLAMA_BASE_URL;
   const executorMap = new Map<string, AgentExecutor>();
-
-  // Resolve subscription-CLI binary path once at boot. launchd / cron / systemd
-  // start daemons with a minimal PATH that may omit user-install locations
-  // (e.g. ~/.local/bin). Resolving here — before the agent loop — lets every
-  // agent reuse the cached absolute path rather than re-running PATH lookups
-  // per wake. Uses `which` first (works in interactive shells), then probes
-  // common install locations as a fallback.
-  const harnessCliName = config.llm.provider === "subscription-cli" ? config.llm.cli : undefined;
-  const resolvedCliPath: string | undefined = harnessCliName
-    ? ((await resolveCliBinaryPath(harnessCliName)) ?? undefined)
-    : undefined;
-  if (harnessCliName && resolvedCliPath) {
-    logger.info("daemon.cli.resolved", { cli: harnessCliName, path: resolvedCliPath });
-  } else if (harnessCliName && !resolvedCliPath) {
-    logger.warn("daemon.cli.not-found", {
-      cli: harnessCliName,
-      message: `"${harnessCliName}" not found via PATH or common install locations; wakes will fail with ENOENT`,
-    });
-  }
 
   for (const agent of allRegistered) {
     // Boot-time validation pass: build a throw-away client bag with

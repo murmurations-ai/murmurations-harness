@@ -28,6 +28,12 @@ export interface AgentStatus {
    */
   readonly shadowCostMicros: number | null;
   readonly shadowCostFormatted: string | null;
+  /**
+   * Subscription-CLI permission mode from the last wake's audit context
+   * (T-CLI-9 / harness#301). Null for API-provider agents or if the
+   * agent has not yet completed a wake.
+   */
+  readonly subscriptionCliPermissionMode: "restricted" | "operator-approved" | "trusted" | null;
   readonly stale: boolean; // stalled or no wake in > 48h
   readonly consecutiveFailures: number;
   readonly totalWakes: number;
@@ -115,6 +121,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         costFormatted: "$0.00",
         shadowCostMicros: null,
         shadowCostFormatted: null,
+        subscriptionCliPermissionMode: null,
         stale: false,
         consecutiveFailures: a.consecutiveFailures,
         totalWakes: a.totalWakes,
@@ -197,6 +204,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
       let costFormatted = "$0.0000";
       let shadowCostMicros: number | null = null;
       let shadowCostFormatted: string | null = null;
+      let subscriptionCliPermissionMode: AgentStatus["subscriptionCliPermissionMode"] = null;
       try {
         const indexContent = await readFile(join(runsDir, agentId, "index.jsonl"), "utf8");
         const lines = indexContent
@@ -212,6 +220,9 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
               shadowCostMicros?: number | null;
               shadowCostUsdFormatted?: string | null;
             };
+            subscriptionCli?: {
+              permissionMode?: string;
+            };
           };
           costMicros = entry.llm?.costMicros ?? 0;
           costFormatted = `$${entry.llm?.costUsdFormatted ?? "0.0000"}`;
@@ -220,6 +231,10 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
             entry.llm?.shadowCostUsdFormatted != null
               ? `$${entry.llm.shadowCostUsdFormatted}`
               : null;
+          const pm = entry.subscriptionCli?.permissionMode;
+          if (pm === "restricted" || pm === "operator-approved" || pm === "trusted") {
+            subscriptionCliPermissionMode = pm;
+          }
         }
       } catch {
         /* no cost data */
@@ -234,6 +249,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         costFormatted,
         shadowCostMicros,
         shadowCostFormatted,
+        subscriptionCliPermissionMode,
         stale,
         consecutiveFailures: agentState.consecutiveFailures,
         totalWakes: agentState.totalWakes,
@@ -262,6 +278,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           costFormatted: "$0.0000",
           shadowCostMicros: null,
           shadowCostFormatted: null,
+          subscriptionCliPermissionMode: null,
           stale: true,
           consecutiveFailures: 0,
           totalWakes: 0,
@@ -279,10 +296,12 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           shadowCostMicros?: number | null;
           shadowCostUsdFormatted?: string | null;
         };
+        subscriptionCli?: { permissionMode?: string };
       };
       const lastWake = entry.finishedAt ? new Date(entry.finishedAt) : null;
       const stale = lastWake ? Date.now() - lastWake.getTime() > 48 * 3600 * 1000 : true;
       const fallbackShadow = entry.llm?.shadowCostUsdFormatted;
+      const fallbackPm = entry.subscriptionCli?.permissionMode;
       results.push({
         agentId,
         state: "idle",
@@ -293,6 +312,12 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         shadowCostMicros: entry.llm?.shadowCostMicros ?? null,
         shadowCostFormatted:
           fallbackShadow !== undefined && fallbackShadow !== null ? `$${fallbackShadow}` : null,
+        subscriptionCliPermissionMode:
+          fallbackPm === "restricted" ||
+          fallbackPm === "operator-approved" ||
+          fallbackPm === "trusted"
+            ? fallbackPm
+            : null,
         stale,
         consecutiveFailures: 0,
         totalWakes: 0,
@@ -309,6 +334,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         costFormatted: "$0.0000",
         shadowCostMicros: null,
         shadowCostFormatted: null,
+        subscriptionCliPermissionMode: null,
         stale: true,
         consecutiveFailures: 0,
         totalWakes: 0,

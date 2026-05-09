@@ -113,6 +113,13 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
     else marker = dim("[--]");
 
     const failStr = a.consecutiveFailures > 0 ? red(` ${String(a.consecutiveFailures)}F`) : "";
+    // T-CLI-9: show permission mode badge only when elevated above the safe default.
+    const permStr =
+      a.subscriptionCliPermissionMode === "trusted"
+        ? yellow(" [trusted]")
+        : a.subscriptionCliPermissionMode === "operator-approved"
+          ? cyan(" [op-approved]")
+          : "";
 
     const time = a.lastWake!.toISOString().slice(11, 16);
     const next = a.nextWakeCountdown !== "--" ? a.nextWakeCountdown.padEnd(8) : dim("--".padEnd(8));
@@ -129,7 +136,7 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
         : dim("░".repeat(BAR_WIDTH));
 
     lines.push(
-      `  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w${failStr}`,
+      `  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w${failStr}${permStr}`,
     );
   }
 

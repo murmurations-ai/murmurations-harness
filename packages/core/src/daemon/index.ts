@@ -1452,4 +1452,9 @@ export { makeWakeId };
 // Re-export the run-artifact writer surface so the CLI boot path can
 // construct one without reaching into internal module paths.
 export { RunArtifactWriter, DispatchRunArtifactWriter } from "./runs.js";
-export type { RunArtifactWriterConfig, RunArtifactIndexEntry, RunArtifactLogger } from "./runs.js";
+export type {
+  RunArtifactWriterConfig,
+  RunArtifactIndexEntry,
+  RunArtifactLogger,
+  SubscriptionCliAuditContext,
+} from "./runs.js";

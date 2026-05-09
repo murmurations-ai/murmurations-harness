@@ -40,6 +40,37 @@ import { formatUSDMicros } from "../cost/usd.js";
 import type { WakeCostRecord } from "../cost/record.js";
 import type { AgentResult } from "../execution/index.js";
 
+/**
+ * Audit record for subscription-CLI wakes (T-CLI-9 / harness#301).
+ *
+ * Recorded before the subprocess is spawned so the record reflects
+ * what was **configured**, not what the subprocess reported. A
+ * pre-spawn record is more trustworthy: the subprocess cannot modify
+ * it, and it survives even if the subprocess crashes before producing
+ * any output.
+ */
+export interface SubscriptionCliAuditContext {
+  /** Which vendor CLI was used. */
+  readonly cliName: "claude" | "gemini" | "codex";
+  /**
+   * Absolute path of the spawned binary, pre-resolved at daemon boot
+   * by `resolveCliBinaryPath()`. Falls back to the bare CLI name
+   * ("claude", "gemini", "codex") when PATH resolution was skipped
+   * (e.g., non-launchd environments where PATH contains the bin dir).
+   */
+  readonly resolvedPath: string;
+  /** Effective ADR-0036 permission mode. */
+  readonly permissionMode: "restricted" | "operator-approved" | "trusted";
+  /**
+   * `--allowedTools` patterns passed to the CLI subprocess. Empty
+   * array means no tool restriction was applied (fully open or fully
+   * restricted by the CLI's own defaults — see ADR-0036).
+   */
+  readonly allowedTools: readonly string[];
+  /** Always `true` — harness#300 (env allowlist) landed before this field. */
+  readonly envAllowlistApplied: true;
+}
+
 /** Configuration for a {@link RunArtifactWriter}. */
 export interface RunArtifactWriterConfig {
   /**
@@ -60,6 +91,12 @@ export interface RunArtifactWriterConfig {
    * pin the day deterministically.
    */
   readonly now?: () => Date;
+  /**
+   * Subscription-CLI audit context for T-CLI-9 / harness#301.
+   * When set, every index.jsonl entry written by this writer will
+   * include a `subscriptionCli` block. Absent for API-provider agents.
+   */
+  readonly subscriptionCli?: SubscriptionCliAuditContext;
 }
 
 /** Minimal contract so the daemon can log write failures without
@@ -138,15 +175,22 @@ export interface RunArtifactIndexEntry {
    * `0` means all directives were addressed. Absent when none present.
    */
   readonly directivesUnaddressed?: number;
+  /**
+   * Subscription-CLI audit context (T-CLI-9 / harness#301).
+   * Present on all subscription-CLI wakes; absent for API-provider wakes.
+   */
+  readonly subscriptionCli?: SubscriptionCliAuditContext;
 }
 
 export class RunArtifactWriter {
   readonly #rootDir: string;
   readonly #now: () => Date;
+  readonly #subscriptionCli: SubscriptionCliAuditContext | undefined;
 
   public constructor(config: RunArtifactWriterConfig) {
     this.#rootDir = config.rootDir;
     this.#now = config.now ?? ((): Date => new Date());
+    this.#subscriptionCli = config.subscriptionCli;
   }
 
   /**
@@ -179,7 +223,12 @@ export class RunArtifactWriter {
       const digestBody = renderDigestBody(result, costRecord, now);
       await writeFile(digestAbsolutePath, digestBody, "utf8");
 
-      const entry: RunArtifactIndexEntry = buildIndexEntry(result, costRecord, digestRelativePath);
+      const entry: RunArtifactIndexEntry = buildIndexEntry(
+        result,
+        costRecord,
+        digestRelativePath,
+        this.#subscriptionCli,
+      );
       // Newline-terminated so readers can stream line-by-line.
       await appendFile(indexAbsolutePath, `${JSON.stringify(entry)}\n`, "utf8");
     } catch (cause) {
@@ -214,6 +263,7 @@ const buildIndexEntry = (
   result: AgentResult,
   costRecord: WakeCostRecord | undefined,
   digestRelativePath: string,
+  subscriptionCli?: SubscriptionCliAuditContext,
 ): RunArtifactIndexEntry => {
   const outcome = outcomeKindOf(result);
   const durationMs = result.finishedAt.getTime() - result.startedAt.getTime();
@@ -251,6 +301,7 @@ const buildIndexEntry = (
       apiCalls: costRecord?.totals.apiCalls ?? 0,
     },
     digestPath: digestRelativePath,
+    ...(subscriptionCli !== undefined ? { subscriptionCli } : {}),
   };
 };
 
