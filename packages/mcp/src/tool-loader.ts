@@ -78,6 +78,57 @@ export interface McpServerConfig {
 }
 
 // ---------------------------------------------------------------------------
+// MCP description sanitizer (Sec / harness#286)
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line no-control-regex
+const CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+
+/**
+ * Phrases commonly used in prompt-injection payloads embedded in tool
+ * descriptions from hostile or compromised MCP servers. Case-insensitive.
+ * Each entry is a prefix of a suspicious phrase; matches are replaced with
+ * the literal string `[REDACTED]` so the agent sees a gap rather than a
+ * coherent instruction.
+ */
+const INJECTION_PATTERNS: readonly RegExp[] = [
+  /ignore (?:all )?(?:previous|prior|above) instructions?/gi,
+  /disregard (?:all )?(?:previous|prior|above) instructions?/gi,
+  /forget (?:everything|all) (?:you (?:were|have been) told|above)/gi,
+  /you are now/gi,
+  /your new (?:instructions?|system prompt|role)/gi,
+  /\bSYSTEM:\s/g,
+  /<\/?(?:system|assistant|user|human|im_start|im_end)\b/gi,
+  /\[INST\]/gi,
+  /<<SYS>>/gi,
+];
+
+const MCP_DESCRIPTION_MAX_CHARS = 500;
+
+/**
+ * Sanitize an external MCP tool description before injecting it into the
+ * agent's tool surface (Sec / harness#286):
+ * 1. Strip control characters
+ * 2. Replace heuristic prompt-injection patterns with `[REDACTED]`
+ * 3. Enforce a character-count cap (truncated with `[…]` marker)
+ *
+ * @internal exported for testing
+ */
+export const sanitizeMcpDescription = (
+  raw: string,
+  maxChars = MCP_DESCRIPTION_MAX_CHARS,
+): string => {
+  let s = raw.replace(CONTROL_RE, "");
+  for (const pattern of INJECTION_PATTERNS) {
+    s = s.replace(pattern, "[REDACTED]");
+  }
+  if (s.length > maxChars) {
+    s = `${s.slice(0, maxChars)}[…]`;
+  }
+  return s;
+};
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -124,7 +175,7 @@ export class McpToolLoader {
 
         allTools.push({
           name: toolName,
-          description: mcpTool.description ?? "",
+          description: sanitizeMcpDescription(mcpTool.description ?? ""),
           parameters: jsonSchema(mcpTool.inputSchema),
           execute: async (input: Record<string, unknown>): Promise<unknown> => {
             const result = await boundClient.callTool({
