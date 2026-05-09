@@ -1050,6 +1050,8 @@ export const runAttach = async (rootDir: string, name: string): Promise<void> =>
 
   rl.on("close", () => {
     shuttingDown = true;
+    // CF-F (harness#278): delete ephemeral MCP config on clean detach.
+    spiritSession?.close();
     conn.destroy();
     resolveAttachClosed();
   });

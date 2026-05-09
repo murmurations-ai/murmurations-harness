@@ -38,7 +38,7 @@ import {
   type SubscriptionCliPermissionMode,
   type SubscriptionCli,
 } from "../harness-config.js";
-import { writeSpiritMcpConfig } from "./mcp-config.js";
+import { sweepOrphanedSpiritMcpConfigs, writeEphemeralSpiritMcpConfig } from "./mcp-config.js";
 import { buildSpiritSystemPrompt } from "./system-prompt.js";
 import { buildSpiritTools } from "./tools.js";
 
@@ -58,6 +58,11 @@ export interface SpiritSession {
    * conversation.jsonl + session.json files. The next turn starts cold.
    */
   reset(): Promise<void>;
+  /**
+   * Clean up session resources: deletes the ephemeral MCP config file
+   * written at attach time (CF-F / harness#278). Call on detach.
+   */
+  close(): void;
   readonly provider: LLMProvider;
   readonly model: string;
   /** True when prior conversation context was rehydrated at attach. */
@@ -189,6 +194,9 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
   let client: LLMClient;
   let model: string;
   let useApiTools: boolean;
+  // CF-F (harness#278): holds the cleanup fn for the ephemeral MCP config
+  // written at attach time; called in close() on clean detach.
+  let mcpConfigCleanup: (() => void) | undefined;
 
   if (harness.llm.provider === "subscription-cli") {
     const cli: SubscriptionCli = harness.llm.cli ?? "claude";
@@ -197,7 +205,15 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     // Claude is the only CLI with `--mcp-config` support today (ADR-0038).
     // Codex/gemini fall through without an MCP bridge — they can converse
     // but cannot invoke harness-internal tools yet.
-    const mcpConfigPath = cli === "claude" ? writeSpiritMcpConfig(rootDir) : undefined;
+    // CF-F (harness#278): sweep any orphaned per-attach configs from a
+    // prior crashed session, then write a fresh ephemeral one for this attach.
+    let mcpConfigPath: string | undefined;
+    if (cli === "claude") {
+      sweepOrphanedSpiritMcpConfigs(rootDir);
+      const ephemeral = writeEphemeralSpiritMcpConfig(rootDir);
+      mcpConfigPath = ephemeral.configPath;
+      mcpConfigCleanup = ephemeral.cleanup;
+    }
 
     client = createSubscriptionCliClient({
       cli,
@@ -336,9 +352,14 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     await store.reset();
   };
 
+  const close = (): void => {
+    mcpConfigCleanup?.();
+  };
+
   return {
     turn,
     reset,
+    close,
     provider: harness.llm.provider,
     model,
     resumed,

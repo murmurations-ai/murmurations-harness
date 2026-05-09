@@ -29,7 +29,8 @@
  * adapters, not here.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -68,6 +69,62 @@ export const writeSpiritMcpConfig = (rootDir: string): string => {
   };
   writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
   return configPath;
+};
+
+/**
+ * Write an ephemeral per-attach Spirit MCP config under
+ * `<rootDir>/.murmuration/spirit-mcp-<uuid>.json` (CF-F / harness#278).
+ * The UUID suffix ensures each Spirit attach gets its own file so
+ * concurrent attaches (and orphans from crashes) don't collide.
+ *
+ * Returns the absolute config path and a `cleanup` function. The caller
+ * must call `cleanup()` when the session ends to delete the file. On a
+ * crash, `sweepOrphanedSpiritMcpConfigs()` removes leftovers at next boot.
+ */
+export const writeEphemeralSpiritMcpConfig = (
+  rootDir: string,
+): { configPath: string; cleanup: () => void } => {
+  const configDir = join(rootDir, ".murmuration");
+  mkdirSync(configDir, { recursive: true });
+  const configPath = join(configDir, `spirit-mcp-${randomUUID()}.json`);
+  const config = {
+    mcpServers: { "murmuration-spirit": spiritBridgeEntry(rootDir) },
+  };
+  writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+  return {
+    configPath,
+    cleanup: (): void => {
+      try {
+        rmSync(configPath, { force: true });
+      } catch {
+        // Best-effort: if the file is already gone, that's fine
+      }
+    },
+  };
+};
+
+/**
+ * Remove all `spirit-mcp-*.json` orphan files from a prior crashed attach
+ * (CF-F / harness#278). Called at the start of each new Spirit attach so
+ * stale files never accumulate. Skips non-matching entries silently.
+ */
+export const sweepOrphanedSpiritMcpConfigs = (rootDir: string): void => {
+  const configDir = join(rootDir, ".murmuration");
+  let entries: string[];
+  try {
+    entries = readdirSync(configDir);
+  } catch {
+    return; // dir doesn't exist yet — nothing to sweep
+  }
+  for (const entry of entries) {
+    if (/^spirit-mcp-[0-9a-f-]+\.json$/.test(entry)) {
+      try {
+        rmSync(join(configDir, entry), { force: true });
+      } catch {
+        // Best-effort
+      }
+    }
+  }
 };
 
 /**
