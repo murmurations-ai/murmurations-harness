@@ -208,23 +208,3 @@ export const buildAgentRoutingLabels = (
   ...groupIds.map(groupProposalLabel),
   SCOPE_ALL_LABEL,
 ];
-
-// ---------------------------------------------------------------------------
-// S3-flavored governance labels.
-//
-// These labels are written and matched by enough sites in core +
-// signals + cli that drift was a real risk before this module. They
-// live here for now even though they're S3-specific (`tier:*` is an
-// S3 vocabulary; other governance plugins use their own decision
-// taxonomies). Plugin-owned label vocabularies are a v0.8.0+ design
-// item — they will migrate to the S3 plugin's `labelVocabulary()` in v0.8.0.
-// ---------------------------------------------------------------------------
-
-/** S3 decision tier: agent acts without notifying Source. */
-export const TIER_AUTONOMOUS_LABEL = "tier:autonomous";
-
-/** S3 decision tier: agent acts, then notifies Source. */
-export const TIER_NOTIFY_LABEL = "tier:notify";
-
-/** S3 decision tier: agent proposes, Source must consent before action. */
-export const TIER_CONSENT_LABEL = "tier:consent";

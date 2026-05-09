@@ -108,3 +108,9 @@ per the Engineering Lead #22 gate review ([issue #6](https://github.com/murmurat
 | [ADR-0038](./0038-spirit-mcp-bridge.md)                                   | Spirit MCP bridge for subscription-CLI tool calls                                                        | Accepted |
 | [ADR-0039](./0039-local-executable-authority.md)                          | Local executable authority for subscription-CLI providers                                                | Proposed |
 | [ADR-0040](./0040-wake-event-stream.md)                                   | Wake event stream for live agent observability                                                           | Proposed |
+| [ADR-0041](./0041-facilitator-agent-and-plugin-state-machines.md)         | Facilitator-agent role and plugin-extensible governance state machines                                   | Proposed |
+| [ADR-0042](./0042-done-criteria-and-priority-bundles.md)                  | Done-criteria block in role.md + priority-tiered signal bundles                                          | Proposed |
+| [ADR-0043](./0043-spirit-as-meta-agent.md)                                | Spirit as a meta-agent: per-murmuration context, memory, and scaffolding authority                       | Proposed |
+| [ADR-0044](./0044-spirit-as-operator-execution-environment.md)            | Spirit as Operator Execution Environment                                                                 | Proposed |
+| [ADR-0045](./0045-prompt-boundary.md)                                     | Prompt Boundary: Trust Classification and Cache-Aware Assembly                                           | Accepted |
+| [ADR-0046](./0046-phase-3-governance-plugin-extraction.md)                | Phase 3: Governance Plugin Extraction                                                                    | Accepted |

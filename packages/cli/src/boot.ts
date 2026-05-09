@@ -39,11 +39,13 @@ import {
   DispatchRunArtifactWriter,
   IdentityLoader,
   InProcessExecutor,
+  PluginInitError,
   RunArtifactWriter,
   SubprocessExecutor,
   makeSecretKey,
   makeUSDMicros,
   registeredAgentFromLoadedIdentity,
+  satisfiesCoreVersionRange,
   type AgentExecutor,
   type AgentRunner,
   type BudgetCeiling,
@@ -881,6 +883,14 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       process.exit(78);
     }
     governancePlugin = candidate as import("@murmurations-ai/core").GovernancePlugin;
+    const range = governancePlugin.compatibleCoreVersionRange;
+    if (range !== undefined && range !== "") {
+      if (!satisfiesCoreVersionRange(HARNESS_VERSION, range)) {
+        throw new PluginInitError(
+          `Governance plugin "${governancePlugin.name}" v${governancePlugin.version} requires core ${range} but harness core is v${HARNESS_VERSION}`,
+        );
+      }
+    }
     const pluginVocabulary = governancePlugin.labelVocabulary?.() ?? [];
     process.stdout.write(
       `${JSON.stringify({

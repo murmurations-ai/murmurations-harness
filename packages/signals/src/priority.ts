@@ -41,9 +41,10 @@
 import {
   AWAITING_SOURCE_CLOSE_LABEL,
   SOURCE_DIRECTIVE_LABEL,
-  TIER_CONSENT_LABEL,
   assignedLabel,
 } from "@murmurations-ai/core";
+
+const TIER_CONSENT_LABEL = "tier:consent";
 import type { Signal } from "@murmurations-ai/core";
 
 // ---------------------------------------------------------------------------

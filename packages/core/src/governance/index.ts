@@ -560,6 +560,50 @@ export interface GovernanceRoutingDecision {
 }
 
 // ---------------------------------------------------------------------------
+// Plugin error taxonomy (harness#2 — Phase 3 gate)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown when a plugin fails to initialize during
+ * {@link GovernancePlugin.onDaemonStart}. The daemon catches and logs
+ * all errors from that hook; using this class makes the error visible
+ * in log parsing and telemetry without crashing the daemon.
+ */
+export class PluginInitError extends Error {
+  public override readonly name = "PluginInitError";
+  public constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+  }
+}
+
+/**
+ * Thrown by a plugin's {@link GovernancePlugin.onEventsEmitted} or
+ * {@link GovernancePlugin.evaluateAction} when it cannot process the
+ * event or action. The daemon's catch block prevents this from
+ * crashing the daemon; using this class provides structured log
+ * discrimination between plugin errors and harness errors.
+ */
+export class PluginEventError extends Error {
+  public override readonly name = "PluginEventError";
+  public constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+  }
+}
+
+/**
+ * Thrown when a plugin's async hook exceeds the allowed time budget.
+ * Plugins are responsible for implementing their own timeouts and
+ * throwing this class when the budget is exceeded — the daemon does
+ * not impose timeouts on plugin calls directly.
+ */
+export class PluginTimeoutError extends Error {
+  public override readonly name = "PluginTimeoutError";
+  public constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Action authorization
 // ---------------------------------------------------------------------------
 
@@ -682,6 +726,57 @@ export type ClosureVerificationResult =
   | { readonly ok: false; readonly reason: string };
 
 // ---------------------------------------------------------------------------
+// Plugin compat check helper (harness#2 — Phase 3 gate)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses a three-part semver string `"MAJOR.MINOR.PATCH"` into an integer
+ * tuple, or returns `null` for malformed input.
+ */
+const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)/;
+const parseSemver = (v: string): [number, number, number] | null => {
+  const parts = SEMVER_RE.exec(v);
+  if (!parts) return null;
+  const major = parseInt(parts[1] ?? "0", 10);
+  const minor = parseInt(parts[2] ?? "0", 10);
+  const patch = parseInt(parts[3] ?? "0", 10);
+  return [major, minor, patch];
+};
+
+const cmpSemver = (a: [number, number, number], b: [number, number, number]): number => {
+  if (a[0] !== b[0]) return a[0] - b[0];
+  if (a[1] !== b[1]) return a[1] - b[1];
+  return a[2] - b[2];
+};
+
+/**
+ * Returns `true` when `coreVersion` satisfies `range`. Supports
+ * space-separated conditions of the form `>=X.Y.Z`, `>X.Y.Z`,
+ * `<=X.Y.Z`, `<X.Y.Z`, `=X.Y.Z`. All conditions must be satisfied
+ * (AND semantics). Returns `true` for an empty or blank range.
+ */
+const RANGE_CONDITION_RE = /^(>=|>|<=|<|=)?(\d+\.\d+\.\d+)/;
+export const satisfiesCoreVersionRange = (coreVersion: string, range: string): boolean => {
+  const cv = parseSemver(coreVersion);
+  if (!cv) return false;
+  const conditions = range.trim().split(/\s+/);
+  for (const cond of conditions) {
+    const m = RANGE_CONDITION_RE.exec(cond);
+    if (!m) continue;
+    const op = m[1] ?? "=";
+    const rv = parseSemver(m[2] ?? "");
+    if (!rv) continue;
+    const diff = cmpSemver(cv, rv);
+    if (op === ">=" && diff < 0) return false;
+    if (op === ">" && diff <= 0) return false;
+    if (op === "<=" && diff > 0) return false;
+    if (op === "<" && diff >= 0) return false;
+    if (op === "=" && diff !== 0) return false;
+  }
+  return true;
+};
+
+// ---------------------------------------------------------------------------
 // State graph helper — derived from plugin's stateGraphs()
 // ---------------------------------------------------------------------------
 
@@ -714,6 +809,14 @@ export interface GovernancePlugin {
   readonly name: string;
   /** Semver version of the plugin implementation. */
   readonly version: string;
+  /**
+   * Semver range (e.g. `">=0.9.0 <1.0.0"`) describing which harness
+   * core versions this plugin is compatible with. When set, the daemon
+   * checks it at boot against `HARNESS_CORE_VERSION` and aborts with
+   * `PluginInitError` if the range is not satisfied. Omit to skip the
+   * check (permissive / in-tree plugins).
+   */
+  readonly compatibleCoreVersionRange?: string;
   /** Display terminology for this governance model. If omitted, generic defaults are used. */
   readonly terminology?: GovernanceTerminology;
 

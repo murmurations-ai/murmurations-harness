@@ -141,14 +141,6 @@ short ADR recording the stance + the graduation criteria (first
 external operator? v1.0 tag? npm stars threshold?) prevents future
 contributors from guessing.
 
-### D2. ADR index automation
-
-**What:** `docs/adr/README.md` table currently stops at ADR-0019.
-ADRs 0020–0029 exist on disk.
-
-**Why note:** Not an ADR itself but worth a one-line step in the release
-checklist. Architecture reviewer #9 flagged this.
-
 ---
 
 **How to use this file:** When you start a feature that touches any of

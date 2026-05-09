@@ -4,15 +4,22 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { makeAgentId } from "../execution/index.js";
+import { makeAgentId, makeWakeId, type EmittedGovernanceEvent } from "../execution/index.js";
 import {
   GovernanceStateStore,
   NoOpGovernancePlugin,
+  PluginEventError,
+  PluginInitError,
+  PluginTimeoutError,
   isTerminalState,
   makeGovernanceStateReader,
+  satisfiesCoreVersionRange,
+  type GovernanceEventBatch,
   type GovernancePlugin,
+  type GovernanceRoutingDecision,
   type GovernanceStateGraph,
   type GovernanceItem,
+  type GovernanceStateReader,
 } from "./index.js";
 
 // Example state graphs covering different governance models.
@@ -497,5 +504,243 @@ describe("GovernanceStateStore persistence", () => {
     const store = new GovernanceStateStore({ persistDir });
     const loaded = await store.load();
     expect(loaded).toBe(1); // good line loaded, bad line skipped
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Plugin error taxonomy (harness#2 — Phase 3 gate)
+// ---------------------------------------------------------------------------
+
+describe("Plugin error taxonomy", () => {
+  it("PluginInitError has correct name and is instanceof Error", () => {
+    const e = new PluginInitError("init failed");
+    expect(e).toBeInstanceOf(Error);
+    expect(e).toBeInstanceOf(PluginInitError);
+    expect(e.name).toBe("PluginInitError");
+    expect(e.message).toBe("init failed");
+  });
+
+  it("PluginEventError has correct name and is instanceof Error", () => {
+    const e = new PluginEventError("event failed");
+    expect(e).toBeInstanceOf(Error);
+    expect(e).toBeInstanceOf(PluginEventError);
+    expect(e.name).toBe("PluginEventError");
+    expect(e.message).toBe("event failed");
+  });
+
+  it("PluginTimeoutError has correct name and is instanceof Error", () => {
+    const e = new PluginTimeoutError("timed out");
+    expect(e).toBeInstanceOf(Error);
+    expect(e).toBeInstanceOf(PluginTimeoutError);
+    expect(e.name).toBe("PluginTimeoutError");
+    expect(e.message).toBe("timed out");
+  });
+
+  it("errors support the cause option (ES2022 ErrorOptions)", () => {
+    const cause = new Error("upstream");
+    const e = new PluginInitError("wrapped", { cause });
+    expect(e.cause).toBe(cause);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// satisfiesCoreVersionRange (harness#2 — Phase 3 gate)
+// ---------------------------------------------------------------------------
+
+describe("satisfiesCoreVersionRange", () => {
+  it("returns true when version satisfies >= lower bound", () => {
+    expect(satisfiesCoreVersionRange("0.9.0", ">=0.9.0")).toBe(true);
+    expect(satisfiesCoreVersionRange("1.0.0", ">=0.9.0")).toBe(true);
+    expect(satisfiesCoreVersionRange("0.9.1", ">=0.9.0")).toBe(true);
+  });
+
+  it("returns false when version is below >= lower bound", () => {
+    expect(satisfiesCoreVersionRange("0.8.9", ">=0.9.0")).toBe(false);
+    expect(satisfiesCoreVersionRange("0.9.0", ">0.9.0")).toBe(false);
+  });
+
+  it("returns true when version satisfies < upper bound", () => {
+    expect(satisfiesCoreVersionRange("0.9.0", "<1.0.0")).toBe(true);
+    expect(satisfiesCoreVersionRange("0.9.9", "<1.0.0")).toBe(true);
+  });
+
+  it("returns false when version is at or above < upper bound", () => {
+    expect(satisfiesCoreVersionRange("1.0.0", "<1.0.0")).toBe(false);
+    expect(satisfiesCoreVersionRange("1.0.1", "<1.0.0")).toBe(false);
+  });
+
+  it("handles compound range (AND semantics)", () => {
+    expect(satisfiesCoreVersionRange("0.9.0", ">=0.9.0 <1.0.0")).toBe(true);
+    expect(satisfiesCoreVersionRange("0.9.5", ">=0.9.0 <1.0.0")).toBe(true);
+    expect(satisfiesCoreVersionRange("1.0.0", ">=0.9.0 <1.0.0")).toBe(false);
+    expect(satisfiesCoreVersionRange("0.8.9", ">=0.9.0 <1.0.0")).toBe(false);
+  });
+
+  it("returns true for empty range string (skip check)", () => {
+    expect(satisfiesCoreVersionRange("0.7.2", "")).toBe(true);
+    expect(satisfiesCoreVersionRange("0.7.2", "   ")).toBe(true);
+  });
+
+  it("handles = (exact) operator", () => {
+    expect(satisfiesCoreVersionRange("0.9.0", "=0.9.0")).toBe(true);
+    expect(satisfiesCoreVersionRange("0.9.1", "=0.9.0")).toBe(false);
+  });
+
+  it("handles <= operator", () => {
+    expect(satisfiesCoreVersionRange("0.9.0", "<=0.9.0")).toBe(true);
+    expect(satisfiesCoreVersionRange("0.9.1", "<=0.9.0")).toBe(false);
+  });
+
+  it("returns false for malformed core version string", () => {
+    expect(satisfiesCoreVersionRange("not-a-version", ">=0.9.0")).toBe(false);
+  });
+
+  it("skips malformed condition tokens (lenient parsing)", () => {
+    expect(satisfiesCoreVersionRange("0.9.0", ">=0.9.0 bogus-token")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-circle routing contract (harness#1 — Phase 3 gate)
+//
+// Design decision: parallel rounds with Source escalation on conflict.
+//   - A single event may fan out to N agent routes simultaneously.
+//   - Each route represents one circle running its own consent round.
+//   - Conflicting outcomes escalate via { target: "source" }.
+//   - The daemon dispatches all routes returned by onEventsEmitted;
+//     the plugin is not responsible for sequencing them.
+//
+// This test documents the routing contract that every GovernancePlugin
+// implementation must uphold. It is model-agnostic: the assertions
+// apply whether the plugin is S3, chain-of-command, consensus, etc.
+// ---------------------------------------------------------------------------
+
+describe("Multi-circle routing contract (harness#1)", () => {
+  const AGENT_A = makeAgentId("01-content");
+  const AGENT_B = makeAgentId("02-publishing");
+  const AGENT_C = makeAgentId("03-intelligence");
+
+  const makeEvent = (kind: string): EmittedGovernanceEvent => ({
+    kind,
+    payload: { test: true },
+  });
+
+  const noopReader: GovernanceStateReader = {
+    graphs: () => [],
+    get: () => undefined,
+    query: () => [],
+    buildDecisionRecord: () => {
+      throw new Error("not needed in routing tests");
+    },
+    size: () => 0,
+  };
+
+  it("plugin can route one event to multiple agents (parallel round model)", async () => {
+    const event = makeEvent("tension");
+    const batch: GovernanceEventBatch = {
+      wakeId: makeWakeId("wake-01"),
+      agentId: AGENT_A,
+      events: [event],
+    };
+
+    const multiCirclePlugin: Pick<GovernancePlugin, "onEventsEmitted"> = {
+      onEventsEmitted(_batch): Promise<readonly GovernanceRoutingDecision[]> {
+        return Promise.resolve([
+          {
+            event,
+            routes: [
+              { target: "agent", agentId: AGENT_A },
+              { target: "agent", agentId: AGENT_B },
+              { target: "agent", agentId: AGENT_C },
+            ],
+          },
+        ]);
+      },
+    };
+
+    const decisions = await multiCirclePlugin.onEventsEmitted(
+      batch,
+      makeGovernanceStateReader(noopReader),
+    );
+    expect(decisions).toHaveLength(1);
+    const routes = decisions[0]?.routes ?? [];
+    expect(routes).toHaveLength(3);
+    const targets = routes.map((r) => (r.target === "agent" ? r.agentId : r.target));
+    expect(targets).toContain(AGENT_A);
+    expect(targets).toContain(AGENT_B);
+    expect(targets).toContain(AGENT_C);
+  });
+
+  it("plugin can signal Source escalation via { target: 'source' } route", async () => {
+    const event = makeEvent("tension");
+    const batch: GovernanceEventBatch = {
+      wakeId: makeWakeId("wake-02"),
+      agentId: AGENT_A,
+      events: [event],
+    };
+
+    const escalatingPlugin: Pick<GovernancePlugin, "onEventsEmitted"> = {
+      onEventsEmitted(_batch): Promise<readonly GovernanceRoutingDecision[]> {
+        return Promise.resolve([
+          {
+            event,
+            routes: [
+              { target: "agent", agentId: AGENT_A },
+              { target: "source" }, // conflict escalation
+            ],
+          },
+        ]);
+      },
+    };
+
+    const decisions = await escalatingPlugin.onEventsEmitted(
+      batch,
+      makeGovernanceStateReader(noopReader),
+    );
+    const routes = decisions[0]?.routes ?? [];
+    expect(routes.some((r) => r.target === "source")).toBe(true);
+    expect(routes.some((r) => r.target === "agent")).toBe(true);
+  });
+
+  it("plugin can discard an event with { target: 'discard' } (single route, no fan-out)", async () => {
+    const event = makeEvent("noise");
+    const batch: GovernanceEventBatch = {
+      wakeId: makeWakeId("wake-03"),
+      agentId: AGENT_A,
+      events: [event],
+    };
+
+    const discardPlugin: Pick<GovernancePlugin, "onEventsEmitted"> = {
+      onEventsEmitted(_batch): Promise<readonly GovernanceRoutingDecision[]> {
+        return Promise.resolve([{ event, routes: [{ target: "discard" }] }]);
+      },
+    };
+
+    const decisions = await discardPlugin.onEventsEmitted(
+      batch,
+      makeGovernanceStateReader(noopReader),
+    );
+    expect(decisions[0]?.routes).toHaveLength(1);
+    expect(decisions[0]?.routes[0]?.target).toBe("discard");
+  });
+
+  it("returning an empty decisions array is valid (plugin chose not to route)", async () => {
+    const batch: GovernanceEventBatch = {
+      wakeId: makeWakeId("wake-04"),
+      agentId: AGENT_A,
+      events: [],
+    };
+
+    const passivePlugin: Pick<GovernancePlugin, "onEventsEmitted"> = {
+      onEventsEmitted(): Promise<readonly GovernanceRoutingDecision[]> {
+        return Promise.resolve([]);
+      },
+    };
+
+    const decisions = await passivePlugin.onEventsEmitted(
+      batch,
+      makeGovernanceStateReader(noopReader),
+    );
+    expect(decisions).toHaveLength(0);
   });
 });
