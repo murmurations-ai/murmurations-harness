@@ -128,6 +128,14 @@ export interface DefaultSignalAggregatorConfig {
    * Returning undefined / empty Set leaves them in `normal`.
    */
   readonly getActiveConsentRoundIssueNumbers?: (agentId: AgentId) => Promise<ReadonlySet<number>>;
+  /**
+   * Maximum concurrent GitHub requests during `anyLabel` fan-out
+   * (Sec L1 / harness#342). Default: 4. Operators with strict
+   * rate-limit budgets can lower this; operators on GitHub Enterprise
+   * with generous rate limits can raise it. The outer scope loop
+   * remains sequential — this cap is only for the inner label fan-out.
+   */
+  readonly fanOutParallelism?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,14 +385,27 @@ export class DefaultSignalAggregator implements SignalAggregator {
       }
       // Fan-out: one query per anyLabel value. Each query AND-combines
       // the existing labels filter (if any) with the OR-label.
+      // Sec L1 / harness#342: cap concurrent GitHub requests via a
+      // worker-pool pattern. JavaScript continuations are atomic so the
+      // shared `seen` Set needs no locking.
       const baseLabels = baseFilterForScope.labels ?? [];
-      for (const orLabel of scope.anyLabel) {
-        const filter: ListIssuesFilter = {
+      const concurrency = Math.max(1, this.#config.fanOutParallelism ?? 4);
+      const queue = scope.anyLabel.map((orLabel) => ({
+        filter: {
           ...baseFilterForScope,
           labels: [...baseLabels, orLabel],
-        };
-        await recordIssues(scope, filter, orLabel);
-      }
+        } satisfies ListIssuesFilter,
+        orLabel,
+      }));
+      let qi = 0;
+      const worker = async (): Promise<void> => {
+        while (qi < queue.length) {
+          const item = queue[qi++];
+          if (item === undefined) break;
+          await recordIssues(scope, item.filter, item.orLabel);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
     }
 
     // Sort by recency before applying the cap so the most-recent-N is
