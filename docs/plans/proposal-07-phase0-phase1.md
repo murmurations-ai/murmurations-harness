@@ -280,9 +280,9 @@ Expected: all pass. New types add zero runtime behavior so no existing tests bre
 
 ## Phase 2+ Reminder (not in scope)
 
-- Phase 2: Move prompt assembly from DefaultRunner → PromptAssembler (requires ADR-003X)
+- Phase 2: Move prompt assembly from DefaultRunner → PromptAssembler (requires ADR-0045)
 - Phase 3: ToolRegistry wiring, ToolInvocationRecorder, MCP env migration
-- Phase 4: Contract-backed completion validation (requires ADR-003Y)
+- Phase 4: Contract-backed completion validation (requires ADR-0047)
 - Phase 5: WakeHealthMetrics derivation + Langfuse threading
 - Phase 6: Two-tier memory, curate_memory built-in
 - Phase 7: Durable RunLedger, ContainerExecutor, INTERRUPT/RESUME

@@ -33,7 +33,7 @@ Hermes has no mitigation beyond blocking obvious injection patterns at the sessi
 
 - **This is the most architecturally significant finding.** It names exactly the attack that Proposal 07's trust model is designed to prevent.
 - In Proposal 07, memory and skills segments are classified `semi-trusted` — they are agent-curated, but sourced from prior wakes and external interactions. They cannot grant tools, alter policy, request secrets, override completion criteria, or authorize mutation.
-- **For consent round #352:** Add "skill poisoning" as a named threat in ADR-003X (Prompt Boundary). The `semi-trusted` classification for `memory` and `skills` segments directly mitigates this attack. The propagation rule — untrusted/semi-trusted text cannot grant tools or alter policy — is the defense.
+- **For consent round #352:** Add "skill poisoning" as a named threat in ADR-0045 (Prompt Boundary). The `semi-trusted` classification for `memory` and `skills` segments directly mitigates this attack. The propagation rule — untrusted/semi-trusted text cannot grant tools or alter policy — is the defense.
 - **Signed provenance:** Hermes currently has no skill signing. For Murmurations, `ToolCallReceipts` and `RunLedger` hash-chaining already provide a provenance trail for agent-written artifacts. When skills are eventually agent-generated (Phase 6), the ledger should record which wake produced which skill file and what signals it was derived from.
 
 ---
@@ -88,7 +88,7 @@ Result: agents with 20+ self-generated skills run 40% faster on repeated tasks i
 
 GEPA and the Langfuse loop are **complementary, not competing**. GEPA optimizes task-level procedures; the Langfuse loop feeds architectural improvement through governance. For Murmurations, GEPA-style trace analysis is a future direction for Phase 6/post-6 — the execution record built by `ToolCallReceipts` + `RunLedgerEntry` is already the right substrate for a GEPA-equivalent loop.
 
-**For ADR-003Y (Execution Contracts):** The GEPA loop confirms that complete, machine-readable execution traces (not just cost records) are required for any self-improvement mechanism. `RunLedgerEntry` with `toolReceipts`, `actionReceipts`, `validation`, and `health` is the correct design — it is the data that GEPA-equivalent analysis would need.
+**For ADR-0047 (Execution Contracts):** The GEPA loop confirms that complete, machine-readable execution traces (not just cost records) are required for any self-improvement mechanism. `RunLedgerEntry` with `toolReceipts`, `actionReceipts`, `validation`, and `health` is the correct design — it is the data that GEPA-equivalent analysis would need.
 
 ---
 
@@ -136,11 +136,11 @@ GEPA and the Langfuse loop are **complementary, not competing**. GEPA optimizes 
 
 | Finding                                       | Where to apply                                                                                           |
 | --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Skill poisoning as named threat               | ADR-003X (Prompt Boundary) — document the threat, name `semi-trusted` classification as the mitigation   |
+| Skill poisoning as named threat               | ADR-0045 (Prompt Boundary) — document the threat, name `semi-trusted` classification as the mitigation   |
 | Memory consolidation trigger                  | Phase 6 spec — `memory.consolidate_threshold: 0.8` in role.md schema; encode in `curate_memory` built-in |
 | Signed provenance for agent-written artifacts | RunLedger Phase 6 — record wake + signals source for any agent-generated skill/knowledge file            |
 | MCP supply-chain warning                      | Phase 3 spec / ADR — confirm allowlist+pin requirement with Hermes as production evidence                |
-| RunLedger as GEPA substrate                   | ADR-003Y (Execution Contracts) — full execution trace is required for any future self-improvement loop   |
+| RunLedger as GEPA substrate                   | ADR-0047 (Execution Contracts) — full execution trace is required for any future self-improvement loop   |
 
 ## What Proposal 07 Need Not Change
 

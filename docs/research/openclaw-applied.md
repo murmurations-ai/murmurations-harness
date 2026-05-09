@@ -14,7 +14,7 @@ OpenClaw is a local-first, personal AI assistant runtime — "an operating syste
 **Harness Application:**
 
 - **Current State:** Proposal 07's PromptAssembler (Phase 2) will naturally create this split because identity/role/contract segments are stable while signals/health/memory are volatile. But the boundary is implicit — an accidental property of segment ordering.
-- **Proposed Addition to Phase 2:** Introduce `PromptBundle.cacheAnchor` — an explicit marker in the assembled prompt buffer after the last stable segment, before the first volatile segment. This should be a named concept in ADR-003X (Prompt Boundary), not left to implementation convention.
+- **Proposed Addition to Phase 2:** Introduce `PromptBundle.cacheAnchor` — an explicit marker in the assembled prompt buffer after the last stable segment, before the first volatile segment. This should be a named concept in ADR-0045 (Prompt Boundary), not left to implementation convention.
 - **Why this matters:** With wakes at 23:00 PT nightly, identical stable segments across all agents are prime cache candidates. Each cache miss on stable content is wasted cost. The boundary makes the optimization explicit and auditable via the `promptHash`.
 
 ---
@@ -43,7 +43,7 @@ Later levels override earlier ones. This makes policy inheritance predictable an
 **Harness Application:**
 
 - **Current State:** Proposal 07's Phase 7 (`EnvironmentSpec` + `ContainerExecutor`) declares the intent for least-privilege sandboxing but does not yet specify a precedence model for how per-role policy overrides global defaults.
-- **Proposed Addition:** ADR-003Y (Execution Contracts) or the Phase 7 spec should define a precedence ladder analogous to OpenClaw's. A candidate for Murmurations:
+- **Proposed Addition:** ADR-0047 (Execution Contracts) or the Phase 7 spec should define a precedence ladder analogous to OpenClaw's. A candidate for Murmurations:
   ```
   Harness Default → Group Policy → Role Policy → Wake Override
   ```
@@ -84,7 +84,7 @@ Later levels override earlier ones. This makes policy inheritance predictable an
 - For an interactive assistant, this is acceptable — the human is always in the loop and can catch a malformed tool call.
 - For Murmurations, where GitHub issue bodies (written by external contributors or agents-as-commenters) are injected into the signal bundle and processed headlessly, the absence of formal trust propagation is a real attack surface.
 - **This confirms Proposal 07's trust model is not over-engineering.** The `trusted / semi-trusted / untrusted` PromptSegment classification and the propagation rules (untrusted text cannot grant tools, alter policy, etc.) are required for safe headless operation, not optional hardening.
-- **Practical note:** The signals segment is `untrusted` because issue bodies are external contributor content. The identity and role segments are `trusted`. The governance segment is `trusted`. Memory is `semi-trusted` (curated by the agent but sourced from prior wakes). These classifications should be encoded in ADR-003X, not left to convention.
+- **Practical note:** The signals segment is `untrusted` because issue bodies are external contributor content. The identity and role segments are `trusted`. The governance segment is `trusted`. Memory is `semi-trusted` (curated by the agent but sourced from prior wakes). These classifications should be encoded in ADR-0045, not left to convention.
 
 ---
 
@@ -92,10 +92,10 @@ Later levels override earlier ones. This makes policy inheritance predictable an
 
 | Finding                                         | Where to apply                                                                      |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Cache boundary (`SYSTEM_PROMPT_CACHE_BOUNDARY`) | ADR-003X (Prompt Boundary) — add `PromptBundle.cacheAnchor`                         |
+| Cache boundary (`SYSTEM_PROMPT_CACHE_BOUNDARY`) | ADR-0045 (Prompt Boundary) — add `PromptBundle.cacheAnchor`                         |
 | Subtraction Principle field validation          | Proposal 07 §Architectural Principles — add OpenClaw to evidence base               |
-| Tool policy precedence ladder                   | Phase 7 spec / ADR-003Y — add precedence model for EnvironmentSpec                  |
-| Trust level formalization for headless agents   | ADR-003X (Prompt Boundary) — encode trusted/semi-trusted/untrusted per segment kind |
+| Tool policy precedence ladder                   | Phase 7 spec / ADR-0047 — add precedence model for EnvironmentSpec                  |
+| Trust level formalization for headless agents   | ADR-0045 (Prompt Boundary) — encode trusted/semi-trusted/untrusted per segment kind |
 
 ## What Proposal 07 Need Not Change
 

@@ -19,7 +19,7 @@
 **Scope — not included:**
 
 - Phases 2–7 are directional only; each requires a separate consent round before implementation
-- ADR-003X "Prompt Boundary" and ADR-003Y "Execution Contracts" are required as separate consent rounds before Phases 2 and 4 respectively
+- ADR-0045 "Prompt Boundary" and ADR-0047 "Execution Contracts" are required as separate consent rounds before Phases 2 and 4 respectively
 - Cross-language harness ports, multi-tenant deployment, vector or embedding-based memory, `GovernancePlugin` interface changes beyond what Phases 5–6 require
 
 **Review date:** After Phase 1 ships, or by 2026-07-01 — whichever comes first.
@@ -64,8 +64,8 @@ This proposal is filed for consent as **direction and phased architecture**, not
 
 **Still required as separate consent rounds before implementation:**
 
-- **ADR-003X "Prompt Boundary"** — trust levels, segment policy, sanitizer contract (gates Phase 2).
-- **ADR-003Y "Execution Contracts"** — the five elements and enforcement semantics (gates Phase 4).
+- **ADR-0045 "Prompt Boundary"** — trust levels, segment policy, sanitizer contract (gates Phase 2).
+- **ADR-0047 "Execution Contracts"** — the five elements and enforcement semantics (gates Phase 4).
 - **Phase-by-phase re-consent** for Phases 2–7 as their detailed scope becomes concrete.
 
 This is an architectural commitment, not a delivery commitment for every named interface.
@@ -131,17 +131,17 @@ Raw episodic history should remain separate from curated semantic memory. The ha
 
 ### The trust model prevents skill poisoning; the RunLedger enables self-improvement
 
-**Skill poisoning** (named by Hermes Agent's security review, NousResearch, 103k+ stars): a single-turn injection causes the agent to write a malicious skill file that loads as trusted context on every future wake. Hermes has no mitigation because it lacks formal trust classification. Proposal 07's `semi-trusted` classification for `memory` and `skills` segments is the defense — a `semi-trusted` segment cannot grant tools, alter policy, or authorize mutation regardless of content. ADR-003X should name this threat explicitly. See `docs/research/hermes-applied.md` §1.
+**Skill poisoning** (named by Hermes Agent's security review, NousResearch, 103k+ stars): a single-turn injection causes the agent to write a malicious skill file that loads as trusted context on every future wake. Hermes has no mitigation because it lacks formal trust classification. Proposal 07's `semi-trusted` classification for `memory` and `skills` segments is the defense — a `semi-trusted` segment cannot grant tools, alter policy, or authorize mutation regardless of content. ADR-0045 should name this threat explicitly. See `docs/research/hermes-applied.md` §1.
 
 **RunLedger as self-improvement substrate:** Hermes's GEPA loop (ICLR 2026 Oral, 40% faster on repeated tasks with 20+ self-generated skills) works by analyzing complete execution traces. `RunLedgerEntry` with `toolReceipts`, `actionReceipts`, `validation`, and `health` is precisely the substrate a GEPA-equivalent loop would consume. Building the ledger correctly in Phases 0–4 is what enables a future self-improvement loop. Detail in `docs/research/hermes-applied.md` §3.
 
 ### Completion ≠ correctness: the quantified case for WakeValidator
 
-The "Beyond Task Completion" paper (arXiv 2512.12791) measured production CloudOps agents: **100% task completion / 33% policy adherence / 13.1% memory recall**. An agent can complete every task while doing two-thirds incorrectly from a policy standpoint. WakeValidator must check both surfaces: _outcome_ (required artifacts exist) and _behavioral_ (tool call sequence was policy-compliant per `ToolCallReceipts`). Checking only artifacts misses the 67-point compliance gap. Implementation detail for ADR-003Y; full findings in `docs/research/beyond-task-completion-applied.md`.
+The "Beyond Task Completion" paper (arXiv 2512.12791) measured production CloudOps agents: **100% task completion / 33% policy adherence / 13.1% memory recall**. An agent can complete every task while doing two-thirds incorrectly from a policy standpoint. WakeValidator must check both surfaces: _outcome_ (required artifacts exist) and _behavioral_ (tool call sequence was policy-compliant per `ToolCallReceipts`). Checking only artifacts misses the 67-point compliance gap. Implementation detail for ADR-0047; full findings in `docs/research/beyond-task-completion-applied.md`.
 
 ### Security: named threat model validates the trust architecture
 
-The formal threat taxonomy (arXiv 2603.01564, arXiv 2510.23883) names six attack categories — Prompt Abuse, Environment Injection, Memory Attacks, Toolchain Abuse, Model Tampering, Agent Network Attacks — all of which map directly to Proposal 07 components. The harness#353/354 routing inversion bugs are an instance of Agent Network Attacks. ADR-003X should open with this taxonomy so the trust classification reads as a response to named threats, not defensive preference. Three system-level security primitives (Identity/Authorization, Provenance/Traceability, Ecosystem Response) also map directly onto the harness's existing constructs; see `docs/research/agentic-security-threats-applied.md` for the full mapping.
+The formal threat taxonomy (arXiv 2603.01564, arXiv 2510.23883) names six attack categories — Prompt Abuse, Environment Injection, Memory Attacks, Toolchain Abuse, Model Tampering, Agent Network Attacks — all of which map directly to Proposal 07 components. The harness#353/354 routing inversion bugs are an instance of Agent Network Attacks. ADR-0045 should open with this taxonomy so the trust classification reads as a response to named threats, not defensive preference. Three system-level security primitives (Identity/Authorization, Provenance/Traceability, Ecosystem Response) also map directly onto the harness's existing constructs; see `docs/research/agentic-security-threats-applied.md` for the full mapping.
 
 ### RunLedger design is independently validated by LangGraph
 
@@ -423,7 +423,7 @@ export interface PromptBundle {
   // Index of the last stable segment — segments before this index are cache-stable across wakes;
   // segments at or after are volatile (signals, memory, health). Enables explicit cache boundary
   // optimization analogous to OpenClaw's SYSTEM_PROMPT_CACHE_BOUNDARY. Should be encoded in
-  // ADR-003X, not left to implementation convention.
+  // ADR-0045, not left to implementation convention.
   readonly cacheAnchorIndex: number;
 }
 ```
@@ -437,7 +437,7 @@ Rules:
 - All signal rendering uses a single sanitizer/renderer.
 - `AgentSpawnContext.promptPath` / `promptRef` becomes the primary task prompt source after the field is added.
 - The prompt bundle hash is recorded in the run ledger and trace metadata.
-- **Canonical trust classification per segment kind** (to be encoded in ADR-003X, not left to convention):
+- **Canonical trust classification per segment kind** (to be encoded in ADR-0045, not left to convention):
 
   | Segment kind | Trust level    | Rationale                                          |
   | ------------ | -------------- | -------------------------------------------------- |
@@ -579,7 +579,7 @@ Every wake should carry a contract that says what useful completion means. `Exec
 - **Obligation** — what the agent _must_ produce to satisfy the contract (`requiredOutputs`, `completionConditions`, `verification`). These are checked post-wake by `WakeValidator`.
 - **Permission** — what the agent _is allowed to do_ during the wake (`allowedSideEffects`, `budget`, `approval`). These are checked pre-action by the policy layer and `ApprovalPolicy`.
 
-Conflating obligation and permission obscures which part of the contract was violated in a failed wake. ADR-003Y should name these as two sub-contracts with distinct enforcement points.
+Conflating obligation and permission obscures which part of the contract was violated in a failed wake. ADR-0047 should name these as two sub-contracts with distinct enforcement points.
 
 The `ExecutionContract` also has a **dual lifecycle**: it is injected as a `trusted` prompt segment at spawn time (so the model knows what it must produce and what it may do), and it serves as the validation frame applied post-model by `WakeValidator`. This is not redundant — the injection encodes intent for the model; the validation checks what actually happened.
 
@@ -874,7 +874,7 @@ Existing files become adapters:
 - Add prompt segment hashes and token estimates to run artifacts.
 - Parse structured wake actions in `DefaultRunner` and surface parse errors.
 
-**ADR required:** ADR-003X "Prompt Boundary" — trust levels, segment policy, sanitizer contract.
+**ADR required:** ADR-0045 "Prompt Boundary" — trust levels, segment policy, sanitizer contract.
 
 ### Phase 3: Tool boundary cleanup
 
@@ -898,7 +898,7 @@ Existing files become adapters:
   - **Behavioral validation**: `ToolCallReceipts` ordered by timestamp checked for policy compliance and diagnostic-before-action sequencing
 - Include validation results in `RunArtifactIndexEntry`.
 
-**ADR required:** ADR-003Y "Execution Contracts" — five elements, obligation/permission split, and dual validation surfaces.
+**ADR required:** ADR-0047 "Execution Contracts" — five elements, obligation/permission split, and dual validation surfaces.
 
 ### Phase 5: Health metrics and self-reflection
 
@@ -1041,17 +1041,17 @@ Start with signal completeness, minimal execution contracts, and the typed runti
 | 4-pillar framework — 3rd derivation of AgentRuntime (arXiv 2512.12791) | Consent Framing + ARCHITECTURE.md (convergence validation)                                               |
 | Tool sequencing — diagnostic-before-action (arXiv 2512.12791)          | Phase 4/5 — `ToolCallReceipts` ordered by timestamp; WakeValidator sequencing check                      |
 | `memorySegmentReferenced` (arXiv 2512.12791)                           | Phase 5/6 — `WakeHealthMetrics.memorySegmentReferenced` field                                            |
-| Six named threat categories (arXiv 2603.01564)                         | ADR-003X opening section — threat model; maps each category to P07 component                             |
+| Six named threat categories (arXiv 2603.01564)                         | ADR-0045 opening section — threat model; maps each category to P07 component                             |
 | Three system-level security primitives (arXiv 2603.01564)              | ARCHITECTURE.md — Identity/Auth, Provenance/Traceability, Ecosystem Response                             |
 | Dangerous tool composition (arXiv 2603.01564)                          | Phase 3 — `ToolInvocationRecorder` call sequence; `ExecutionContract.allowedSideEffects` composite check |
-| Multi-agent memory poisoning (arXiv 2603.01564)                        | ADR-003X — per-agent routing isolation as security primitive, not just correctness fix                   |
+| Multi-agent memory poisoning (arXiv 2603.01564)                        | ADR-0045 — per-agent routing isolation as security primitive, not just correctness fix                   |
 | RunLedger as pluggable interface (LangGraph)                           | Phase 7 — `RunLedger` abstract interface with `append/get/list/delete`                                   |
 | Two-phase write / pending + committed (LangGraph)                      | `RunLedgerEntry.status` field + Phase 7 INTERRUPT/RESUME approval pattern                                |
 | UUID v6 for `WakeId` (LangGraph)                                       | Phase 0 types — time-ordered IDs, chronological ledger traversal                                         |
 | Full snapshots not deltas (LangGraph)                                  | Phase 7 spec — stated explicitly as `RunLedgerEntry` constraint                                          |
 | `actionItemVersions` (LangGraph versions_seen)                         | Phase 1/4 — `SignalBundle.actionItemVersions`; prevent signal replay                                     |
-| INTERRUPT/RESUME approval gate (LangGraph)                             | Phase 7 + ADR-003Y — approval-required tools create pending wake + GitHub issue, resume on approval      |
+| INTERRUPT/RESUME approval gate (LangGraph)                             | Phase 7 + ADR-0047 — approval-required tools create pending wake + GitHub issue, resume on approval      |
 | Pregel/BSP superstep model (LangGraph)                                 | ARCHITECTURE.md — GitHub-as-channel is a superstep model; names why per-wake isolation is correct        |
-| Obligation vs permission split (architectural review)                  | §5 ExecutionContract, ADR-003Y — two sub-contracts with distinct enforcement points                      |
+| Obligation vs permission split (architectural review)                  | §5 ExecutionContract, ADR-0047 — two sub-contracts with distinct enforcement points                      |
 | ODARE loop with Validate phase (architectural review)                  | Target Architecture §ODARE — Validate between Act and Record; distinct from Evaluate                     |
 | AgentStateStore as named inter-wake primitive (architectural review)   | ARCHITECTURE.md + Target Architecture — inter-wake health state bridge                                   |

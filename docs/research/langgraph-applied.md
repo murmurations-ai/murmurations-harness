@@ -111,5 +111,5 @@ The graph does not poll. The human has unlimited time to review. The interrupt p
 | `actionItemVersions` in SignalBundle                            | Phase 1 spec — prevent re-processing already-acted-on signals                                       |
 | UUID v6 for WakeId                                              | Phase 0 types — time-ordered, enables chronological ledger traversal                                |
 | Full snapshots, not deltas                                      | Phase 7 spec — state explicitly                                                                     |
-| INTERRUPT/RESUME → approval-gated wake pattern                  | Phase 7 + ADR-003Y — approval-required tools create pending wake + GitHub issue, resume on approval |
+| INTERRUPT/RESUME → approval-gated wake pattern                  | Phase 7 + ADR-0047 — approval-required tools create pending wake + GitHub issue, resume on approval |
 | Pregel/superstep model as named principle                       | ARCHITECTURE.md — names why GitHub-as-channel and per-wake isolation are correct                    |

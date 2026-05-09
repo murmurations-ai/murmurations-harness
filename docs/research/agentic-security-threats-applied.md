@@ -8,7 +8,7 @@ AI agents published to date.
 
 ---
 
-## 1. The Six-Category Threat Taxonomy — Named Threats for ADR-003X
+## 1. The Six-Category Threat Taxonomy — Named Threats for ADR-0045
 
 The taxonomy identifies six attack categories. All six are relevant to Murmurations. Each has a direct
 mapping to a Proposal 07 component.
@@ -24,9 +24,9 @@ mapping to a Proposal 07 component.
 
 **Harness Application:**
 
-- **ADR-003X (Prompt Boundary)** should open with this taxonomy as the threat model section. It names the specific attacks the trust classification defends against. Without a named threat model, the trust classification reads as defensive engineering preference; with it, it reads as a necessary response to known production threats.
+- **ADR-0045 (Prompt Boundary)** should open with this taxonomy as the threat model section. It names the specific attacks the trust classification defends against. Without a named threat model, the trust classification reads as defensive engineering preference; with it, it reads as a necessary response to known production threats.
 - **Environment Injection is the most underweighted threat in current P07 language.** GitHub issue bodies are external, adversarial content by default. The paper states: "the web is an untrusted and adversarial environment by default." GitHub is not the web, but contributor-authored issue content has the same trust posture as web content. The `untrusted` signal classification is correct, but the rationale — environment injection, not just prompt hygiene — should be stated.
-- **Agent Network Attacks directly names the harness#353/354 bug class.** The routing inversion bug (one agent receiving another's directives) and the effectiveness scoring bug (out-of-scope directives penalizing the agent) are both instances of "cross-agent directive injection." The field evidence from CW agents (Proposal 07 gap G1/G6 field validation) now has a formal threat category. Cite this in ADR-003X and the consent round issue.
+- **Agent Network Attacks directly names the harness#353/354 bug class.** The routing inversion bug (one agent receiving another's directives) and the effectiveness scoring bug (out-of-scope directives penalizing the agent) are both instances of "cross-agent directive injection." The field evidence from CW agents (Proposal 07 gap G1/G6 field validation) now has a formal threat category. Cite this in ADR-0045 and the consent round issue.
 
 ---
 
@@ -70,13 +70,13 @@ The paper identifies three primitives required for secure agentic systems:
 
 ---
 
-## 5. Defense Priority Matrix — For ADR-003X and Consent Round
+## 5. Defense Priority Matrix — For ADR-0045 and Consent Round
 
 From the paper's defense recommendations, mapped to Proposal 07 phases:
 
 | Defense                                                 | Mechanism                                       | Phase                    |
 | ------------------------------------------------------- | ----------------------------------------------- | ------------------------ |
-| Prompt hardening — separate instruction from content    | PromptSegment trust levels, sanitizer/renderer  | Phase 2 (ADR-003X)       |
+| Prompt hardening — separate instruction from content    | PromptSegment trust levels, sanitizer/renderer  | Phase 2 (ADR-0045)       |
 | Tool control — least privilege + delegation constraints | ToolGrant + EnvironmentSpec.secretGrants        | Phase 3                  |
 | Provenance tracking                                     | RunLedger hash-chaining + ToolCallReceipts      | Phase 4+                 |
 | Runtime monitoring                                      | WakeHealthActuals + HealthState circuit breaker | Phase 5                  |
@@ -90,9 +90,9 @@ From the paper's defense recommendations, mapped to Proposal 07 phases:
 
 | Finding                                              | Where to apply                                                                             |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Six-category threat taxonomy                         | ADR-003X opening section — named threat model for trust classification                     |
-| Environment injection naming for GitHub signals      | ADR-003X — rationale for `untrusted` signal classification                                 |
+| Six-category threat taxonomy                         | ADR-0045 opening section — named threat model for trust classification                     |
+| Environment injection naming for GitHub signals      | ADR-0045 — rationale for `untrusted` signal classification                                 |
 | Agent Network Attacks = harness#353/354 threat class | Proposal 07 §Gap Analysis G1/G6 + consent round issue — cite taxonomy                      |
 | Three system-level security primitives               | ARCHITECTURE.md — name Identity/Authorization, Provenance/Traceability, Ecosystem Response |
 | Dangerous tool composition detection                 | Phase 3 spec — `ToolInvocationRecorder` tracks call sequence; Evaluate checks composition  |
-| Shared-memory multi-agent poisoning                  | ARCHITECTURE.md + ADR-003X — routing isolation as security primitive, not just correctness |
+| Shared-memory multi-agent poisoning                  | ARCHITECTURE.md + ADR-0045 — routing isolation as security primitive, not just correctness |

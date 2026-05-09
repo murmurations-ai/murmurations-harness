@@ -114,3 +114,4 @@ per the Engineering Lead #22 gate review ([issue #6](https://github.com/murmurat
 | [ADR-0044](./0044-spirit-as-operator-execution-environment.md)            | Spirit as Operator Execution Environment                                                                 | Proposed |
 | [ADR-0045](./0045-prompt-boundary.md)                                     | Prompt Boundary: Trust Classification and Cache-Aware Assembly                                           | Accepted |
 | [ADR-0046](./0046-phase-3-governance-plugin-extraction.md)                | Phase 3: Governance Plugin Extraction                                                                    | Accepted |
+| [ADR-0047](./0047-execution-contracts.md)                                 | Execution Contracts: obligation/permission split + dual validation surfaces                              | Proposed |
