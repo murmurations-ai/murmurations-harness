@@ -7,6 +7,14 @@ Implementation begins on engineering-agent's consent or with-amendment ratificat
 
 **Non-goals:** Sequencing rule DSL beyond the surface (defer to follow-up ADR per ADR-0047 §3B); nested AND/OR in `done_when` (defer per §6); container isolation (Phase 7 per Proposal 07 §7).
 
+**Design principle: v1 is brutally simple.** External review (OpenClaw agent, 2026-05-08) flagged that the contract DSL and behavioral validation are the two places where Phase 4 risk concentrates. Every fork in this plan that could grow features now should defer instead. Concretely:
+
+- The `contract:` YAML grammar in PR 1 is the smallest set of fields that supports the Phase 4 use case. No nesting, no expressions, no operators beyond single-level `OR`. If an operator demands more, file a follow-up ADR — do not extend this PR.
+- The composite-permission check in PR 6 ships with **exactly one rule** (`read` + `network`) and it emits a **warning, not a hard failure**, for the first 14 days after merge. Promotion to hard failure requires an explicit follow-up commit and a documented incident or near-miss.
+- The sequencing surface in PR 6 is plumbing only. No rule evaluator. No DSL. The first sequencing rule waits for a real bug.
+
+When in doubt, the right answer is "less."
+
 ---
 
 ## Synopsis — what Phase 4 is about
@@ -373,19 +381,30 @@ export const validateBehavior = (
   contract: ExecutionContract,
   receipts: readonly ToolCallReceipt[],
 ): BehaviorValidationResult => {
-  // Composite permission check (v1):
+  // Composite permission check (v1 — WARNING-only for first 14 days):
   //   - Compute the union of permissions actually exercised across all
   //     successful receipts (outcome === "success").
-  //   - For each known dangerous combination (read + network is the v1
-  //     example), flag if both appear and the contract did not declare
-  //     a single side-effect spanning both.
+  //   - One rule only: read + network without a contract-declared
+  //     side-effect spanning both. Other dangerous combinations require
+  //     a follow-up commit + documented incident before they ship.
+  //   - During the soak period, flag with `passed: true` and a
+  //     `reason: "warning: composite-permission read+network observed"`
+  //     so dashboards surface it but the wake does not fail.
   // Sequencing surface (v1): infrastructure only — no rules evaluated.
   //   The receipt sequence is passed through to the result so future
-  //   sequencing rules can add checks without re-plumbing.
+  //   sequencing rules can add checks without re-plumbing. No DSL.
   // Denied-call pattern (v1):
-  //   - >5 denied calls in a single wake → flag as policy probing.
+  //   - >5 denied calls in a single wake → flag as policy probing
+  //     (warning, not failure, for first 14 days).
 };
 ```
+
+**Soak period (per "v1 is brutally simple" principle):** After PR 6 merges, the composite-permission check runs in WARNING mode for **14 days** before being promoted to a hard failure. Promotion requires:
+
+1. Zero false positives observed during the soak period across all opted-in agents, OR
+2. An explicit retrospective commit naming each false-positive case and ratifying the rule anyway with documented operator awareness.
+
+If false positives appear, the rule does not promote — it goes back to the design board.
 
 **`RunArtifactIndexEntry.validationStatus` extension** (`packages/core/src/daemon/runs.ts:171`):
 
@@ -449,6 +468,21 @@ Once PRs 1–6 land:
 1. EP roles update `role.md` opt-in. Engineering-agent goes first as the dogfood case.
 2. Each role's first wake under contract gets manual review of the validation result before the next wake.
 3. After two weeks of all-roles-on-contract data, file a retrospective tension (per Phase 3 cadence) on whether the contract DSL needs amendment.
+
+### Inter-PR soak periods
+
+Per the "v1 is brutally simple" principle, each PR has a minimum settle time before the next PR starts. This prevents stacking unverified surface area in a single weekend:
+
+| PR transition         | Minimum soak | Validation gate before next PR                                                                                 |
+| --------------------- | ------------ | -------------------------------------------------------------------------------------------------------------- |
+| PR 1 → PR 2           | 24 h         | Engineering-agent role.md parses cleanly with a `contract:` block                                              |
+| PR 2 → PR 3           | 24 h         | One real EP wake produces a populated `ExecutionContract` in logs (`daemon.contract.assembled` event)          |
+| PR 3 → PR 4           | 48 h         | Engineering-agent prompt cache hit-rate unchanged after contract injection                                     |
+| PR 4 → PR 5           | 48 h         | One real wake completes with both legacy validation AND new `validateOutcomes` agreeing on `valid: true/false` |
+| PR 5 → PR 6           | 72 h         | Three real wakes' worth of `ToolCallReceipts` collected without crash, drift, or missing receipts              |
+| PR 6 merge → soak end | 14 d         | Composite-permission rule promotion (see PR 6 §Soak period)                                                    |
+
+Total wall-clock from PR 1 start to Phase 4 closure: **≥ 22 days**, not "tonight." This is a deliberate slowdown — the architectural surface is wide enough that batching all six PRs on a single review pass invites integration bugs that don't show up until production wakes hit them.
 
 ### Performance budget
 

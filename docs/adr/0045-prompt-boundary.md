@@ -1,9 +1,9 @@
 # ADR-0045 — Prompt Boundary: Trust Classification and Cache-Aware Assembly
 
-**Status:** Accepted  
-**Date:** 2026-05-08  
-**Deciders:** Nori Nishigaya, engineering-agent  
-**Proposal:** Proposal 07 Phase 2 (harness#842)
+- **Status:** Accepted
+- **Date:** 2026-05-08
+- **Deciders:** Nori Nishigaya, engineering-agent
+- **Proposal:** Proposal 07 Phase 2 (harness#842)
 
 ---
 
