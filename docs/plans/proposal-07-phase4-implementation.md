@@ -9,6 +9,57 @@ Implementation begins on engineering-agent's consent or with-amendment ratificat
 
 ---
 
+## Synopsis — what Phase 4 is about
+
+### One breath
+
+Phase 4 is when the harness stops asking "did the agent produce _something_?" and starts asking "did the agent produce _the right thing_, _the right way_?"
+
+### The problem it solves
+
+Today the harness has one validity check: did the wake produce any artifacts? If yes, mark productive; if no, mark idle. That's it. Two failure modes slip through:
+
+1. **Agent did the wrong work** — produced artifacts, but not the ones it was supposed to produce. Burns budget, looks productive on the dashboard.
+2. **Agent did the right work the wrong way** — completed its task while violating policy. The "Beyond Task Completion" research (arXiv 2512.12791) measured this on production agents at **100% completion / 33% policy adherence**. Two-thirds of misbehavior is invisible.
+
+### What changes
+
+Operators declare a contract per agent in `role.md`:
+
+```yaml
+contract:
+  done_when:
+    - "At least one knowledge file committed"
+  committed_artifacts:
+    - "agents/<id>/knowledge/*.md"
+  approval_required_for:
+    - "admin"
+```
+
+That contract is used twice:
+
+1. **At spawn:** injected into the agent's system prompt as a trusted segment so the model knows what it must produce and what it's allowed to do.
+2. **After the wake:** the validator checks both surfaces:
+   - **Outcome** — did the declared artifacts exist? Did the action items get touched?
+   - **Behavior** — did the _sequence_ of tool calls violate composite permissions? (e.g., `read` + `network` together = exfiltration risk, even if each is individually allowed.)
+
+### What gets built
+
+The type scaffolding already exists from Phase 0–1 (`ExecutionContract`, `ToolCallReceipt`, `WakeValidator` interfaces). Phase 4 wires it up: read the YAML, assemble the contract, render it into the prompt, record every tool call as a receipt with hashed input/output, validate both surfaces post-wake, surface results in the run index for the dashboard.
+
+### What it unlocks
+
+- Failed wakes name _which sub-contract_ they violated (obligation vs. permission), instead of vague "idle"
+- The 67-point compliance gap becomes detectable
+- Tool-call receipts become the substrate for Phase 6 self-improvement (a GEPA-equivalent loop reads them) and Phase 7 INTERRUPT/RESUME approval gates
+- Operators get an opt-in path to stricter validation without any existing role breaking
+
+### What it doesn't do
+
+It's not container isolation (Phase 7), not health metrics or self-reflection (Phase 5), not memory curation (Phase 6). It's the contract layer — the thing that makes everything downstream measurable.
+
+---
+
 ## Milestones at a glance
 
 Six PRs. Each lands behind no flag — the ADR's backward-compat guarantee (synthesized minimal default for roles without a `contract:` block) provides the safety net. Each PR is independently shippable; later PRs assume earlier PRs are merged.
