@@ -1,0 +1,209 @@
+# Branch Cleanup Plan — 2026-05-08
+
+**Goal:** close out every abandoned branch in `murmurations-ai/murmurations-harness` by either merging, cherry-picking valuable work, or deleting. Frame each verdict against Proposal 07's current state (ADR-0045 ratified, ADR-0046 ratified, ADR-0047 in consent).
+
+**Inventory:** 47 local branches + 20 remote branches (excluding `main`). 12 open PRs.
+
+---
+
+## Verdict matrix
+
+Each branch is assigned to one of five tiers. Tier ordering reflects execution sequence — start with Tier 1 (zero-risk), end with Tier 5 (careful work).
+
+### Tier 1 — Verified-merged, safe to `git branch -d` immediately (38 local branches)
+
+These have `[gone]` upstream tracking AND `git cherry main <branch>` shows zero unmerged work, OR the branch tip already equals an ancestor of main. Pure local-clone leftovers from squash-merged PRs.
+
+```
+chore/dedupe-adr-collisions
+docs/proposal-07-harness-engineering           (ahead 1 = my prior-session commit, already in main)
+docs/v0.5.0-getting-started
+feat/adr-0027-fallback-identity
+feat/adr-0029-memory-extension                 (cherry: 0/1 unmerged)
+feat/b5-phase-1-directive-validation           (cherry shows 2 unmerged but content lives in main as `UnaddressedDirective`/`validateWake` — work shipped under squash SHA)
+feat/github-pr-commit-tools
+feat/github-read-tools-256
+feat/subscription-cli-provider                 (ahead 0)
+feat/v0.5-default-s3-governance
+feat/v0.5-doctor-command                       (cherry: 0/1)
+feat/v0.5-hello-circle-example
+feat/v0.5-init-ux-overhaul
+feat/v0.5-running-sessions-sockets
+feat/v0.7.0-agent-effectiveness                (ahead 0)
+feat/v0.7.1-stability                          (ahead 0)
+fix/232-empty-github-scopes-warning            (no upstream, 0 unmerged, issue #232 closed)
+fix/boot-mcp-wiring-291
+fix/dashboard-ux-59-61
+fix/directive-cli-flag-parsing
+fix/error-legibility-for-new-operators
+fix/extension-tools-include-on-github-collaboration
+fix/idle-wake-skip-297
+fix/init-skill-groups-terminology
+fix/mcp-setup-discipline-255
+fix/portable-mcp-command-paths
+fix/pricing-catalog-251
+fix/runner-and-subprocess-followups
+fix/runner-hardcoded-gemini-252
+fix/runner-tools-gate-subscription-cli
+fix/signal-aggregator-directive-excerpt-cap
+fix/v0.5-bare-enter-noop
+fix/v0.5-bundled-plugin-resolution
+fix/v0.5-detach-to-unattached
+fix/v0.5-example-hello-alias
+fix/v0.5-init-example-env-capture
+fix/v0.5-reasonable-defaults
+fix/v0.5-resolve-running-sessions
+fix/v0.5-spirit-layout-prompt
+fix/v0.5-spirit-thinking-indicator
+fix/v0.5-unattached-repl-completion
+pr-270                                          (no upstream, 0 unmerged)
+pr-270-security-review                          (no upstream, 0 unmerged)
+research/harness-engineering                    (Proposal 07 origin — final form is in `docs/proposals/07-...md`)
+```
+
+**Action:** `git branch -d <branch>` (lower-case `-d`, refuses if anything would be lost). Bulk script:
+
+```sh
+for br in $(cat tier1-branches.txt); do
+  git branch -d "$br" || echo "SKIP $br (had unmerged work)"
+done
+```
+
+**Risk:** Zero. `-d` (not `-D`) is the safety net.
+
+---
+
+### Tier 2 — Open PRs already-merged today, just need PR closure + branch delete (2 PRs)
+
+Both landed in this session via the merges Nori pulled at 20:57. PRs are still "open" on GitHub because they were merged via direct-to-main commits, not the PR's merge button.
+
+| PR       | Branch                             | Action                                                                                                            |
+| -------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **#269** | `feat/llm-step-logging`            | Verify content matches main commit `4c47ede`; close PR with comment "merged as 4c47ede"; delete branch via GitHub |
+| **#268** | `fix/convene-minutes-too-long-267` | Verify content matches main commit `844b821`; close PR with comment "merged as 844b821"; delete branch via GitHub |
+
+**Action:**
+
+```sh
+gh pr close 269 --repo murmurations-ai/murmurations-harness --comment "Merged to main as 4c47ede" --delete-branch
+gh pr close 268 --repo murmurations-ai/murmurations-harness --comment "Merged to main as 844b821" --delete-branch
+```
+
+Then `git branch -D feat/llm-step-logging fix/convene-minutes-too-long-267` locally.
+
+**Risk:** Low. Verify SHA-to-content equivalence with `git diff origin/<branch> main -- <files>` before closing.
+
+---
+
+### Tier 3 — Open PRs superseded by Proposal 07 ratified work (5 PRs to close as obsolete)
+
+| PR       | Branch                                   | Why superseded                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **#237** | `docs/proposal-07-routing-and-contracts` | Routing & Contracts pass + Boundary 4 + Boundary 5. Boundary 5 (narrative ↔ tool-call hallucination) shipped as code in main (`UnaddressedDirective`/`validateWake` in `execution/index.ts`) and is generalized by **ADR-0047** (behavioral validation surface). Boundary 4 (membership drift) is a real follow-up but unrelated to Phase 4. The doc edits themselves were not merged into main's Proposal 07 — but the _thinking_ has been superseded by ADR-0045/0046/0047. |
+| **#217** | `docs/adr-0032-jdocmunch`                | ADR number 0032 was taken (Cross-package type management). jDocMunch adoption now lives at the user-config level (Nori's global CLAUDE.md), not the harness level.                                                                                                                                                                                                                                                                                                            |
+| **#159** | `docs/v0.6.0-init-interview-plan`        | v0.6.0 shipped; init UX evolved into Spirit (ADR-0024) + the harness directory layout (ADR-0026). The "init interview" framing was replaced by Spirit's source-onboarding skill.                                                                                                                                                                                                                                                                                              |
+| **#140** | `plan/v0.5.1-unified-logging`            | v0.5 shipped; logging architecture is now in Engineering Standards #4 + DaemonEventBus.                                                                                                                                                                                                                                                                                                                                                                                       |
+| **#124** | `plan/v0.5.0-init-ux-overhaul`           | v0.5 shipped.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **#123** | `plan/phase-1.2-governance-on-github`    | Superseded by **ADR-0046** (Phase 3 governance plugin extraction) — governance state on GitHub is now a plugin concern, not a phase milestone.                                                                                                                                                                                                                                                                                                                                |
+
+**Action per PR:** post a closing comment that names the superseding ADR/work, then `gh pr close <N> --delete-branch`. Local branches: `git branch -D <branch>`.
+
+**Pre-close safety check for PR #237:** before closing, read `docs/proposals/07-harness-engineering-target-architecture.md` from the branch and diff against main's version to confirm nothing uniquely valuable was left behind. If anything is salvageable (e.g., Boundary 4 framing for a future ADR), cherry-pick the relevant section into a new follow-up issue rather than letting the PR die silently.
+
+**Risk:** Low if pre-close diff is done. The main risk is losing Boundary 4 framing — mitigation is a follow-up issue capturing the design for a future ADR.
+
+---
+
+### Tier 4 — Open PRs / branches with unmerged work that may still be relevant (4 to triage)
+
+| PR / Branch                                      | Unmerged commits | Verdict                                                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **PR #265** `fix/convene-wires-github-tools-264` | 1                | **Issue #264 still OPEN.** This PR addresses it. **Read the diff, rebase on main, merge or close with rationale.**                                                                                                                                                                                                            |
+| **PR #260** `research/minerva-lessons`           | 7                | The Minerva research informed Proposal 07 (`docs/research/` already cites it). Check whether the synthesis doc adds anything not already in `docs/research/`. If yes, cherry-pick the doc only. The other 6 commits are stacked MCP fixes (see `fix/mcp-env-evaluate-vars` below).                                            |
+| **PR #225** `feature/add-release-workflow`       | 1                | `release.yml` exists in main. Diff the unmerged commit to see if it adds anything (e.g., npm publishing). Likely close-as-superseded after diff.                                                                                                                                                                              |
+| **PR #218** `docs/toolchain-guide`               | 6                | MCP toolchain setup guide for jMunch + GitHub. Genuinely useful operator content. The 4 stacked MCP-fix commits overlap with `fix/mcp-env-evaluate-vars`. **Cherry-pick the 2 doc commits (`bc25d91`, `6fe8d8d`)** as a fresh PR after rebasing on current main. Drop the stacked fix commits (handled separately in Tier 5). |
+
+**Action sequence for Tier 4:**
+
+1. PR #265: read the 1-commit diff, evaluate against current `convene` implementation (PR #266 issue is also open and is "v2 of #264" — coordinate). Either merge after rebase or close with handoff to #266.
+2. PR #260: extract `c161057 docs(research): synthesize architectural lessons from Minerva experiment` as a standalone cherry-pick PR; close #260 with link to the cherry-pick PR.
+3. PR #225: diff the 1 commit against current `release.yml`; close-or-merge based on diff.
+4. PR #218: cherry-pick the 2 doc commits as a fresh PR; close #218.
+
+**Risk:** Medium. Each requires reading the diff before action. Plan ~30 min per PR.
+
+---
+
+### Tier 5 — Branches with unmerged work, NO upstream PR, careful port required (4 branches)
+
+These are the highest-risk entries. They have substantive unmerged work but no PR currently tracking them. Deleting blindly loses the work.
+
+| Branch                                                   | Unmerged                                                                                                  | Decision needed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **`feat/spirit-setup-github`** (local-only, no upstream) | 11 commits                                                                                                | The 4 spirit skills (`setup-github.md`, `setup-llms.md`, `setup-products.md`, plus the `agent-anatomy` etc.) **ARE in main** (`packages/cli/src/spirit/skills/`). But the 6 _core fixes_ — `de87adc fix(core): pass resolved secrets into spawn context environment for MCP tool loader`, `afd5efc fix(cli): do not inject github secrets or signals for local murmurations`, `e5f349f fix(cli): inject github mcp config into default-agent fallback`, `faa5d49 fix(spirit): correct mcp configuration target to role.md instead of harness.yaml` — these did NOT land. Some may be obsolete given current `local`-collaboration support; some may be real bug fixes. **Cherry-pick each fix in isolation onto a fresh branch, run CI, evaluate.** If the fix is still valid, file as a fresh PR. If superseded by current code, document the supersession in a closing note. |
+| **`adr/0030-repl-wakes`** (origin only)                  | 1 commit                                                                                                  | Number 0030 is taken (MADR adoption). REPL wakes content overlaps with ADR-0018 (CLI tmux interface) and ADR-0019 (Persistent context agents). **Read the draft, file as ADR-0048 if anything uniquely valuable, otherwise delete.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **`fix/cli-mcp-loader`** (origin only)                   | 1 commit `27d2744 fix(cli): wire McpToolLoader into daemon boot context`                                  | MCP wiring exists in main (`packages/cli/src/spirit/mcp-config.ts`). Diff this commit against current main wiring to see if anything is missing. Likely superseded.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **`fix/mcp-env-evaluate-vars`** (origin only)            | 6 commits including `feat(cli): add github-extras builtin extension with github__get_issue_comments tool` | The `github__get_issue_comments` tool may not exist in main as a builtin. The MCP env-evaluation fixes overlap with the `feat/spirit-setup-github` core fixes. **Read each commit, decide per-commit: cherry-pick if still valid, drop if superseded.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+
+**Action sequence for Tier 5** (per branch, sequentially, with CI between each):
+
+```sh
+# Template for cherry-pick safety
+git checkout -b cherry/<purpose> main
+git cherry-pick <sha>
+pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test
+# If green → push as a fresh PR with rationale
+# If red → analyze, decide whether to fix or abandon
+```
+
+Specific suggested order:
+
+1. **`fix/cli-mcp-loader`** (1 commit, easiest to evaluate)
+2. **`adr/0030-repl-wakes`** (1 commit, doc-only — safest)
+3. **`fix/mcp-env-evaluate-vars`** (6 commits — investigate then cherry-pick selectively)
+4. **`feat/spirit-setup-github`** (11 commits — most invasive, save for last when patterns are clear)
+
+**Risk:** Medium-high. Cherry-picking individual fixes can introduce regressions if the surrounding code has shifted. Mitigation: run full CI after each cherry-pick; revert any cherry-pick that breaks tests rather than chasing fixes.
+
+---
+
+## Execution sequence
+
+Phased so each phase is independently revertable and CI-verified before the next starts.
+
+| Phase | Scope                                                                     | Wall-clock                 | Risk                                       |
+| ----- | ------------------------------------------------------------------------- | -------------------------- | ------------------------------------------ |
+| **A** | Tier 1 bulk delete (38 branches)                                          | 5 min                      | Zero (`-d` refuses on data loss)           |
+| **B** | Tier 2 PR closures (#268, #269)                                           | 5 min                      | Low (diff verified pre-close)              |
+| **C** | Tier 3 PR closures with rationale comments (5 PRs)                        | 30 min                     | Low (pre-close diff for #237 specifically) |
+| **D** | Tier 4 triage (4 PRs, decide-and-act per PR)                              | 2 hours                    | Medium                                     |
+| **E** | Tier 5 careful ports (4 branches, sequential cherry-pick + CI per commit) | 4 hours spread across days | Medium-high                                |
+
+**Recommended cadence:** Phase A + B + C tonight if energy allows (≤45 min total). Phase D in a single dedicated session. Phase E spread across 2–3 sessions with a soak day between cherry-picks per the Phase 4 plan's "v1 brutally simple" principle (don't stack unverified surface area).
+
+---
+
+## Final-state target
+
+After all phases:
+
+- **Local branches:** `main` only.
+- **Remote branches:** `main` plus any active in-flight PR branches (Phase 4 implementation will create new ones — those are out of scope here).
+- **Open PRs:** zero abandoned PRs. Any that close as obsolete have a comment naming the superseding ADR/commit. Any salvaged work lives in a fresh, rebased PR.
+- **Lost work:** none. Every cherry-pick attempted and either landed or documented as superseded with rationale.
+
+---
+
+## Pre-flight checklist before Phase A
+
+- [x] Branch inventory complete
+- [x] Open PRs enumerated
+- [x] Per-branch unmerged-commit count verified via `git cherry`
+- [x] Critical content presence verified for `feat/spirit-setup-github` skills, `release.yml`, ADR-0030/0032 numbers, Proposal 07 doc state
+- [ ] Phase A execution authorized
+- [ ] Phase B PR diffs reviewed
+- [ ] Phase C supersession comments drafted
+- [ ] Phase D triage scheduled
+- [ ] Phase E cherry-pick window planned
+
+When ready, execute phase by phase. Do not batch phases.
