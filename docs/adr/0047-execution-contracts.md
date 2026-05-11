@@ -56,6 +56,12 @@ The contract contains two sub-contracts with distinct lifecycles:
 - A pre-action denial does not fail the wake; it returns a `denied` `ToolCallReceipt.outcome` and the model continues. The receipt is the audit trail
 - A budget overrun terminates the wake with `policyDecision: "denied"` on the offending call
 
+**Derivation rule for `allowedSideEffects` (revised 2026-05-11 per architecture review):** the harness already has three permission axes — `findReservedLabels()` enforces label write-scope; `ToolGrant.allowedAgentIds` deny-by-default authorizes tool access; `ApprovalPolicy.mode` gates approval-required tools. `ExecutionContract.allowedSideEffects` is **a coarse ceiling derived from**, not parallel to, those mechanisms:
+
+> `allowedSideEffects` ⊆ (union of `ToolDescriptor.permissions` for tools granted to this agent via `ToolGrant.allowedAgentIds`)
+
+The contract field cannot _grant_ permissions beyond what the existing layer has authorized; it can only declare a tighter ceiling than the union (e.g., a wake that's allowed `read | write | network` by grant might declare `allowedSideEffects: ["read", "write"]` to forbid network calls this wake). If the contract's ceiling is wider than the granted union, the wider claims are dropped during contract assembly and a `daemon.contract.permission.narrowed` log event is emitted. This keeps `ToolGrant` as the single authoritative source of capability; `allowedSideEffects` is a per-wake refinement, not a grant.
+
 A failed wake's diagnostic surface (in `RunArtifactIndexEntry.validationStatus`) names which sub-contract was violated. "Failed obligation" and "failed permission" are not interchangeable.
 
 ### 3. Dual validation surfaces

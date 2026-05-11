@@ -753,19 +753,30 @@ const cmpSemver = (a: [number, number, number], b: [number, number, number]): nu
  * Returns `true` when `coreVersion` satisfies `range`. Supports
  * space-separated conditions of the form `>=X.Y.Z`, `>X.Y.Z`,
  * `<=X.Y.Z`, `<X.Y.Z`, `=X.Y.Z`. All conditions must be satisfied
- * (AND semantics). Returns `true` for an empty or blank range.
+ * (AND semantics). Returns `true` for an empty or blank range
+ * (caller opted out of the check).
+ *
+ * **Fail-closed on unparseable input.** If `range` is non-empty but
+ * no condition parses cleanly, returns `false` — a typo or unsupported
+ * operator (caret `^`, tilde `~`, range hyphen) must not silently
+ * pass the compat check. Plugin authors needing those forms must
+ * expand to explicit `>=`/`<` pairs.
  */
 const RANGE_CONDITION_RE = /^(>=|>|<=|<|=)?(\d+\.\d+\.\d+)/;
 export const satisfiesCoreVersionRange = (coreVersion: string, range: string): boolean => {
   const cv = parseSemver(coreVersion);
   if (!cv) return false;
-  const conditions = range.trim().split(/\s+/);
+  const trimmed = range.trim();
+  if (trimmed === "") return true; // caller opted out
+  const conditions = trimmed.split(/\s+/);
+  let parsedAtLeastOne = false;
   for (const cond of conditions) {
     const m = RANGE_CONDITION_RE.exec(cond);
     if (!m) continue;
     const op = m[1] ?? "=";
     const rv = parseSemver(m[2] ?? "");
     if (!rv) continue;
+    parsedAtLeastOne = true;
     const diff = cmpSemver(cv, rv);
     if (op === ">=" && diff < 0) return false;
     if (op === ">" && diff <= 0) return false;
@@ -773,7 +784,7 @@ export const satisfiesCoreVersionRange = (coreVersion: string, range: string): b
     if (op === "<" && diff >= 0) return false;
     if (op === "=" && diff !== 0) return false;
   }
-  return true;
+  return parsedAtLeastOne;
 };
 
 // ---------------------------------------------------------------------------

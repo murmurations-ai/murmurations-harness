@@ -75,13 +75,20 @@ Six PRs. Each lands behind no flag — the ADR's backward-compat guarantee (synt
 | #   | PR title                                                                                 | Surface affected                                                                                                                  | Blocker for next? |
 | --- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
 | 1   | feat(identity): role.md `contract:` frontmatter — Zod schema + parser                    | `packages/core/src/identity/index.ts`, `packages/core/src/types/role-frontmatter.ts`                                              | Yes (gates 2)     |
-| 2   | feat(daemon): assemble `ExecutionContract` in `buildSpawnContext`                        | `packages/core/src/daemon/index.ts`, `packages/core/src/runtime/execution-contract.ts`                                            | Yes (gates 3, 4)  |
+| 2   | feat(daemon): assemble `ExecutionContract` in `buildSpawnContext`                        | `packages/core/src/daemon/index.ts`, `packages/core/src/runtime/execution-contract.ts`                                            | Yes (gates 3–5)   |
 | 3   | feat(prompt): inject contract as trusted segment via `PromptAssembler`                   | `packages/core/src/runtime/prompt-assembler.ts`                                                                                   | No                |
 | 4   | feat(validation): `validateOutcomes` + wire into post-wake hook                          | `packages/core/src/execution/index.ts` (extend `validateWake`), `packages/core/src/runtime/wake-validator.ts` (new)               | No                |
 | 5   | feat(tools): `ToolInvocationRecorder` — collect `ToolCallReceipts`                       | `packages/core/src/tools/recorder.ts` (new), executor wiring in `packages/core/src/execution/{in-process,subprocess,dispatch}.ts` | Yes (gates 6)     |
 | 6   | feat(validation): `validateBehavior` + populate `RunArtifactIndexEntry.validationStatus` | `packages/core/src/runtime/wake-validator.ts`, `packages/core/src/daemon/runs.ts`                                                 | Closes Phase 4    |
 
-PRs 3, 4, 5 can land in parallel after PR 2. PR 6 is the closer.
+**Sequencing (revised 2026-05-11 per architecture review #3):** The original "PRs 3, 4, 5 in parallel after PR 2" had PR 4 (`validateOutcomes`) checking `actionItems[]` evidence (which needs `mutatedIssues` derived from `ToolCallReceipts`) before PR 5 (`ToolInvocationRecorder`) existed — PR 4 would have shipped with a stub receipt source then been rewired in PR 6. Revised sequence: **PR 5 lands before PR 4.** Concretely:
+
+- **PR 1 → PR 2** (sequential, gates everything)
+- **After PR 2: PR 3 (prompt injection) and PR 5 (`ToolInvocationRecorder`) land in parallel** — they touch independent surfaces
+- **PR 4 (`validateOutcomes`) lands after PR 5** so the outcome validator can consume receipts
+- **PR 6 closes** after PR 4 and PR 5 are both in
+
+PR numbers are stable labels — the section bodies below use the original numbering. The dependency graph is what changed.
 
 ---
 
@@ -477,9 +484,10 @@ Per the "v1 is brutally simple" principle, each PR has a minimum settle time bef
 | --------------------- | ------------ | -------------------------------------------------------------------------------------------------------------- |
 | PR 1 → PR 2           | 24 h         | Engineering-agent role.md parses cleanly with a `contract:` block                                              |
 | PR 2 → PR 3           | 24 h         | One real EP wake produces a populated `ExecutionContract` in logs (`daemon.contract.assembled` event)          |
-| PR 3 → PR 4           | 48 h         | Engineering-agent prompt cache hit-rate unchanged after contract injection                                     |
-| PR 4 → PR 5           | 48 h         | One real wake completes with both legacy validation AND new `validateOutcomes` agreeing on `valid: true/false` |
-| PR 5 → PR 6           | 72 h         | Three real wakes' worth of `ToolCallReceipts` collected without crash, drift, or missing receipts              |
+| PR 2 → PR 3           | 24 h         | (in parallel with PR 5) Engineering-agent prompt cache hit-rate unchanged after contract injection             |
+| PR 2 → PR 5           | 24 h         | (in parallel with PR 3) `ToolInvocationRecorder` collects one wake's receipts cleanly, no executor regressions |
+| PR 5 → PR 4           | 48 h         | One real wake's `ToolCallReceipts` available for `validateOutcomes` to consume for `actionItems[]` evidence    |
+| PR 4 → PR 6           | 72 h         | One real wake completes with both legacy validation AND new `validateOutcomes` agreeing on `valid: true/false` |
 | PR 6 merge → soak end | 14 d         | Composite-permission rule promotion (see PR 6 §Soak period)                                                    |
 
 Total wall-clock from PR 1 start to Phase 4 closure: **≥ 22 days**, not "tonight." This is a deliberate slowdown — the architectural surface is wide enough that batching all six PRs on a single review pass invites integration bugs that don't show up until production wakes hit them.

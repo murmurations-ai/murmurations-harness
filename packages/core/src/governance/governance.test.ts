@@ -595,8 +595,30 @@ describe("satisfiesCoreVersionRange", () => {
     expect(satisfiesCoreVersionRange("not-a-version", ">=0.9.0")).toBe(false);
   });
 
-  it("skips malformed condition tokens (lenient parsing)", () => {
+  it("skips malformed tokens when at least one valid condition parses", () => {
     expect(satisfiesCoreVersionRange("0.9.0", ">=0.9.0 bogus-token")).toBe(true);
+  });
+
+  // ── Fail-closed semantics (security M2 — review feedback 2026-05-11) ─────
+  // Empty range = opt-out. Any non-empty range that fails to parse a single
+  // condition must return false to prevent typos and unsupported operators
+  // (^, ~, range hyphens) from silently passing the compat check.
+
+  it("fail-closed: returns false for entirely-unparseable range", () => {
+    expect(satisfiesCoreVersionRange("0.9.0", "GARBAGE")).toBe(false);
+    expect(satisfiesCoreVersionRange("0.9.0", "foo bar baz")).toBe(false);
+  });
+
+  it("fail-closed: returns false for caret form (^X.Y.Z) — not supported", () => {
+    expect(satisfiesCoreVersionRange("0.9.0", "^0.9.0")).toBe(false);
+  });
+
+  it("fail-closed: returns false for tilde form (~X.Y.Z) — not supported", () => {
+    expect(satisfiesCoreVersionRange("0.9.0", "~0.9.0")).toBe(false);
+  });
+
+  it("fail-closed: returns false for truncated semver (>=0.9) — not parseable", () => {
+    expect(satisfiesCoreVersionRange("0.9.0", ">=0.9")).toBe(false);
   });
 });
 
