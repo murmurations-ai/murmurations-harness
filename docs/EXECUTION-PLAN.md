@@ -1,8 +1,22 @@
 # Consolidated Execution Plan
 
-**Status:** Active — updated 2026-04-12
-**Inputs:** Intelligence Circle architecture review (2026-04-12), MURMURATION-HARNESS-SPEC.md, PHASE-2-PLAN.md, CIRCLE-WAKE-SPEC.md, GITHUB-AS-SYSTEM-OF-RECORD.md
+**Status:** Active — updated 2026-05-11
+**Inputs:** Intelligence Circle architecture review (2026-04-12), MURMURATION-HARNESS-SPEC.md, PHASE-2-PLAN.md, CIRCLE-WAKE-SPEC.md, GITHUB-AS-SYSTEM-OF-RECORD.md, Proposal 07 ratified ADRs (0045/0046/0047)
 **For:** Coding agents implementing the next phases
+
+---
+
+## Two phase numbering schemes coexist — read this first
+
+Since 2026-04-30, **two parallel phase numbers** are in use across this codebase:
+
+1. **EXECUTION-PLAN.md phases** (this document, originally 2026-04-12) — the operational delivery plan: Phase 1 (GitHub-as-system-of-record), Phase 2 (Actions + did-work tracking), Phase 3 (Self-reflection cadence), Phase 4 (Retrospectives + Strategy Plugin), Phase 5+ (Session manager, multi-instance, hardening).
+
+2. **Proposal 07 phases** (`docs/proposals/07-harness-engineering-target-architecture.md`, ratified 2026-04-30+) — the architectural migration: Phase 0–1 (types-only scaffolding, landed), Phase 2 (Prompt Boundary, ADR-0045 accepted), Phase 3 (Governance Plugin Extraction, ADR-0046 accepted), Phase 4 (Execution Contracts, ADR-0047 proposed, gates Phase 4 implementation), Phase 5+ (Health metrics, two-tier memory, durable ledger).
+
+**They are not the same phases.** When this document says "Phase 3," it means self-reflection (most of which has shipped). When a recent ADR/commit/issue says "Phase 3," it means the Proposal 07 governance plugin extraction (ratified by ADR-0046 on 2026-05-08). Cross-references below name the Proposal 07 phase explicitly to disambiguate.
+
+A future doc consolidation may merge the schemes; for now, treat both as load-bearing.
 
 ---
 
@@ -191,6 +205,8 @@ blocked
 
 **Governance-model-agnostic.** The active governance plugin provides the flavor, language, and state machine for all governance interactions. The harness provides the plumbing (events, state store, GitHub sync); the plugin provides the semantics (what events are called, what states exist, how decisions are made). Agents don't need to know which governance model is active — they emit generic governance events and the plugin handles the rest.
 
+> **Cross-reference:** _Proposal 07 Phase 3_ ("Governance Plugin Extraction", ADR-0046, accepted 2026-05-08) is a different scope from this Phase 3. ADR-0046 hardened the `GovernancePlugin` interface (typed plugin errors, compat version range, multi-circle routing contract) and removed S3 vocabulary from `@murmurations-ai/core`. The self-reflection cadence work below is the EXECUTION-PLAN.md Phase 3.
+
 | Step | What                                                                                                                                                                                                       | Status  |
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
 | 3.1  | **Self-reflection prompt** — EFFECTIVENESS/OBSERVATION/GOVERNANCE_EVENT. Renamed from TENSION. `parseSelfReflection()` in harness core. Generic `agent-governance-event` kind (plugin maps to model term). | ✅ DONE |
@@ -200,6 +216,8 @@ blocked
 ### Phase 4 — Circle Retrospectives + Strategy Plugin
 
 **Also governance-model-agnostic.** Retrospectives are a circle-wake kind, not tied to S3. Strategy plugins are separate from governance plugins.
+
+> **Cross-reference:** _Proposal 07 Phase 4_ ("Execution Contracts", ADR-0047, proposed 2026-05-08) is a different scope from this Phase 4. ADR-0047 introduces the obligation/permission split, `ToolCallReceipts`, and `WakeValidator` — the contract-backed completion machinery. Implementation plan in [`docs/plans/proposal-07-phase4-implementation.md`](./plans/proposal-07-phase4-implementation.md) (6 PRs, awaiting engineering-agent consent on EP #845). The Retrospectives + Strategy Plugin work below is independent.
 
 | Step | What                                                                                                                                                                                                                                                            | Status                         |
 | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |

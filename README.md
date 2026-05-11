@@ -4,7 +4,9 @@
 
 The Murmuration Harness is an open-source TypeScript runtime that lets a single human — the **Source** — coordinate a murmuration of AI agents to do real work. It is not an autonomous agent framework. It is a tool that amplifies human agency.
 
-> **v0.5.0** (in testing) — Out-of-the-box init UX, `murmuration doctor` preflight, hello-circle example, reasonable defaults everywhere. 8 packages, 631 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
+> **v0.7.2** (current) — Spirit-as-operator-execution-environment, subscription-CLI providers (Claude/Codex/Gemini Pro/Max), prompt boundary with trust classification, Phase 3 governance plugin extraction complete. 9 packages, 1178 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
+>
+> **In flight (v0.8+):** ADR-0047 "Execution Contracts" (proposed) gates Phase 4 contract-backed completion — see [`docs/plans/proposal-07-phase4-implementation.md`](./docs/plans/proposal-07-phase4-implementation.md).
 
 ## Quickstart (5 minutes, 6 commands)
 
