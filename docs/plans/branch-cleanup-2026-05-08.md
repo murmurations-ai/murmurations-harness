@@ -204,7 +204,7 @@ After all phases:
 - [x] **Phase B executed 2026-05-11 08:15 PDT** — PR #268 + #269 closed with merge-pointer comments; both remote + local branches deleted (see below)
 - [x] **Phase C executed 2026-05-11 08:25 PDT** — 6 superseded PRs closed (#237, #217, #159, #140, #124, #123); pre-close safety check on #237 confirmed Boundary 4/5 framing preserved (see below)
 - [x] **Phase D executed 2026-05-11 08:35 PDT** — 4 final PRs closed (#225, #260, #218, #265); 8 Tier 1.5 branches verified safe and deleted; duplicate `fix/release-workflow-pnpm` deleted. **0 open PRs remaining**; **1 local branch left** (`feat/spirit-setup-github`, Tier 5)
-- [ ] Phase E cherry-pick window planned (only 1 branch remaining)
+- [x] **Phase E executed 2026-05-11 08:38 PDT** — `feat/spirit-setup-github` deleted after per-commit verification that all 11 commits are superseded by main (5 skills + 6 code fixes, latter reimplemented with better `SecretsProvider` plumbing). **Final state: 1 local branch (main), 0 open PRs, 0 lost work.**
 
 When ready, execute phase by phase. Do not batch phases.
 
@@ -354,3 +354,54 @@ All 8 deleted with `-D`.
 | **Branches/PRs handled with zero lost work** | —                  | 30 deleted | 2 closed | 6 closed | 9 closed (4 PRs + 5 branches) |
 
 **Single remaining branch:** `feat/spirit-setup-github` (Tier 5, no upstream, 11 commits including 6 core-fix commits that did NOT land — needs Phase E cherry-pick triage).
+
+---
+
+## Phase E execution log — 2026-05-11 08:35 PDT
+
+**Result:** `feat/spirit-setup-github` deleted after per-commit verification that every change is in main under a different (and often better) implementation. Local branches: **2 → 1 (only `main`)**. Total cleanup arc complete.
+
+### Per-commit verdict for the 11 commits
+
+**Group A — skill content (5 commits)** — all landed in main:
+
+| SHA       | Subject                            | Where in main                                                                                  |
+| --------- | ---------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `575b495` | setup-github skill                 | `packages/cli/src/spirit/skills/setup-github.md` (97 lines == 97 lines, byte-comparable count) |
+| `ec9f79b` | architecture advice                | Main: "Phase 1: Consult and Advise" framing                                                    |
+| `b08b59a` | consultative tone                  | Main: "guide them through a consultative process. Do not dump all the steps at once."          |
+| `75e392b` | Obsidian/PKM heuristic             | Main: full Obsidian question + reasoning block                                                 |
+| `8b58fe8` | setup-products + setup-llms skills | Both files present in main                                                                     |
+
+**Group B — code fixes (6 commits)** — all superseded by **better** implementations in main:
+
+| SHA       | Subject                            | Why main's version is better                                                                                                                      |
+| --------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `d3ac603` | `init` asks collab + products      | Main's `init.ts:842+` has full local/github collaboration branching with prompt + conditional MCP injection                                       |
+| `faa5d49` | mcp config target in role.md       | Skill doc edit; already covered by Group A                                                                                                        |
+| `e5f349f` | default-agent github mcp config    | Main's `default-agent/role.md` has the proper write-scope structure                                                                               |
+| `afd5efc` | skip github secrets for local mode | Main's `init.ts:921+` removes the github MCP block entirely from default-agent when local                                                         |
+| `de87adc` | pass secrets to MCP tool loader    | Main has `resolveAgentEnvironment(agent, secretsProvider)` — proper `SecretsProvider` plumbing instead of branch's naive `agent.secrets.reveal()` |
+| `3f61c29` | CI fixes for PR #121               | PR #121 never merged; CI fix is obsolete                                                                                                          |
+
+The branch was deleted with `-D` after the verification.
+
+---
+
+## Final state — Phases A through E complete
+
+| Metric             | Start (2026-05-08) | After E (2026-05-11)                                                                              |
+| ------------------ | ------------------ | ------------------------------------------------------------------------------------------------- |
+| **Local branches** | 47                 | **1** (just `main`)                                                                               |
+| **Open PRs**       | 12                 | **0**                                                                                             |
+| **Lost work**      | —                  | **0**: every closure has a superseder pointer; every deletion was verified against main's content |
+
+### Pattern lessons captured
+
+1. **`[gone]` upstream tracking is a weaker signal than it appears.** Squash-merge with post-merge fixes breaks `git cherry`'s patch-id matching. Always re-verify against the full set, not a sample.
+2. **Branches that look "ahead" against main are often _behind_ in disguise.** A 5-commit-ahead/129-commit-behind branch is severely stale; the 5 "unique" commits are usually superseded by main's evolution, not novel work.
+3. **Closing-with-rationale is the safe default.** Every PR closed in Phases B–E has a comment naming the superseding commit/ADR/issue. Cherry-picking is only justified when (a) the work is missing from main AND (b) the surrounding code has not significantly drifted.
+4. **The "v1 brutally simple" + soak-period principle scaled down to this cleanup.** Phases A→B→C→D→E with verification gates between each phase prevented compound errors.
+5. **Patient verification finds the right answer faster than aggressive cherry-picking.** Phase E's "11 unmerged commits — needs careful port" actually resolved to "all 11 superseded" via 5 minutes of targeted grep — the cherry-pick window would have been wasted work.
+
+**Cleanup complete.** No further phases planned. Future branch hygiene should follow the same pattern: verify against main with content checks, not just `git cherry`.
