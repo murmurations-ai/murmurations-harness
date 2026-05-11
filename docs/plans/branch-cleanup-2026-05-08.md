@@ -203,8 +203,8 @@ After all phases:
 - [x] **Phase A executed 2026-05-08 21:55 PDT** — 30 deleted, 8 kept (see below)
 - [x] **Phase B executed 2026-05-11 08:15 PDT** — PR #268 + #269 closed with merge-pointer comments; both remote + local branches deleted (see below)
 - [x] **Phase C executed 2026-05-11 08:25 PDT** — 6 superseded PRs closed (#237, #217, #159, #140, #124, #123); pre-close safety check on #237 confirmed Boundary 4/5 framing preserved (see below)
-- [ ] Phase D triage scheduled (now includes Tier 1.5 follow-up + new `fix/release-workflow-pnpm`)
-- [ ] Phase E cherry-pick window planned
+- [x] **Phase D executed 2026-05-11 08:35 PDT** — 4 final PRs closed (#225, #260, #218, #265); 8 Tier 1.5 branches verified safe and deleted; duplicate `fix/release-workflow-pnpm` deleted. **0 open PRs remaining**; **1 local branch left** (`feat/spirit-setup-github`, Tier 5)
+- [ ] Phase E cherry-pick window planned (only 1 branch remaining)
 
 When ready, execute phase by phase. Do not batch phases.
 
@@ -306,3 +306,51 @@ Required by the plan. Extract from branch's `docs/proposals/07-routing-and-contr
 | #140 | `plan/v0.5.1-unified-logging`            | Engineering Standard #4 + `DaemonEventBus` + ADR-0040 wake event stream                                           |
 | #124 | `plan/v0.5.0-init-ux-overhaul`           | v0.5.0 shipped; implementation history in git log                                                                 |
 | #123 | `plan/phase-1.2-governance-on-github`    | ADR-0046 "Phase 3: Governance Plugin Extraction" generalizes the governance-on-GitHub framing as a plugin concern |
+
+---
+
+## Phase D execution log — 2026-05-11 08:35 PDT
+
+**Result:** All 4 remaining open PRs closed as superseded; 8 Tier 1.5 surprise branches verified safe and deleted; new straggler `fix/release-workflow-pnpm` deleted (literal duplicate of PR #225). Local branches: **12 → 2**. Open PRs: **4 → 0**.
+
+### Tier 1.5 resolution (8 branches verified)
+
+All 8 confirmed safe via subject-grep against `git log main` + targeted content checks. Each work item exists in main under a different SHA (squash-merged with review fixes that broke patch-id matching):
+
+| Branch                                   | Where the work lives in main                                                                                           |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `feat/adr-0027-fallback-identity`        | `docs/adr/0027-fallback-identity.md`                                                                                   |
+| `feat/b5-phase-1-directive-validation`   | `validateWake` + `UnaddressedDirective` in `packages/core/src/execution/index.ts:782+`; generalized by ADR-0047        |
+| `fix/boot-mcp-wiring-291`                | Commit `cc44114` on main (exact subject match)                                                                         |
+| `fix/directive-cli-flag-parsing`         | `packages/cli/src/directive.ts` evolved past this; later subjects supersede                                            |
+| `fix/idle-wake-skip-297`                 | `packages/core/src/daemon/index.ts:82` comment "Hash the wake context's stable shape for idle-wake skip (harness#297)" |
+| `fix/runner-tools-gate-subscription-cli` | `supportsToolUse` capability checks throughout `packages/core/src/runner/index.ts`                                     |
+| `fix/v0.5-spirit-thinking-indicator`     | Commit `4754917` on main (exact subject match)                                                                         |
+| `research/harness-engineering`           | Final Proposal 07 doc + all `docs/research/*-applied.md` files in main                                                 |
+
+All 8 deleted with `-D`.
+
+### Remaining 4 PRs — disposition
+
+| PR                                            | Disposition | Rationale                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **#225** `feature/add-release-workflow`       | **CLOSED**  | Main's `release.yml` is strictly better (pnpm-aware, version verification, full CI gate, monorepo `pnpm -r publish`, auto-changelog). PR used npm — would break the monorepo.                                                                                                                                        |
+| **#260** `research/minerva-lessons`           | **CLOSED**  | `docs/research/minerva-lessons-applied.md` already in main (44 lines, identical). Other 6 stacked commits are stale MCP env-evaluation fixes.                                                                                                                                                                        |
+| **#218** `docs/toolchain-guide`               | **CLOSED**  | TOOLCHAIN-GUIDE.md is a year stale (references `npx` GitHub MCP that has been replaced by builtin extensions; `jMunch` naming evolved to `jcodemunch-mcp`/`jdocmunch-mcp` at user-config level). Intent superseded by Spirit's `setup-llms`/`setup-github`/`setup-products` skills + ADR-0044.                       |
+| **#265** `fix/convene-wires-github-tools-264` | **CLOSED**  | Approach (wire ALL tools to ALL convene LLM calls) is the wrong scope per still-open issue [#266](https://github.com/murmurations-ai/murmurations-harness/issues/266) ("v2 of #264: scope read tools to facilitator synthesis only"). Issue #264 remains open as the design question; #266 is the refined v2 design. |
+
+### New straggler resolved
+
+`fix/release-workflow-pnpm` — local-only, no upstream. Pointed at the **exact same commit** as PR #225 (`558332bf`). Pure duplicate; deleted alongside the PR #225 close.
+
+---
+
+## Cumulative result — Phases A through D
+
+| Metric                                       | Start (2026-05-08) | After A    | After B  | After C  | After D                       |
+| -------------------------------------------- | ------------------ | ---------- | -------- | -------- | ----------------------------- |
+| **Local branches**                           | 47                 | 18         | 17       | 12       | **2** (main + 1)              |
+| **Open PRs**                                 | 12                 | 12         | 10       | 4        | **0**                         |
+| **Branches/PRs handled with zero lost work** | —                  | 30 deleted | 2 closed | 6 closed | 9 closed (4 PRs + 5 branches) |
+
+**Single remaining branch:** `feat/spirit-setup-github` (Tier 5, no upstream, 11 commits including 6 core-fix commits that did NOT land — needs Phase E cherry-pick triage).
