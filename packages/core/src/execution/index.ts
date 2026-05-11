@@ -1,5 +1,6 @@
 import type { WakeCostRecord } from "../cost/record.js";
 import { SOURCE_DIRECTIVE_LABEL, buildAgentRoutingLabels } from "../labels/index.js";
+import type { ExecutionContract } from "../runtime/execution-contract.js";
 
 /**
  * Agent execution — the pluggable boundary between the harness daemon and
@@ -628,18 +629,23 @@ export interface AgentSpawnContext {
    */
   readonly promptRef?: string;
   /**
-   * Minimal execution contract scaffold (Near-Term #9, Proposal 07).
+   * Full execution contract for this wake (Phase 4 PR 2, ADR-0047, ADR-0048).
    *
-   * In Phase 0/1, only `objective`, `doneWhen`, and `allowedSideEffects`
-   * are populated. Phase 4 expands this to the full `ExecutionContract`.
-   * Optional so pre-Phase-1 callers (tests, examples) do not need to
-   * populate it.
+   * Assembled by `assembleExecutionContract()` from the role's
+   * `contract:` block + runtime context (signals, budget, write scopes).
+   * Optional so test fixtures and pre-Phase-4 callers do not need to
+   * populate it; production daemon wakes always populate it from PR 2
+   * onward.
+   *
+   * Consumers (Phase 4 PR 3/4/6a):
+   *   - PromptAssembler renders `requiredOutputs` + `actionItems` into
+   *     the system prompt.
+   *   - `validateOutcomes` (PR 4) scores the wake against the obligation
+   *     sub-contract.
+   *   - `validateBehavior` (PR 6a, warning-only) reads `allowedSideEffects`
+   *     to cross-check narrative vs. tool calls.
    */
-  readonly contract?: {
-    readonly objective: string;
-    readonly doneWhen: readonly string[];
-    readonly allowedSideEffects: readonly string[];
-  };
+  readonly contract?: ExecutionContract;
 }
 
 // ---------------------------------------------------------------------------

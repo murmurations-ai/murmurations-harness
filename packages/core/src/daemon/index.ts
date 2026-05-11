@@ -44,6 +44,10 @@ import {
 import type { LoadedAgentIdentity } from "../identity/index.js";
 import { buildAgentRoutingLabels } from "../labels/index.js";
 import {
+  assembleExecutionContract,
+  type ContractDeclaration,
+} from "../runtime/execution-contract.js";
+import {
   makeSecretKey,
   REDACT,
   type SecretDeclaration,
@@ -253,6 +257,14 @@ export interface RegisteredAgent {
   readonly plugins: readonly {
     readonly provider: string;
   }[];
+
+  /**
+   * Parsed `contract:` block from `role.md` frontmatter (ADR-0047, ADR-0048,
+   * Phase 4 PR 1+2). Undefined when the role does not declare a contract —
+   * `assembleExecutionContract()` still produces a usable contract from
+   * runtime context in that case.
+   */
+  readonly contract?: ContractDeclaration;
 }
 
 /**
@@ -382,6 +394,7 @@ export const registeredAgentFromLoadedIdentity = (
     secrets,
     tools,
     plugins,
+    ...(frontmatter.contract !== undefined ? { contract: frontmatter.contract } : {}),
   };
 };
 
@@ -1374,13 +1387,30 @@ const buildSpawnContext = async (
     };
   }
 
+  const wakeMode = "individual" as const;
+  const wakeReason = event.wakeReason;
+
+  // Phase 4 PR 2: assemble the full ExecutionContract for this wake.
+  // Empty when the role lacks a `contract:` block — assembleExecutionContract
+  // handles the missing-declaration case and still returns a usable contract
+  // populated from runtime context (objective derived from wake reason,
+  // allowedSideEffects derived from write scopes).
+  const contract = assembleExecutionContract({
+    wakeReason,
+    wakeMode,
+    declaration: agent.contract,
+    signals,
+    budget,
+    githubWriteScopes: agent.githubWriteScopes,
+  });
+
   return {
     wakeId: event.wakeId,
     agentId,
     identity,
     signals,
-    wakeReason: event.wakeReason,
-    wakeMode: "individual" as const,
+    wakeReason,
+    wakeMode,
     budget,
     currentSchedule: formatTrigger(agent.trigger),
     capabilities: {
@@ -1397,6 +1427,7 @@ const buildSpawnContext = async (
     },
     mcpServerConfigs: agent.tools.mcp,
     environment: resolveAgentEnvironment(agent, secretsProvider),
+    contract,
   };
 };
 
