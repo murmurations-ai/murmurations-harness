@@ -85,11 +85,23 @@ export interface McpServerConfig {
 const CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 
 /**
+ * Zero-width / invisible characters used to fragment injection patterns
+ * across visual whitespace (harness#359). Stripped before pattern matching.
+ * Covers ZWSP (U+200B), ZWNJ (U+200C), ZWJ (U+200D), word joiner (U+2060),
+ * and BOM/ZWNBSP (U+FEFF). Written with explicit escapes so the source file
+ * has no irregular whitespace.
+ */
+const ZERO_WIDTH_RE = /[\u200B-\u200D\u2060\uFEFF]/g;
+
+/**
  * Phrases commonly used in prompt-injection payloads embedded in tool
  * descriptions from hostile or compromised MCP servers. Case-insensitive.
  * Each entry is a prefix of a suspicious phrase; matches are replaced with
  * the literal string `[REDACTED]` so the agent sees a gap rather than a
  * coherent instruction.
+ *
+ * Patterns match the normalized form (NFKC + zero-width strip + whitespace
+ * collapse). `\s` in a pattern matches the collapsed single space.
  */
 const INJECTION_PATTERNS: readonly RegExp[] = [
   /ignore (?:all )?(?:previous|prior|above) instructions?/gi,
@@ -107,10 +119,24 @@ const MCP_DESCRIPTION_MAX_CHARS = 500;
 
 /**
  * Sanitize an external MCP tool description before injecting it into the
- * agent's tool surface (Sec / harness#286):
- * 1. Strip control characters
- * 2. Replace heuristic prompt-injection patterns with `[REDACTED]`
- * 3. Enforce a character-count cap (truncated with `[…]` marker)
+ * agent's tool surface (Sec / harness#286 + harness#359):
+ *
+ * 1. Strip control characters and zero-width invisibles
+ * 2. NFKC-normalize so compatibility variants (full-width, ligatures,
+ *    combined diacritics) collapse to their canonical form
+ * 3. Collapse all whitespace runs (including tabs/newlines) to single space
+ *    so pattern literals like `ignore previous instructions` cannot be
+ *    fragmented by alternative whitespace
+ * 4. Apply the heuristic injection patterns to the normalized form
+ * 5. Enforce a character-count cap (truncated with `[…]` marker)
+ *
+ * **Defense-in-depth, not a primary security control.** The real prompt-
+ * boundary trust gate is ADR-0045 (`<untrusted-tool-description>` wrapper).
+ * This function is a heuristic that catches the common, named injection
+ * patterns; it deliberately does not attempt full Unicode confusable
+ * normalization (e.g., Cyrillic homoglyphs `Іgnore` → `Ignore`) because
+ * that would require a confusables table the harness does not ship.
+ * Operators must still vet MCP servers before installing them.
  *
  * @internal exported for testing
  */
@@ -118,7 +144,8 @@ export const sanitizeMcpDescription = (
   raw: string,
   maxChars = MCP_DESCRIPTION_MAX_CHARS,
 ): string => {
-  let s = raw.replace(CONTROL_RE, "");
+  let s = raw.replace(CONTROL_RE, "").replace(ZERO_WIDTH_RE, "");
+  s = s.normalize("NFKC").replace(/\s+/g, " ");
   for (const pattern of INJECTION_PATTERNS) {
     s = s.replace(pattern, "[REDACTED]");
   }
