@@ -24,6 +24,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
 import { accountabilitiesSchema } from "../done-criteria/index.js";
+import { contractDeclarationSchema } from "../runtime/execution-contract.js";
 import {
   makeAgentId,
   makeGroupId,
@@ -458,6 +459,13 @@ export const roleFrontmatterSchema = z.object({
   // declare accountabilities fall back to legacy self-reported
   // EFFECTIVENESS reflection without machine-checked done conditions.
   accountabilities: accountabilitiesSchema,
+
+  // ADR-0047: execution contract declaration (Phase 4 PR 1). Optional —
+  // roles without a `contract:` block fall back to the synthesized
+  // minimal default at spawn time (ADR-0047 §4 fallback). Unknown keys
+  // are rejected via `.strict()` so typos in `done_when` / etc. surface
+  // at boot rather than silently degrading validation.
+  contract: contractDeclarationSchema.optional(),
 });
 
 /** Parsed, validated shape of a `role.md` frontmatter block. */

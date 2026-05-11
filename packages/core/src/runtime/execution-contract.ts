@@ -24,6 +24,8 @@
  *       - "admin"
  */
 
+import { z } from "zod";
+
 import type { CostBudget, WakeMode, WakeReason } from "../execution/index.js";
 import type { ApprovalPolicy, ToolPermission } from "../tools/registry.js";
 
@@ -101,3 +103,39 @@ export interface ExecutionContract {
   readonly budget: CostBudget;
   readonly approval: ApprovalPolicy;
 }
+
+// ---------------------------------------------------------------------------
+// `role.md` operator-facing contract declaration
+// ---------------------------------------------------------------------------
+
+/**
+ * Zod schema for the optional `contract:` block in `role.md` frontmatter
+ * (ADR-0047 §4, Phase 4 PR 1). All arrays default to empty so a partial
+ * `contract: {}` block parses cleanly; unknown keys are rejected via
+ * `.strict()` so typos surface at boot rather than silently degrading.
+ *
+ * The schema is intentionally minimal per the "v1 brutally simple"
+ * design principle in `docs/plans/proposal-07-phase4-implementation.md`:
+ * no nesting, no expressions, no operators beyond single-level `OR` in
+ * `done_when[]` strings (parsed downstream in `buildSpawnContext` —
+ * PR 2). When operators demand more expressive grammar, file a
+ * follow-up ADR rather than extending this schema.
+ *
+ * The downstream mapping into {@link ExecutionContract} happens at
+ * spawn time in PR 2. Operators with no `contract:` block fall back
+ * to the synthesized minimal default (ADR-0047 §4 fallback).
+ */
+export const contractDeclarationSchema = z
+  .object({
+    done_when: z.array(z.string()).default([]),
+    committed_artifacts: z.array(z.string()).default([]),
+    runtime_artifacts: z.array(z.string()).default([]),
+    verification_required_for: z.array(z.string()).default([]),
+    approval_required_for: z.array(z.string()).default([]),
+  })
+  .strict();
+
+/** Parsed `contract:` block from `role.md` frontmatter. Optional on
+ *  the parent schema; this type is what consumers see when a role
+ *  declares the block. */
+export type ContractDeclaration = z.infer<typeof contractDeclarationSchema>;

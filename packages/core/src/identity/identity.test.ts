@@ -759,6 +759,107 @@ describe("roleFrontmatterSchema (ADR-0016 extensions)", () => {
     const loader = new IdentityLoader({ rootDir });
     await expect(loader.load("bad-plugins")).rejects.toThrow(FrontmatterInvalidError);
   });
+
+  // ── ADR-0047 contract declaration (Phase 4 PR 1) ─────────────────────────
+  // Optional block in role.md frontmatter. All 5 arrays default to empty;
+  // unknown keys rejected via .strict(); non-string array entries rejected
+  // by z.array(z.string()).
+
+  it("role.md without contract block parses (backwards compat)", async () => {
+    await writeMinimalFixture(
+      "no-contract",
+      ['agent_id: "no-contract"', 'name: "No Contract"', "model_tier: balanced"].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    const loaded = await loader.load("no-contract");
+    expect(loaded.frontmatter.contract).toBeUndefined();
+  });
+
+  it("role.md with full contract block parses and produces all 5 arrays", async () => {
+    await writeMinimalFixture(
+      "full-contract",
+      [
+        'agent_id: "full-contract"',
+        'name: "Full Contract"',
+        "model_tier: balanced",
+        "contract:",
+        "  done_when:",
+        '    - "At least one knowledge file committed"',
+        "  committed_artifacts:",
+        '    - "agents/<id>/knowledge/*.md"',
+        "  runtime_artifacts:",
+        '    - ".murmuration/runs/<id>/*.md"',
+        "  verification_required_for:",
+        '    - "github.create_pull_request"',
+        "  approval_required_for:",
+        '    - "admin"',
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    const loaded = await loader.load("full-contract");
+    const contract = loaded.frontmatter.contract;
+    expect(contract).toBeDefined();
+    expect(contract?.done_when).toEqual(["At least one knowledge file committed"]);
+    expect(contract?.committed_artifacts).toEqual(["agents/<id>/knowledge/*.md"]);
+    expect(contract?.runtime_artifacts).toEqual([".murmuration/runs/<id>/*.md"]);
+    expect(contract?.verification_required_for).toEqual(["github.create_pull_request"]);
+    expect(contract?.approval_required_for).toEqual(["admin"]);
+  });
+
+  it("role.md with empty contract block defaults all 5 arrays to []", async () => {
+    await writeMinimalFixture(
+      "empty-contract",
+      [
+        'agent_id: "empty-contract"',
+        'name: "Empty Contract"',
+        "model_tier: balanced",
+        "contract: {}",
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    const loaded = await loader.load("empty-contract");
+    const contract = loaded.frontmatter.contract;
+    expect(contract).toBeDefined();
+    expect(contract?.done_when).toEqual([]);
+    expect(contract?.committed_artifacts).toEqual([]);
+    expect(contract?.runtime_artifacts).toEqual([]);
+    expect(contract?.verification_required_for).toEqual([]);
+    expect(contract?.approval_required_for).toEqual([]);
+  });
+
+  it("rejects unknown key under contract: (.strict() catches typos)", async () => {
+    await writeMinimalFixture(
+      "typo-contract",
+      [
+        'agent_id: "typo-contract"',
+        'name: "Typo Contract"',
+        "model_tier: balanced",
+        "contract:",
+        "  done_when:",
+        '    - "x"',
+        "  comitted_artifacts:", // typo: missing 'm' — should be rejected
+        '    - "y"',
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    await expect(loader.load("typo-contract")).rejects.toThrow(FrontmatterInvalidError);
+  });
+
+  it("rejects non-string entry in contract.done_when array", async () => {
+    await writeMinimalFixture(
+      "bad-contract-type",
+      [
+        'agent_id: "bad-contract-type"',
+        'name: "Bad Type"',
+        "model_tier: balanced",
+        "contract:",
+        "  done_when:",
+        "    - 42", // number, not string
+      ].join("\n"),
+    );
+    const loader = new IdentityLoader({ rootDir });
+    await expect(loader.load("bad-contract-type")).rejects.toThrow(FrontmatterInvalidError);
+  });
 });
 
 // ---------------------------------------------------------------------------
