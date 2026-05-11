@@ -115,3 +115,4 @@ per the Engineering Lead #22 gate review ([issue #6](https://github.com/murmurat
 | [ADR-0045](./0045-prompt-boundary.md)                                     | Prompt Boundary: Trust Classification and Cache-Aware Assembly                                           | Accepted |
 | [ADR-0046](./0046-phase-3-governance-plugin-extraction.md)                | Phase 3: Governance Plugin Extraction                                                                    | Accepted |
 | [ADR-0047](./0047-execution-contracts.md)                                 | Execution Contracts: obligation/permission split + dual validation surfaces                              | Proposed |
+| [ADR-0048](./0048-phase-4-scope-lock-for-v0.8.0.md)                       | Phase 4 scope lock for v0.8.0: ship outcome validation; defer behavioral hard-fail to 0.8.1              | Proposed |
