@@ -201,9 +201,9 @@ After all phases:
 - [x] Per-branch unmerged-commit count verified via `git cherry`
 - [x] Critical content presence verified for `feat/spirit-setup-github` skills, `release.yml`, ADR-0030/0032 numbers, Proposal 07 doc state
 - [x] **Phase A executed 2026-05-08 21:55 PDT** — 30 deleted, 8 kept (see below)
-- [ ] Phase B PR diffs reviewed
+- [x] **Phase B executed 2026-05-11 08:15 PDT** — PR #268 + #269 closed with merge-pointer comments; both remote + local branches deleted (see below)
 - [ ] Phase C supersession comments drafted
-- [ ] Phase D triage scheduled
+- [ ] Phase D triage scheduled (now includes Tier 1.5 follow-up + new `fix/release-workflow-pnpm`)
 - [ ] Phase E cherry-pick window planned
 
 When ready, execute phase by phase. Do not batch phases.
@@ -260,3 +260,23 @@ chore/dedupe-adr-collisions               docs/proposal-07-harness-engineering
 - Subject represents real work not in main → cherry-pick eval (Tier 5 treatment)
 
 This is a 30-minute follow-up investigation, slotted into Phase D triage.
+
+---
+
+## Phase B execution log — 2026-05-11 08:15 PDT
+
+**Result:** PRs #268 and #269 closed with merge-pointer comments; remote branches deleted via `gh pr close --delete-branch`; local branches deleted. Open PRs: **12 → 10**. Local branches: **18 → 17** (net -1 due to new inventory entry below).
+
+### PR #269 — `feat/llm-step-logging` (closed)
+
+- **Verification:** `git diff origin/feat/llm-step-logging origin/main -- packages/llm/src/adapters/vercel-adapter.ts` returned empty. Content fully in main as commit `4c47ede`.
+- **Action:** closed with comment pointing at the merge commit; remote branch deleted; local branch `-D`'d.
+
+### PR #268 — `fix/convene-minutes-too-long-267` (closed)
+
+- **Verification:** `truncateMinutesForGithub` + `GITHUB_BODY_LIMIT` exist in `packages/cli/src/group-wake.ts:281+`; called from line 953. Branch-vs-main diff showed only _other_ commits to the file (subscription-CLI support added afterward), not unmerged work from this PR.
+- **Action:** closed with comment pointing at the merge commit + explanation that the residual diff is downstream evolution, not unmerged PR work; remote branch deleted; local branch `-D`'d.
+
+### New inventory entry surfaced
+
+`fix/release-workflow-pnpm` — 2-week-old local branch with 1 commit `558332b feat: add automated release workflow`. No upstream tracking, no open PR. Overlaps in subject with PR #225 (`feature/add-release-workflow`). **Tier 5 treatment:** diff this commit against current `release.yml` to see what's still applicable; either cherry-pick selectively or delete with rationale once PR #225 is resolved in Phase D.
