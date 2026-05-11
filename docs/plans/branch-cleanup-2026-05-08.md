@@ -202,7 +202,7 @@ After all phases:
 - [x] Critical content presence verified for `feat/spirit-setup-github` skills, `release.yml`, ADR-0030/0032 numbers, Proposal 07 doc state
 - [x] **Phase A executed 2026-05-08 21:55 PDT** — 30 deleted, 8 kept (see below)
 - [x] **Phase B executed 2026-05-11 08:15 PDT** — PR #268 + #269 closed with merge-pointer comments; both remote + local branches deleted (see below)
-- [ ] Phase C supersession comments drafted
+- [x] **Phase C executed 2026-05-11 08:25 PDT** — 6 superseded PRs closed (#237, #217, #159, #140, #124, #123); pre-close safety check on #237 confirmed Boundary 4/5 framing preserved (see below)
 - [ ] Phase D triage scheduled (now includes Tier 1.5 follow-up + new `fix/release-workflow-pnpm`)
 - [ ] Phase E cherry-pick window planned
 
@@ -280,3 +280,29 @@ This is a 30-minute follow-up investigation, slotted into Phase D triage.
 ### New inventory entry surfaced
 
 `fix/release-workflow-pnpm` — 2-week-old local branch with 1 commit `558332b feat: add automated release workflow`. No upstream tracking, no open PR. Overlaps in subject with PR #225 (`feature/add-release-workflow`). **Tier 5 treatment:** diff this commit against current `release.yml` to see what's still applicable; either cherry-pick selectively or delete with rationale once PR #225 is resolved in Phase D.
+
+---
+
+## Phase C execution log — 2026-05-11 08:25 PDT
+
+**Result:** 6 PRs closed as superseded with rationale comments naming the superseding ADR/work. All 6 remote branches deleted via `--delete-branch`; 5 corresponding local branches deleted. Open PRs: **10 → 4**. Local branches: **17 → 12**.
+
+### Pre-close safety check for PR #237 — outcome
+
+Required by the plan. Extract from branch's `docs/proposals/07-routing-and-contracts.md`:
+
+- **Boundary 4 (membership drift)** — issue [#238](https://github.com/murmurations-ai/murmurations-harness/issues/238) is **CLOSED**. Framing fully preserved in the issue body.
+- **Boundary 5 (narrative ↔ tool-call hallucination)** — issue [#239](https://github.com/murmurations-ai/murmurations-harness/issues/239) is **CLOSED**. Code shipped (`validateWake` + `UnaddressedDirective` in `execution/index.ts:782+`); generalized by **ADR-0047**'s dual-validation surface.
+
+**Conclusion:** no follow-up issue needed. The framing lives in (a) the closed boundary issues, (b) the shipped code, and (c) ADR-0047. PR #237 closed cleanly.
+
+### PR closure summary
+
+| PR   | Branch                                   | Superseder named in close comment                                                                                 |
+| ---- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| #237 | `docs/proposal-07-routing-and-contracts` | Issue #238 + Issue #239 + `validateWake`/`UnaddressedDirective` in main + ADR-0047                                |
+| #217 | `docs/adr-0032-jdocmunch`                | ADR-0032 number taken; jDocMunch lives at user-config level                                                       |
+| #159 | `docs/v0.6.0-init-interview-plan`        | ADR-0024 (Spirit) + ADR-0026 (directory layout) + Spirit `source-onboarding` skill                                |
+| #140 | `plan/v0.5.1-unified-logging`            | Engineering Standard #4 + `DaemonEventBus` + ADR-0040 wake event stream                                           |
+| #124 | `plan/v0.5.0-init-ux-overhaul`           | v0.5.0 shipped; implementation history in git log                                                                 |
+| #123 | `plan/phase-1.2-governance-on-github`    | ADR-0046 "Phase 3: Governance Plugin Extraction" generalizes the governance-on-GitHub framing as a plugin concern |
