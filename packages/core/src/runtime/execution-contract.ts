@@ -26,7 +26,7 @@
 
 import { z } from "zod";
 
-import type { CostBudget, WakeMode, WakeReason } from "../execution/index.js";
+import type { CostBudget, Signal, SignalBundle, WakeMode, WakeReason } from "../execution/index.js";
 import type { ApprovalPolicy, ToolPermission } from "../tools/registry.js";
 
 // ---------------------------------------------------------------------------
@@ -139,3 +139,150 @@ export const contractDeclarationSchema = z
  *  the parent schema; this type is what consumers see when a role
  *  declares the block. */
 export type ContractDeclaration = z.infer<typeof contractDeclarationSchema>;
+
+// ---------------------------------------------------------------------------
+// assembleExecutionContract (Phase 4 PR 2)
+// ---------------------------------------------------------------------------
+
+/** GitHub write scope shape consumed by {@link assembleExecutionContract}.
+ *  Mirrors the subset of `RegisteredAgent.githubWriteScopes` the contract
+ *  cares about — pulled out so this module does not depend on `daemon/`. */
+export interface GithubWriteScopesView {
+  readonly issueComments: readonly string[];
+  readonly branchCommits: readonly { readonly repo: string; readonly paths: readonly string[] }[];
+  readonly labels: readonly string[];
+  readonly issues: readonly string[];
+}
+
+/** Inputs to {@link assembleExecutionContract}. */
+export interface AssembleExecutionContractArgs {
+  readonly wakeReason: WakeReason;
+  readonly wakeMode: WakeMode;
+  /** Parsed `contract:` block from `role.md`. Undefined when the role
+   *  does not declare a contract — the function still returns a valid
+   *  {@link ExecutionContract} populated only from runtime context. */
+  readonly declaration: ContractDeclaration | undefined;
+  readonly signals: SignalBundle;
+  readonly budget: CostBudget;
+  readonly githubWriteScopes: GithubWriteScopesView;
+}
+
+/** Maps a single action-item Signal to an {@link ActionItemRef}. */
+const toActionItemRef = (signal: Signal): ActionItemRef => {
+  const sourceRef =
+    signal.kind === "github-issue" || signal.kind === "governance-round" ? signal.url : undefined;
+  return {
+    signalId: signal.id,
+    ...(sourceRef !== undefined ? { sourceRef } : {}),
+  };
+};
+
+/**
+ * Build a full {@link ExecutionContract} for one wake.
+ *
+ * Combines the operator-authored `contract:` block from `role.md` with
+ * runtime context (signal bundle, budget, wake reason, GitHub write
+ * scopes). The result is the single source of truth used by:
+ *
+ *   - The prompt assembler (PR 3) to render `requiredOutputs` and
+ *     `actionItems` into the system prompt.
+ *   - `validateOutcomes` (PR 4) to score the wake against the
+ *     declared obligations.
+ *
+ * Phase 4 PR 2 keeps the assembly intentionally minimal:
+ *
+ *   - `objective` is the first `done_when` string when present, else
+ *     a synthesized one-line derived from `wakeReason`.
+ *   - `requiredOutputs` is the concatenation of `committed_artifacts`
+ *     and `runtime_artifacts` from the declaration; each entry becomes
+ *     a glob-style required-output descriptor.
+ *   - `actionItems` is the SignalBundle's action-item array mapped 1:1
+ *     to {@link ActionItemRef}.
+ *   - `completionConditions` is one entry per `done_when` string.
+ *   - `verification` is one required step per `verification_required_for`
+ *     entry.
+ *   - `allowedSideEffects` is derived from `githubWriteScopes`: `read`
+ *     is always granted; `write` is added when any write scope is
+ *     non-empty. Finer-grained tool permission grants land in a later
+ *     PR.
+ *   - `approval` requires Source approval when `approval_required_for`
+ *     is non-empty; the reason string lists the gated keys.
+ *
+ * Phase 5+ will replace this with full Tsinghua NLAH semantics
+ * (disjunction, exemption, partial-credit). The v1 form is brutally
+ * simple per ADR-0048 §Decision-drivers (1) and the
+ * "v1 DSLs brutally simple" project rule.
+ */
+export const assembleExecutionContract = (
+  args: AssembleExecutionContractArgs,
+): ExecutionContract => {
+  const declaration = args.declaration;
+
+  const committedOutputs = (declaration?.committed_artifacts ?? []).map((path) => ({
+    kind: "committed-artifact" as const,
+    path,
+    description: `Committed artifact matching: ${path}`,
+  }));
+  const runtimeOutputs = (declaration?.runtime_artifacts ?? []).map((path) => ({
+    kind: "runtime-artifact" as const,
+    path,
+    description: `Runtime artifact matching: ${path}`,
+  }));
+  const requiredOutputs = [...committedOutputs, ...runtimeOutputs];
+
+  const actionItems = args.signals.actionItems.map(toActionItemRef);
+
+  const completionConditions: readonly CompletionCondition[] = (declaration?.done_when ?? []).map(
+    (description, idx) => ({
+      id: `done-when-${String(idx)}`,
+      description,
+    }),
+  );
+
+  const verification: readonly VerificationStep[] = (
+    declaration?.verification_required_for ?? []
+  ).map((id, idx) => ({
+    id: `verification-${String(idx)}`,
+    description: `Verification required for: ${id}`,
+    required: true,
+  }));
+
+  const writeScopes = args.githubWriteScopes;
+  const hasAnyWrite =
+    writeScopes.issueComments.length > 0 ||
+    writeScopes.branchCommits.length > 0 ||
+    writeScopes.labels.length > 0 ||
+    writeScopes.issues.length > 0;
+  const allowedSideEffects: readonly ToolPermission[] = hasAnyWrite ? ["read", "write"] : ["read"];
+
+  const firstDoneWhen = declaration?.done_when[0];
+  const objective =
+    firstDoneWhen ??
+    (args.wakeReason.kind === "scheduled"
+      ? `Scheduled wake (${args.wakeReason.cronExpression})`
+      : args.wakeReason.kind === "event"
+        ? `Event-triggered wake: ${args.wakeReason.eventType}`
+        : `Manual wake invoked by ${args.wakeReason.invokedBy}`);
+
+  const approvalKeys = declaration?.approval_required_for ?? [];
+  const approval: ApprovalPolicy =
+    approvalKeys.length > 0
+      ? {
+          mode: "required",
+          reason: `Source approval required for: ${approvalKeys.join(", ")}`,
+        }
+      : { mode: "none" };
+
+  return {
+    wakeReason: args.wakeReason,
+    wakeMode: args.wakeMode,
+    objective,
+    requiredOutputs,
+    actionItems,
+    completionConditions,
+    verification,
+    allowedSideEffects,
+    budget: args.budget,
+    approval,
+  };
+};
