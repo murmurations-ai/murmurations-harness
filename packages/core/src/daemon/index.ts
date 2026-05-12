@@ -891,6 +891,9 @@ export class Daemon {
               signals: context.signals.signals,
               agentId: agent.agentId,
               groupIds: agent.groupMemberships,
+              // Phase 4 PR 4: pass the assembled contract so obligation
+              // validation runs alongside the legacy heuristic.
+              ...(context.contract !== undefined ? { contract: context.contract } : {}),
             },
             result,
             actionReceipts,
@@ -938,6 +941,12 @@ export class Daemon {
           actionItemsAssigned: validation.actionItemsAssigned,
           actionItemsAddressed: validation.actionItemsAddressed,
           directivesUnaddressedCount: validation.directivesUnaddressed.length,
+          ...(validation.obligationStatus !== undefined
+            ? { obligationStatus: validation.obligationStatus }
+            : {}),
+          ...(validation.unmetRequiredOutputs !== undefined
+            ? { unmetRequiredOutputsCount: validation.unmetRequiredOutputs.length }
+            : {}),
         });
       } else if (isCompleted(result)) {
         this.#logger.info("daemon.wake.validated", {
@@ -946,6 +955,9 @@ export class Daemon {
           artifactCount: validation.artifactCount,
           actionItemsAddressed: validation.actionItemsAddressed,
           actionItemsAssigned: validation.actionItemsAssigned,
+          ...(validation.obligationStatus !== undefined
+            ? { obligationStatus: validation.obligationStatus }
+            : {}),
         });
       }
 
