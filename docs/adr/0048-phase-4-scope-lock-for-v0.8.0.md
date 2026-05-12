@@ -1,7 +1,8 @@
 # ADR-0048 — Phase 4 scope lock for v0.8.0: ship outcome validation; defer behavioral hard-fail to 0.8.1
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-05-12)
 - **Date:** 2026-05-11
+- **Accepted:** 2026-05-12 — engineering-agent consent + facilitator-agent synthesis on EP #864; Source close.
 - **Decision-maker(s):** Source (Nori), Engineering Circle
 - **Consulted:** ADR-0047 (Execution Contracts); OpenClaw review 2026-05-08; Phase 4 implementation plan (Proposal 07 §Migration Plan)
 - **Supersedes:** None
