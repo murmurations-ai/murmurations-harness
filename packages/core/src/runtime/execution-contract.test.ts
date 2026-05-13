@@ -12,7 +12,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { assembleExecutionContract, contractDeclarationSchema } from "./execution-contract.js";
+import {
+  assembleExecutionContract,
+  contractDeclarationSchema,
+  renderContractForPrompt,
+} from "./execution-contract.js";
 import type { Signal, SignalBundle } from "../execution/index.js";
 import { makeAgentId, makeWakeId } from "../execution/index.js";
 
@@ -227,5 +231,120 @@ describe("assembleExecutionContract", () => {
       githubWriteScopes: emptyScopes,
     });
     expect(contract.approval).toEqual({ mode: "none" });
+  });
+});
+
+describe("renderContractForPrompt", () => {
+  it("renders the no-obligations notice when only runtime context is present", () => {
+    const contract = assembleExecutionContract({
+      wakeReason: { kind: "scheduled", cronExpression: "0 9 * * *" },
+      wakeMode: "individual",
+      declaration: undefined,
+      signals: emptySignals,
+      budget: baseBudget,
+      githubWriteScopes: emptyScopes,
+    });
+
+    const rendered = renderContractForPrompt(contract);
+    expect(rendered).toMatch(/^# Execution Contract\n/);
+    expect(rendered).toContain("**Objective:** Scheduled wake (0 9 * * *)");
+    expect(rendered).toContain("_No explicit obligations declared");
+    expect(rendered).toContain("Permitted side effects");
+    expect(rendered).toContain("`read`");
+    expect(rendered).not.toContain("## Completion conditions");
+    expect(rendered).not.toContain("## Required outputs");
+    expect(rendered).not.toContain("## Source approval");
+  });
+
+  it("renders all sections when the contract is fully populated", () => {
+    const declaration = contractDeclarationSchema.parse({
+      done_when: [
+        "Commit at least one research artifact under drafts/",
+        "OR post a substantive comment on an open issue",
+      ],
+      committed_artifacts: ["drafts/**/*.md", "docs/research/**/*.md"],
+      runtime_artifacts: [".murmuration/runs/**/*.md"],
+      verification_required_for: ["github.create_pull_request"],
+      approval_required_for: ["admin"],
+    });
+
+    const contract = assembleExecutionContract({
+      wakeReason: { kind: "manual", invokedBy: "source" },
+      wakeMode: "individual",
+      declaration,
+      signals: emptySignals,
+      budget: baseBudget,
+      githubWriteScopes: writeScopes,
+    });
+
+    const rendered = renderContractForPrompt(contract);
+    expect(rendered).toContain(
+      "**Objective:** Commit at least one research artifact under drafts/",
+    );
+    expect(rendered).toContain("## Completion conditions");
+    expect(rendered).toContain("- Commit at least one research artifact under drafts/");
+    expect(rendered).toContain("- OR post a substantive comment on an open issue");
+    expect(rendered).toContain("## Required outputs");
+    expect(rendered).toContain("**committed-artifact** `drafts/**/*.md`");
+    expect(rendered).toContain("**runtime-artifact** `.murmuration/runs/**/*.md`");
+    expect(rendered).toContain("## Verification required");
+    expect(rendered).toContain("Verification required for: github.create_pull_request (required)");
+    expect(rendered).toContain("## Permitted side effects");
+    expect(rendered).toContain("`read, write`");
+    expect(rendered).toContain("## Source approval");
+    expect(rendered).toContain("**required** — Source approval required for: admin");
+  });
+
+  it("omits the verification section when no verification steps are declared", () => {
+    const declaration = contractDeclarationSchema.parse({
+      done_when: ["produce a digest"],
+      committed_artifacts: ["digests/**/*.md"],
+    });
+
+    const contract = assembleExecutionContract({
+      wakeReason: { kind: "scheduled", cronExpression: "0 9 * * *" },
+      wakeMode: "individual",
+      declaration,
+      signals: emptySignals,
+      budget: baseBudget,
+      githubWriteScopes: emptyScopes,
+    });
+
+    const rendered = renderContractForPrompt(contract);
+    expect(rendered).toContain("## Completion conditions");
+    expect(rendered).toContain("## Required outputs");
+    expect(rendered).not.toContain("## Verification required");
+    expect(rendered).not.toContain("## Source approval");
+  });
+
+  it("omits the approval section when mode is 'none'", () => {
+    const declaration = contractDeclarationSchema.parse({
+      done_when: ["do the thing"],
+    });
+
+    const contract = assembleExecutionContract({
+      wakeReason: { kind: "scheduled", cronExpression: "0 9 * * *" },
+      wakeMode: "individual",
+      declaration,
+      signals: emptySignals,
+      budget: baseBudget,
+      githubWriteScopes: emptyScopes,
+    });
+
+    const rendered = renderContractForPrompt(contract);
+    expect(rendered).not.toContain("## Source approval");
+  });
+
+  it("shows read+write when write scopes are present", () => {
+    const contract = assembleExecutionContract({
+      wakeReason: { kind: "manual", invokedBy: "source" },
+      wakeMode: "individual",
+      declaration: undefined,
+      signals: emptySignals,
+      budget: baseBudget,
+      githubWriteScopes: writeScopes,
+    });
+    const rendered = renderContractForPrompt(contract);
+    expect(rendered).toContain("`read, write`");
   });
 });

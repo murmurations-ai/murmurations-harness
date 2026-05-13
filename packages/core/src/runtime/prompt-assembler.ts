@@ -24,6 +24,7 @@ import { join } from "node:path";
 import type { AgentSpawnContext } from "../execution/index.js";
 import { renderSignalForPrompt } from "../execution/index.js";
 import { runsDirForAgent } from "../daemon/runs-path.js";
+import { renderContractForPrompt } from "./execution-contract.js";
 import { scanSkills, formatSkillsPromptBlock } from "../skills/index.js";
 
 // ---------------------------------------------------------------------------
@@ -249,7 +250,27 @@ export class PromptAssembler {
       content: MEMORY_PASSIVE_DATA_INSTRUCTION,
     };
 
+    // 4. Execution contract — emitted when spawn carries a contract
+    //    (Phase 4 PR 3, ADR-0047, ADR-0048). The contract is trusted because
+    //    it is assembled from the operator-authored role.md contract: block
+    //    plus harness-controlled runtime fields (budget, write scopes, signal
+    //    action items). Tells the agent what completion looks like and which
+    //    side effects are permitted.
+    const contractSegment: PromptSegment | undefined =
+      spawn.contract !== undefined
+        ? {
+            id: "execution-contract",
+            kind: "contract",
+            trust: "trusted",
+            content: renderContractForPrompt(spawn.contract),
+            sourceRef: `agents/${agentDir}/role.md#contract`,
+          }
+        : undefined;
+
     const system: PromptSegment[] = [identitySegment, skillsSegment, memoryInstructionSegment];
+    if (contractSegment !== undefined) {
+      system.push(contractSegment);
+    }
     // All system segments are stable — volatile content (signals, digests) is
     // in the user message. cacheAnchorIndex = system.length signals that
     // the full system array is cache-stable.

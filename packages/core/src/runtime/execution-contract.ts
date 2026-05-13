@@ -286,3 +286,109 @@ export const assembleExecutionContract = (
     approval,
   };
 };
+
+// ---------------------------------------------------------------------------
+// renderContractForPrompt (Phase 4 PR 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Render an {@link ExecutionContract} as a prompt segment body.
+ *
+ * Used by `PromptAssembler` to inject the contract into the system prompt
+ * as a `trusted` segment (the operator authored the underlying `role.md`
+ * `contract:` block; the harness assembled the runtime fields). The agent
+ * reads this block to learn what completion looks like and what side
+ * effects it may exercise this wake.
+ *
+ * Format is brutally simple per ADR-0048 / "v1 DSLs brutally simple":
+ * markdown sections with one bullet per item, no nesting, no DSL. The
+ * agent's role narrative remains authoritative on *how* to do the work;
+ * this block clarifies *what counts as done*.
+ *
+ * Sections are omitted when their list is empty (with the exception of
+ * the objective line, which is always emitted). When the contract has
+ * no obligations declared, the block degrades to a short
+ * "no obligations declared" notice rather than a wall of empty sections.
+ */
+export const renderContractForPrompt = (contract: ExecutionContract): string => {
+  const lines: string[] = [];
+  lines.push("# Execution Contract");
+  lines.push("");
+  lines.push("You must satisfy this contract to mark this wake productive.");
+  lines.push("");
+  lines.push(`**Objective:** ${contract.objective}`);
+
+  const hasObligation =
+    contract.completionConditions.length > 0 ||
+    contract.requiredOutputs.length > 0 ||
+    contract.verification.length > 0;
+
+  if (!hasObligation) {
+    lines.push("");
+    lines.push(
+      "_No explicit obligations declared in `role.md` `contract:` block. " +
+        "Follow your role narrative; the validator will fall back to artifact-presence heuristics._",
+    );
+  }
+
+  if (contract.completionConditions.length > 0) {
+    lines.push("");
+    lines.push("## Completion conditions");
+    lines.push("");
+    lines.push("This wake is productive when ALL of these conditions hold:");
+    lines.push("");
+    for (const cond of contract.completionConditions) {
+      lines.push(`- ${cond.description}`);
+    }
+  }
+
+  if (contract.requiredOutputs.length > 0) {
+    lines.push("");
+    lines.push("## Required outputs");
+    lines.push("");
+    lines.push(
+      "Produce at least one artifact matching each path. Globs accepted (e.g. `drafts/**/*.md`):",
+    );
+    lines.push("");
+    for (const out of contract.requiredOutputs) {
+      const pathPart = out.path !== undefined ? ` \`${out.path}\`` : "";
+      lines.push(`- **${out.kind}**${pathPart} — ${out.description}`);
+    }
+  }
+
+  if (contract.verification.length > 0) {
+    lines.push("");
+    lines.push("## Verification required");
+    lines.push("");
+    lines.push("These steps must succeed before the wake counts as productive:");
+    lines.push("");
+    for (const step of contract.verification) {
+      const requiredTag = step.required ? " (required)" : " (advisory)";
+      lines.push(`- ${step.description}${requiredTag}`);
+    }
+  }
+
+  lines.push("");
+  lines.push("## Permitted side effects");
+  lines.push("");
+  const sideEffectList = contract.allowedSideEffects.join(", ");
+  lines.push(
+    `You may exercise tools whose permission is one of: \`${sideEffectList}\`. ` +
+      "Tools requiring permissions outside this set will be refused at the tool layer.",
+  );
+
+  if (contract.approval.mode !== "none") {
+    lines.push("");
+    lines.push("## Source approval");
+    lines.push("");
+    const reason = contract.approval.reason ?? "Source approval is required for this wake's scope.";
+    lines.push(`**${contract.approval.mode}** — ${reason}`);
+    lines.push("");
+    lines.push(
+      "If an action would invoke an approval-gated capability, file the request as a " +
+        "structured action item rather than executing it; the harness will pause for Source.",
+    );
+  }
+
+  return lines.join("\n");
+};
