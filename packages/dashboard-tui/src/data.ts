@@ -34,6 +34,29 @@ export interface AgentStatus {
    * agent has not yet completed a wake.
    */
   readonly subscriptionCliPermissionMode: "restricted" | "operator-approved" | "trusted" | null;
+  /**
+   * Validation status of the last wake (Phase 4 PR 5, ADR-0047, ADR-0048).
+   * Null when the agent has not yet completed a wake or the entry pre-dates
+   * Phase 4 wiring.
+   */
+  readonly validationStatus:
+    | "productive"
+    | "idle"
+    | "unaddressed-directives"
+    | "obligation-unmet"
+    | "unknown"
+    | null;
+  /**
+   * Contract obligation status of the last wake. Null when no contract
+   * was supplied (legacy entries or roles without a `contract:` block when
+   * the daemon predates Phase 4 wiring).
+   */
+  readonly obligationStatus: "satisfied" | "unmet" | "not-applicable" | null;
+  /**
+   * Number of `requiredOutputs` from the contract that had no matching
+   * successful evidence (Phase 4 PR 4). Null when obligationStatus is not "unmet".
+   */
+  readonly unmetRequiredOutputsCount: number | null;
   readonly stale: boolean; // stalled or no wake in > 48h
   readonly consecutiveFailures: number;
   readonly totalWakes: number;
@@ -122,6 +145,9 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         shadowCostMicros: null,
         shadowCostFormatted: null,
         subscriptionCliPermissionMode: null,
+        validationStatus: null,
+        obligationStatus: null,
+        unmetRequiredOutputsCount: null,
         stale: false,
         consecutiveFailures: a.consecutiveFailures,
         totalWakes: a.totalWakes,
@@ -205,6 +231,9 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
       let shadowCostMicros: number | null = null;
       let shadowCostFormatted: string | null = null;
       let subscriptionCliPermissionMode: AgentStatus["subscriptionCliPermissionMode"] = null;
+      let validationStatus: AgentStatus["validationStatus"] = null;
+      let obligationStatus: AgentStatus["obligationStatus"] = null;
+      let unmetRequiredOutputsCount: AgentStatus["unmetRequiredOutputsCount"] = null;
       try {
         const indexContent = await readFile(join(runsDir, agentId, "index.jsonl"), "utf8");
         const lines = indexContent
@@ -223,6 +252,9 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
             subscriptionCli?: {
               permissionMode?: string;
             };
+            validationStatus?: string;
+            obligationStatus?: string;
+            unmetRequiredOutputsCount?: number;
           };
           costMicros = entry.llm?.costMicros ?? 0;
           costFormatted = `$${entry.llm?.costUsdFormatted ?? "0.0000"}`;
@@ -234,6 +266,23 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           const pm = entry.subscriptionCli?.permissionMode;
           if (pm === "restricted" || pm === "operator-approved" || pm === "trusted") {
             subscriptionCliPermissionMode = pm;
+          }
+          const vs = entry.validationStatus;
+          if (
+            vs === "productive" ||
+            vs === "idle" ||
+            vs === "unaddressed-directives" ||
+            vs === "obligation-unmet" ||
+            vs === "unknown"
+          ) {
+            validationStatus = vs;
+          }
+          const os = entry.obligationStatus;
+          if (os === "satisfied" || os === "unmet" || os === "not-applicable") {
+            obligationStatus = os;
+          }
+          if (typeof entry.unmetRequiredOutputsCount === "number") {
+            unmetRequiredOutputsCount = entry.unmetRequiredOutputsCount;
           }
         }
       } catch {
@@ -250,6 +299,9 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         shadowCostMicros,
         shadowCostFormatted,
         subscriptionCliPermissionMode,
+        validationStatus,
+        obligationStatus,
+        unmetRequiredOutputsCount,
         stale,
         consecutiveFailures: agentState.consecutiveFailures,
         totalWakes: agentState.totalWakes,
@@ -279,6 +331,9 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           shadowCostMicros: null,
           shadowCostFormatted: null,
           subscriptionCliPermissionMode: null,
+          validationStatus: null,
+          obligationStatus: null,
+          unmetRequiredOutputsCount: null,
           stale: true,
           consecutiveFailures: 0,
           totalWakes: 0,
@@ -318,6 +373,9 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           fallbackPm === "trusted"
             ? fallbackPm
             : null,
+        validationStatus: null,
+        obligationStatus: null,
+        unmetRequiredOutputsCount: null,
         stale,
         consecutiveFailures: 0,
         totalWakes: 0,
@@ -335,6 +393,9 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         shadowCostMicros: null,
         shadowCostFormatted: null,
         subscriptionCliPermissionMode: null,
+        validationStatus: null,
+        obligationStatus: null,
+        unmetRequiredOutputsCount: null,
         stale: true,
         consecutiveFailures: 0,
         totalWakes: 0,

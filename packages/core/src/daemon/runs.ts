@@ -38,7 +38,7 @@ import { join } from "node:path";
 
 import { formatUSDMicros } from "../cost/usd.js";
 import type { WakeCostRecord } from "../cost/record.js";
-import type { AgentResult } from "../execution/index.js";
+import type { AgentResult, WakeValidationResult } from "../execution/index.js";
 
 /**
  * Audit record for subscription-CLI wakes (T-CLI-9 / harness#301).
@@ -165,16 +165,36 @@ export interface RunArtifactIndexEntry {
    * `idle` — wake ran but produced no artifacts.
    * `unaddressed-directives` — one or more source-directives were not
    *   backed by structured evidence.
+   * `obligation-unmet` — the role.md `contract.requiredOutputs` had at
+   *   least one entry without matching successful evidence (Phase 4 PR 4,
+   *   ADR-0047 §2 obligation sub-contract).
    * `unknown` — validation data unavailable (legacy entry or failed wake).
-   * Near-Term #4 (Proposal 07 Phase 1).
+   * Near-Term #4 (Proposal 07 Phase 1), extended in Phase 4 PR 5.
    */
-  readonly validationStatus?: "productive" | "idle" | "unaddressed-directives" | "unknown";
+  readonly validationStatus?:
+    | "productive"
+    | "idle"
+    | "unaddressed-directives"
+    | "obligation-unmet"
+    | "unknown";
   /**
    * Count of source-directives that were in the signal bundle but not
    * addressed with a successful action receipt (Boundary 5).
    * `0` means all directives were addressed. Absent when none present.
    */
   readonly directivesUnaddressed?: number;
+  /**
+   * Contract obligation status (Phase 4 PR 4, ADR-0047 §2).
+   * Absent when no contract was supplied (e.g. roles without a
+   * `contract:` block when the daemon predates Phase 4 wiring).
+   */
+  readonly obligationStatus?: "satisfied" | "unmet" | "not-applicable";
+  /**
+   * Number of `requiredOutputs` from the contract that had no matching
+   * successful evidence (Phase 4 PR 4). Populated only when
+   * `obligationStatus === "unmet"`.
+   */
+  readonly unmetRequiredOutputsCount?: number;
   /**
    * Subscription-CLI audit context (T-CLI-9 / harness#301).
    * Present on all subscription-CLI wakes; absent for API-provider wakes.
@@ -197,11 +217,15 @@ export class RunArtifactWriter {
    * Record one wake's artifacts. Catches all I/O errors internally
    * and reports them via the optional logger so the daemon's wake
    * loop is never blocked by a failed write.
+   *
+   * `validation` is optional so test fixtures and legacy callers
+   * continue to work; production daemon wakes always pass it (Phase 4 PR 5).
    */
   public async record(
     result: AgentResult,
     costRecord: WakeCostRecord | undefined,
     logger?: RunArtifactLogger,
+    validation?: WakeValidationResult,
   ): Promise<void> {
     try {
       const now = this.#now();
@@ -228,6 +252,7 @@ export class RunArtifactWriter {
         costRecord,
         digestRelativePath,
         this.#subscriptionCli,
+        validation,
       );
       // Newline-terminated so readers can stream line-by-line.
       await appendFile(indexAbsolutePath, `${JSON.stringify(entry)}\n`, "utf8");
@@ -259,16 +284,34 @@ const outcomeKindOf = (result: AgentResult): RunArtifactIndexEntry["outcome"] =>
   }
 };
 
+/**
+ * Compute the dashboard-facing validationStatus from a WakeValidationResult.
+ * Precedence: obligation-unmet > unaddressed-directives > idle > productive.
+ * Returns undefined when no validation result is supplied (legacy / test
+ * callers) — the dashboard treats absent as "unknown".
+ */
+const computeValidationStatus = (
+  validation: WakeValidationResult | undefined,
+): RunArtifactIndexEntry["validationStatus"] => {
+  if (validation === undefined) return undefined;
+  if (validation.obligationStatus === "unmet") return "obligation-unmet";
+  if (validation.directivesUnaddressed.length > 0) return "unaddressed-directives";
+  if (!validation.productive) return "idle";
+  return "productive";
+};
+
 const buildIndexEntry = (
   result: AgentResult,
   costRecord: WakeCostRecord | undefined,
   digestRelativePath: string,
   subscriptionCli?: SubscriptionCliAuditContext,
+  validation?: WakeValidationResult,
 ): RunArtifactIndexEntry => {
   const outcome = outcomeKindOf(result);
   const durationMs = result.finishedAt.getTime() - result.startedAt.getTime();
   const llm = costRecord?.llm;
   const github = costRecord?.github;
+  const validationStatus = computeValidationStatus(validation);
   return {
     schemaVersion: 1,
     wakeId: result.wakeId.value,
@@ -302,6 +345,20 @@ const buildIndexEntry = (
     },
     digestPath: digestRelativePath,
     ...(subscriptionCli !== undefined ? { subscriptionCli } : {}),
+    ...(validation !== undefined
+      ? {
+          productive: validation.productive,
+          artifactCount: validation.artifactCount,
+          ...(validationStatus !== undefined ? { validationStatus } : {}),
+          directivesUnaddressed: validation.directivesUnaddressed.length,
+          ...(validation.obligationStatus !== undefined
+            ? { obligationStatus: validation.obligationStatus }
+            : {}),
+          ...(validation.unmetRequiredOutputs !== undefined
+            ? { unmetRequiredOutputsCount: validation.unmetRequiredOutputs.length }
+            : {}),
+        }
+      : {}),
   };
 };
 
@@ -359,6 +416,7 @@ export class DispatchRunArtifactWriter {
     result: AgentResult,
     costRecord: WakeCostRecord | undefined,
     logger?: RunArtifactLogger,
+    validation?: WakeValidationResult,
   ): Promise<void> {
     const writer = this.#writers.get(result.agentId.value);
     if (!writer) {
@@ -369,6 +427,6 @@ export class DispatchRunArtifactWriter {
       });
       return;
     }
-    await writer.record(result, costRecord, logger);
+    await writer.record(result, costRecord, logger, validation);
   }
 }

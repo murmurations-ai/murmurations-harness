@@ -120,6 +120,24 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
         : a.subscriptionCliPermissionMode === "operator-approved"
           ? cyan(" [op-approved]")
           : "";
+    // Phase 4 PR 5: surface validationStatus from the last wake.
+    // Only show the badge when it carries operator-relevant signal.
+    // `productive` is the silent happy path; `unknown` and absent are
+    // both elided to keep the row terse.
+    const validStr =
+      a.validationStatus === "obligation-unmet"
+        ? red(
+            ` [obl-unmet${
+              a.unmetRequiredOutputsCount !== null && a.unmetRequiredOutputsCount > 0
+                ? `:${String(a.unmetRequiredOutputsCount)}`
+                : ""
+            }]`,
+          )
+        : a.validationStatus === "unaddressed-directives"
+          ? yellow(" [dir-unaddr]")
+          : a.validationStatus === "idle"
+            ? dim(" [idle-val]")
+            : "";
 
     const time = a.lastWake!.toISOString().slice(11, 16);
     const next = a.nextWakeCountdown !== "--" ? a.nextWakeCountdown.padEnd(8) : dim("--".padEnd(8));
@@ -136,7 +154,7 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
         : dim("░".repeat(BAR_WIDTH));
 
     lines.push(
-      `  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w${failStr}${permStr}`,
+      `  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w${failStr}${permStr}${validStr}`,
     );
   }
 
