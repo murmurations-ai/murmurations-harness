@@ -317,4 +317,138 @@ describe("RunArtifactWriter", () => {
       }
     });
   });
+
+  describe("validation propagation (Phase 4 PR 5, ADR-0048)", () => {
+    it("omits validation fields when no WakeValidationResult is passed", async () => {
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+      });
+      await writer.record(makeResult(), makeCostRecord());
+
+      const indexPath = join(rootDir, "index.jsonl");
+      const entry = JSON.parse((await readFile(indexPath, "utf8")).trim()) as RunArtifactIndexEntry;
+
+      expect(entry.validationStatus).toBeUndefined();
+      expect(entry.obligationStatus).toBeUndefined();
+      expect(entry.productive).toBeUndefined();
+      expect(entry.unmetRequiredOutputsCount).toBeUndefined();
+    });
+
+    it("records validationStatus=productive when validation passes", async () => {
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+      });
+      await writer.record(makeResult(), makeCostRecord(), undefined, {
+        productive: true,
+        artifactCount: 2,
+        actionItemsAddressed: 0,
+        actionItemsAssigned: 0,
+        directivesUnaddressed: [],
+      });
+
+      const entry = JSON.parse(
+        (await readFile(join(rootDir, "index.jsonl"), "utf8")).trim(),
+      ) as RunArtifactIndexEntry;
+
+      expect(entry.validationStatus).toBe("productive");
+      expect(entry.productive).toBe(true);
+      expect(entry.artifactCount).toBe(2);
+      expect(entry.directivesUnaddressed).toBe(0);
+    });
+
+    it("records validationStatus=idle when not productive and no directives unaddressed", async () => {
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+      });
+      await writer.record(makeResult(), makeCostRecord(), undefined, {
+        productive: false,
+        artifactCount: 0,
+        actionItemsAddressed: 0,
+        actionItemsAssigned: 0,
+        directivesUnaddressed: [],
+        reason: "wake completed but produced no artifacts",
+      });
+
+      const entry = JSON.parse(
+        (await readFile(join(rootDir, "index.jsonl"), "utf8")).trim(),
+      ) as RunArtifactIndexEntry;
+
+      expect(entry.validationStatus).toBe("idle");
+    });
+
+    it("records validationStatus=unaddressed-directives when boundary 5 fires", async () => {
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+      });
+      await writer.record(makeResult(), makeCostRecord(), undefined, {
+        productive: false,
+        artifactCount: 0,
+        actionItemsAddressed: 0,
+        actionItemsAssigned: 0,
+        directivesUnaddressed: [{ issueNumber: 845, reason: "narrative-only-claim" }],
+        reason: "1 directive(s) in signals not addressed by structured evidence",
+      });
+
+      const entry = JSON.parse(
+        (await readFile(join(rootDir, "index.jsonl"), "utf8")).trim(),
+      ) as RunArtifactIndexEntry;
+
+      expect(entry.validationStatus).toBe("unaddressed-directives");
+      expect(entry.directivesUnaddressed).toBe(1);
+    });
+
+    it("records validationStatus=obligation-unmet with unmetRequiredOutputsCount", async () => {
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+      });
+      await writer.record(makeResult(), makeCostRecord(), undefined, {
+        productive: false,
+        artifactCount: 1,
+        actionItemsAddressed: 0,
+        actionItemsAssigned: 0,
+        directivesUnaddressed: [],
+        obligationStatus: "unmet",
+        unmetRequiredOutputs: [
+          { kind: "committed-artifact", path: "drafts/**/*.md" },
+          { kind: "comment" },
+        ],
+        reason: "contract obligation unmet: 2 required output(s) without matching evidence",
+      });
+
+      const entry = JSON.parse(
+        (await readFile(join(rootDir, "index.jsonl"), "utf8")).trim(),
+      ) as RunArtifactIndexEntry;
+
+      expect(entry.validationStatus).toBe("obligation-unmet");
+      expect(entry.obligationStatus).toBe("unmet");
+      expect(entry.unmetRequiredOutputsCount).toBe(2);
+    });
+
+    it("obligation-unmet wins precedence over unaddressed-directives", async () => {
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+      });
+      await writer.record(makeResult(), makeCostRecord(), undefined, {
+        productive: false,
+        artifactCount: 0,
+        actionItemsAddressed: 0,
+        actionItemsAssigned: 0,
+        directivesUnaddressed: [{ issueNumber: 1, reason: "narrative-only-claim" }],
+        obligationStatus: "unmet",
+        unmetRequiredOutputs: [{ kind: "committed-artifact" }],
+      });
+
+      const entry = JSON.parse(
+        (await readFile(join(rootDir, "index.jsonl"), "utf8")).trim(),
+      ) as RunArtifactIndexEntry;
+
+      expect(entry.validationStatus).toBe("obligation-unmet");
+    });
+  });
 });

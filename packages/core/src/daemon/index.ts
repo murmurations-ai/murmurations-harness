@@ -987,7 +987,15 @@ export class Daemon {
                 wakeSummary: amendWakeSummaryWithValidation(result.wakeSummary, validation),
               }
             : result;
-        await this.#runArtifactWriter.record(recordedResult, result.costRecord, this.#logger);
+        // Phase 4 PR 5: pass the validation result so the index entry
+        // can record validationStatus, obligationStatus, and the
+        // unmet-required-output count for dashboard surfacing.
+        await this.#runArtifactWriter.record(
+          recordedResult,
+          result.costRecord,
+          this.#logger,
+          isCompleted(result) ? validation : undefined,
+        );
       }
 
       // Governance event routing — hand emitted events to the plugin,
