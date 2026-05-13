@@ -138,6 +138,13 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
           : a.validationStatus === "idle"
             ? dim(" [idle-val]")
             : "";
+    // Phase 4 PR 6a: surface behavior warnings (warning-only, does NOT
+    // affect productive/successfulWakes). Yellow to distinguish from the
+    // load-bearing red `obl-unmet`. Elided when count is 0/null.
+    const behStr =
+      a.behaviorWarningCount !== null && a.behaviorWarningCount > 0
+        ? yellow(` [beh:${String(a.behaviorWarningCount)}]`)
+        : "";
 
     const time = a.lastWake!.toISOString().slice(11, 16);
     const next = a.nextWakeCountdown !== "--" ? a.nextWakeCountdown.padEnd(8) : dim("--".padEnd(8));
@@ -154,7 +161,7 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
         : dim("░".repeat(BAR_WIDTH));
 
     lines.push(
-      `  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w${failStr}${permStr}${validStr}`,
+      `  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w${failStr}${permStr}${validStr}${behStr}`,
     );
   }
 

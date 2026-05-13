@@ -57,6 +57,13 @@ export interface AgentStatus {
    * successful evidence (Phase 4 PR 4). Null when obligationStatus is not "unmet".
    */
   readonly unmetRequiredOutputsCount: number | null;
+  /**
+   * Count of behavior warnings (Phase 4 PR 6a). Null when validation
+   * data is unavailable. Warning-only signal — does NOT mark the wake
+   * non-productive; rendered as a yellow `[beh:N]` badge for operator
+   * calibration.
+   */
+  readonly behaviorWarningCount: number | null;
   readonly stale: boolean; // stalled or no wake in > 48h
   readonly consecutiveFailures: number;
   readonly totalWakes: number;
@@ -148,6 +155,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         validationStatus: null,
         obligationStatus: null,
         unmetRequiredOutputsCount: null,
+        behaviorWarningCount: null,
         stale: false,
         consecutiveFailures: a.consecutiveFailures,
         totalWakes: a.totalWakes,
@@ -234,6 +242,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
       let validationStatus: AgentStatus["validationStatus"] = null;
       let obligationStatus: AgentStatus["obligationStatus"] = null;
       let unmetRequiredOutputsCount: AgentStatus["unmetRequiredOutputsCount"] = null;
+      let behaviorWarningCount: AgentStatus["behaviorWarningCount"] = null;
       try {
         const indexContent = await readFile(join(runsDir, agentId, "index.jsonl"), "utf8");
         const lines = indexContent
@@ -255,6 +264,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
             validationStatus?: string;
             obligationStatus?: string;
             unmetRequiredOutputsCount?: number;
+            behaviorWarningCount?: number;
           };
           costMicros = entry.llm?.costMicros ?? 0;
           costFormatted = `$${entry.llm?.costUsdFormatted ?? "0.0000"}`;
@@ -284,6 +294,9 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           if (typeof entry.unmetRequiredOutputsCount === "number") {
             unmetRequiredOutputsCount = entry.unmetRequiredOutputsCount;
           }
+          if (typeof entry.behaviorWarningCount === "number") {
+            behaviorWarningCount = entry.behaviorWarningCount;
+          }
         }
       } catch {
         /* no cost data */
@@ -302,6 +315,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         validationStatus,
         obligationStatus,
         unmetRequiredOutputsCount,
+        behaviorWarningCount,
         stale,
         consecutiveFailures: agentState.consecutiveFailures,
         totalWakes: agentState.totalWakes,
@@ -334,6 +348,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           validationStatus: null,
           obligationStatus: null,
           unmetRequiredOutputsCount: null,
+          behaviorWarningCount: null,
           stale: true,
           consecutiveFailures: 0,
           totalWakes: 0,
@@ -376,6 +391,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         validationStatus: null,
         obligationStatus: null,
         unmetRequiredOutputsCount: null,
+        behaviorWarningCount: null,
         stale,
         consecutiveFailures: 0,
         totalWakes: 0,
@@ -396,6 +412,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         validationStatus: null,
         obligationStatus: null,
         unmetRequiredOutputsCount: null,
+        behaviorWarningCount: null,
         stale: true,
         consecutiveFailures: 0,
         totalWakes: 0,

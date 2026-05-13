@@ -5,6 +5,7 @@ import {
   isFailed,
   parseSelfReflection,
   renderSignalForPrompt,
+  validateBehavior,
   validateWake,
   amendWakeSummaryWithValidation,
   isKilled,
@@ -1169,5 +1170,162 @@ describe("renderSignalForPrompt", () => {
     const result = renderSignalForPrompt({ ...baseSignal, trust: "semi-trusted" });
     expect(result).toContain("<semi-trusted-signal>");
     expect(result).toContain("</semi-trusted-signal>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// validateBehavior — Phase 4 PR 6a (warning-only)
+// ---------------------------------------------------------------------------
+
+describe("validateBehavior", () => {
+  const emptyResult = { actions: [], governanceEvents: [], wakeSummary: "" };
+
+  it("returns no warnings when wake summary is empty", () => {
+    const warnings = validateBehavior(emptyResult, []);
+    expect(warnings).toEqual([]);
+  });
+
+  it("flags a 'posted to #N' narrative claim without a matching receipt", () => {
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Posted my consent position to #864. Round complete.",
+    };
+    const warnings = validateBehavior(result, []);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({
+      kind: "narrative-action-without-evidence",
+      issueNumber: 864,
+      verb: "posted",
+    });
+  });
+
+  it("does NOT flag when a successful comment-issue receipt matches", () => {
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Posted my consent position to #864.",
+    };
+    const warnings = validateBehavior(result, [
+      {
+        action: { kind: "comment-issue" as const, issueNumber: 864, body: "consent" },
+        success: true,
+      },
+    ]);
+    expect(warnings).toEqual([]);
+  });
+
+  it("does NOT flag when a GitHub URL for the issue is in the wake summary", () => {
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "Posted consent at https://github.com/xeeban/emergent-praxis/issues/864#issuecomment-1234",
+    };
+    const warnings = validateBehavior(result, []);
+    expect(warnings).toEqual([]);
+  });
+
+  it("does NOT flag when a GitHub URL is in a governance event payload", () => {
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Posted consent on #864.",
+      governanceEvents: [
+        {
+          kind: "report",
+          payload: { url: "https://github.com/xeeban/emergent-praxis/issues/864" },
+        },
+      ],
+    };
+    const warnings = validateBehavior(result, []);
+    expect(warnings).toEqual([]);
+  });
+
+  it("flags a 'closed #N' claim without a matching close-issue receipt", () => {
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Closed #100 after Source ratified the proposal.",
+    };
+    const warnings = validateBehavior(result, []);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.verb).toBe("closed");
+    expect(warnings[0]?.issueNumber).toBe(100);
+  });
+
+  it("flags a 'labeled #N' claim without a matching label-issue receipt", () => {
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Labeled #205 with priority:high.",
+    };
+    const warnings = validateBehavior(result, []);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.verb).toBe("labeled");
+  });
+
+  it("collects multiple warnings independently", () => {
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Posted on #100 and closed #200 and labeled #300 with done. None had receipts.",
+    };
+    const warnings = validateBehavior(result, []);
+    expect(warnings).toHaveLength(3);
+    expect(warnings.map((w) => w.issueNumber).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual([
+      100, 200, 300,
+    ]);
+  });
+
+  it("word boundary: 'posted on #5' does NOT match a #50 receipt", () => {
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Posted on #5.",
+    };
+    const warnings = validateBehavior(result, [
+      {
+        action: { kind: "comment-issue" as const, issueNumber: 50, body: "x" },
+        success: true,
+      },
+    ]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.issueNumber).toBe(5);
+  });
+});
+
+describe("validateWake — behaviorWarnings integration (warning-only)", () => {
+  const ctx = { actionItems: [], signals: [], agentId: "test", groupIds: [] };
+
+  it("includes behaviorWarnings on the validation result when narrative claims have no evidence", () => {
+    const result = {
+      actions: [],
+      outputs: [],
+      governanceEvents: [],
+      wakeSummary: "Posted on #864 (no receipt, no URL).",
+    };
+    const v = validateWake(ctx, result, []);
+    expect(v.behaviorWarnings).toBeDefined();
+    expect(v.behaviorWarnings).toHaveLength(1);
+  });
+
+  it("does NOT mark wake non-productive when only behaviorWarnings fire (warning-only)", () => {
+    const result = {
+      actions: [],
+      outputs: [],
+      governanceEvents: [],
+      // Successful action + a hallucinated claim on a different issue.
+      wakeSummary: "Posted on #999 (hallucinated; no evidence).",
+    };
+    const receipts = [
+      { action: { kind: "label-issue" as const, issueNumber: 1, label: "x" }, success: true },
+    ];
+    const v = validateWake(ctx, result, receipts);
+    expect(v.productive).toBe(true);
+    expect(v.behaviorWarnings).toHaveLength(1);
+  });
+
+  it("omits behaviorWarnings field when no warnings fire", () => {
+    const result = {
+      actions: [],
+      outputs: [],
+      governanceEvents: [],
+      wakeSummary: "Routine wake, no issue references.",
+    };
+    const v = validateWake(ctx, result, []);
+    expect(v.behaviorWarnings).toBeUndefined();
   });
 });

@@ -764,8 +764,39 @@ export interface WakeValidationResult {
    * successful evidence. Populated only when `obligationStatus` is `"unmet"`.
    */
   readonly unmetRequiredOutputs?: readonly { readonly kind: string; readonly path?: string }[];
+  /**
+   * Behavior warnings from `validateBehavior` (Phase 4 PR 6a, ADR-0047 §2,
+   * ADR-0048 §1). Each warning describes a narrative claim in `wakeSummary`
+   * that lacks structured evidence (successful action receipt or URL).
+   *
+   * **Warning-only in v0.8.0** — these do NOT affect `productive`,
+   * `idleWakes`, or `successfulWakes`. They surface on the dashboard so
+   * operators can calibrate before behavior validation is promoted to
+   * hard-fail in v0.8.1 (per ADR-0048 §Decision 2).
+   */
+  readonly behaviorWarnings?: readonly BehaviorWarning[];
   /** If not productive, why. */
   readonly reason?: string;
+}
+
+/**
+ * One behavior warning from `validateBehavior` (Phase 4 PR 6a, ADR-0048 §1).
+ *
+ * Warning-only in v0.8.0: the wake's `productive` flag is not affected.
+ * Surfaced on the dashboard for operator calibration before v0.8.1
+ * promotes behavior validation to hard-fail.
+ */
+export interface BehaviorWarning {
+  /** Pattern that fired. v1 has a single kind; future kinds extend the
+   *  union as new patterns are added (always at minor version bumps to
+   *  let dashboards version-gate display). */
+  readonly kind: "narrative-action-without-evidence";
+  /** Human-readable description of the unmatched claim. */
+  readonly message: string;
+  /** Issue number the agent's narrative referenced, when detectable. */
+  readonly issueNumber?: number;
+  /** Detected narrative verb (e.g. "posted", "commented", "closed", "committed"). */
+  readonly verb?: string;
 }
 
 type GithubIssueSignal = Extract<Signal, { kind: "github-issue" }>;
@@ -911,6 +942,117 @@ const isOutputSatisfied = (
 };
 
 /**
+ * Behavior validation (Phase 4 PR 6a, ADR-0047 §2, ADR-0048 §1).
+ *
+ * Scans `wakeSummary` for action-verb patterns that reference issue numbers
+ * ("posted to #123", "closed issue #456", "committed to drafts/foo.md") and
+ * checks each against structural evidence:
+ *
+ *   - successful WakeActionReceipt of the matching kind + issueNumber
+ *   - GitHub issue URL for the same issue number (per harness#364 Part A)
+ *
+ * Unmatched claims produce a `BehaviorWarning`. **Warning-only in v0.8.0**:
+ * results are surfaced on dashboards and recorded on the wake but do not
+ * affect `productive`/`idleWakes`/`successfulWakes`. v0.8.1 will promote
+ * to hard-fail after 14d composite-permission soak per the original
+ * ADR-0048 calendar (deferred from v0.8.0).
+ *
+ * Brutally simple v1 per the project rule: regex patterns over wake
+ * summary, no NLP. False-positive rate is calibrated against real wake
+ * data during the warning-only window. Operators can scrub their
+ * narrative phrasing if a specific pattern is over-firing.
+ */
+export const validateBehavior = (
+  result: {
+    actions: readonly WakeAction[];
+    governanceEvents: readonly EmittedGovernanceEvent[];
+    wakeSummary: string;
+  },
+  actionReceipts: readonly WakeActionReceipt[],
+): readonly BehaviorWarning[] => {
+  const warnings: BehaviorWarning[] = [];
+  const summary = result.wakeSummary;
+  if (summary.length === 0) return warnings;
+
+  // Pre-compute governance event text for URL evidence checks.
+  const govStrings: string[] = [];
+  for (const g of result.governanceEvents) {
+    try {
+      govStrings.push(JSON.stringify(g));
+    } catch {
+      govStrings.push("");
+    }
+  }
+
+  const hasUrlEvidence = (issueNum: number): boolean => {
+    const re = new RegExp(`github\\.com/[^/]+/[^/]+/issues/${String(issueNum)}(?!\\d)`, "i");
+    if (re.test(summary)) return true;
+    return govStrings.some((s) => s !== "" && re.test(s));
+  };
+
+  const hasReceiptOfKind = (issueNum: number, actionKind: WakeAction["kind"]): boolean =>
+    actionReceipts.some(
+      (r) => r.success && r.action.kind === actionKind && r.action.issueNumber === issueNum,
+    );
+
+  // Pattern: "(posted|commented|replied|left a comment|added a comment) (on|to|at)? (issue)? #N"
+  // Allow up to ~80 chars between the verb and the #N to catch reasonable
+  // phrasing like "posted my consent position on issue #864". Non-greedy
+  // (`{0,80}?`) so a sentence with multiple `#N` references attributes the
+  // FIRST one to this verb, not the last. Word-boundary on the trailing
+  // digit so `#5` does not match `#54`.
+  const commentClaimRegex =
+    /\b(posted|commented|replied|left a comment|added a comment)\b(?:[^.\n]{0,80}?)#(\d+)(?!\d)/gi;
+  const closeClaimRegex = /\b(closed|resolved)\b(?:[^.\n]{0,80}?)#(\d+)(?!\d)/gi;
+  const labelClaimRegex =
+    /\b(labeled|labelled|tagged|added (?:the )?label)\b(?:[^.\n]{0,80}?)#(\d+)(?!\d)/gi;
+
+  for (const match of summary.matchAll(commentClaimRegex)) {
+    const verb = match[1]?.toLowerCase() ?? "posted";
+    const n = Number(match[2]);
+    if (!Number.isFinite(n)) continue;
+    if (hasReceiptOfKind(n, "comment-issue")) continue;
+    if (hasUrlEvidence(n)) continue;
+    warnings.push({
+      kind: "narrative-action-without-evidence",
+      message: `Narrative claims "${verb} … #${String(n)}" but no successful comment-issue receipt or issue URL`,
+      issueNumber: n,
+      verb,
+    });
+  }
+
+  for (const match of summary.matchAll(closeClaimRegex)) {
+    const verb = match[1]?.toLowerCase() ?? "closed";
+    const n = Number(match[2]);
+    if (!Number.isFinite(n)) continue;
+    if (hasReceiptOfKind(n, "close-issue")) continue;
+    if (hasUrlEvidence(n)) continue;
+    warnings.push({
+      kind: "narrative-action-without-evidence",
+      message: `Narrative claims "${verb} … #${String(n)}" but no successful close-issue receipt or issue URL`,
+      issueNumber: n,
+      verb,
+    });
+  }
+
+  for (const match of summary.matchAll(labelClaimRegex)) {
+    const verb = match[1]?.toLowerCase() ?? "labeled";
+    const n = Number(match[2]);
+    if (!Number.isFinite(n)) continue;
+    if (hasReceiptOfKind(n, "label-issue")) continue;
+    if (hasUrlEvidence(n)) continue;
+    warnings.push({
+      kind: "narrative-action-without-evidence",
+      message: `Narrative claims "${verb} … #${String(n)}" but no successful label-issue receipt or issue URL`,
+      issueNumber: n,
+      verb,
+    });
+  }
+
+  return warnings;
+};
+
+/**
  * Default validation: checks artifact count, action item coverage, and
  * structured-evidence backing for any source-directive items in signals.
  * Used when no custom validator is configured.
@@ -919,6 +1061,10 @@ const isOutputSatisfied = (
  * output is checked against successful action receipts. An unmet required
  * output marks the wake non-productive even if the legacy heuristic
  * (artifactCount > 0, no unaddressed directives) would have passed.
+ *
+ * Phase 4 PR 6a: additionally runs `validateBehavior` and attaches any
+ * warnings to the result. Warnings are **warning-only**: they do not
+ * affect `productive` or the legacy heuristic.
  */
 export const validateWake = (
   context: {
@@ -1103,6 +1249,12 @@ export const validateWake = (
           ? `${String(actionItemsAssigned)} action items assigned but none addressed`
           : "wake completed but produced no artifacts";
 
+  // Phase 4 PR 6a: behavior validation runs alongside outcome validation
+  // but is warning-only — its findings do NOT affect `productive` or
+  // any other counter. They surface on the dashboard for operator
+  // calibration before v0.8.1 promotes to hard-fail.
+  const behaviorWarnings = validateBehavior(result, actionReceipts);
+
   const baseResult: WakeValidationResult = {
     productive,
     artifactCount,
@@ -1111,6 +1263,7 @@ export const validateWake = (
     directivesUnaddressed,
     ...(obligationStatus !== undefined ? { obligationStatus } : {}),
     ...(unmetRequiredOutputs !== undefined ? { unmetRequiredOutputs } : {}),
+    ...(behaviorWarnings.length > 0 ? { behaviorWarnings } : {}),
     ...(reason !== undefined ? { reason } : {}),
   };
   return baseResult;
