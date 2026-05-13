@@ -781,6 +781,34 @@ const buildIssueReferenceMatchers = (issueNum: number): readonly RegExp[] => {
 };
 
 /**
+ * URL-form matcher for resolving "does this text reference a real GitHub
+ * issue by URL". Used as structural evidence (Part A of harness#364):
+ * subscription-CLI agents post comments via their subprocess tool layer
+ * — these never reach `result.actions`/`actionReceipts`, but the URL
+ * typically lands in `wakeSummary` or a governance event payload (e.g.
+ * `https://github.com/xeeban/emergent-praxis/issues/845` or
+ * `.../issues/845#issuecomment-NNN`).
+ *
+ * Rationale: a fully-qualified GitHub URL is much harder to hallucinate
+ * than a plain `#N` reference, and an agent emitting it has typically
+ * received it from a real tool call's response payload. Treating these
+ * as structural evidence eliminates the false-positive
+ * `narrative-only-claim` that fires on every consent-round response from
+ * subscription-CLI agents in EP (engineering-agent's 2026-05-12 audit).
+ *
+ * Full-fidelity fix (Part B) is an opt-in `verifiedActions` field on
+ * `AgentResult` populated by subscription-CLI executors from confirmed
+ * subprocess operations — deferred to v0.8.1 per ADR-0048.
+ */
+const buildGithubIssueUrlMatcher = (issueNum: number): RegExp => {
+  const n = String(issueNum);
+  // github.com/<owner>/<repo>/issues/<n> with word boundary on the
+  // trailing digit so `/issues/845` does not match `/issues/8450`.
+  // Also handles the comment-anchor form `/issues/<n>#issuecomment-...`.
+  return new RegExp(`github\\.com/[^/]+/[^/]+/issues/${n}(?!\\d)`, "i");
+};
+
+/**
  * Default validation: checks artifact count, action item coverage, and
  * structured-evidence backing for any source-directive items in signals.
  * Used when no custom validator is configured.
@@ -899,6 +927,19 @@ export const validateWake = (
     const hasUnexecutedAction = result.actions.some((a) => a.issueNumber === issueNum);
     if (hasUnexecutedAction) {
       directivesUnaddressed.push({ issueNumber: issueNum, reason: "no-successful-receipt" });
+      continue;
+    }
+
+    // harness#364 Part A: a fully-qualified GitHub issue URL in the wake
+    // summary or any governance event counts as structural evidence. This
+    // covers subscription-CLI agents whose subprocess-internal comment
+    // posts never land in `result.actions` but typically leave a URL in
+    // the wake summary (the tool-call response includes the issue URL).
+    const urlMatcher = buildGithubIssueUrlMatcher(issueNum);
+    if (urlMatcher.test(result.wakeSummary)) {
+      continue;
+    }
+    if (govEventStrings.some((s) => s !== "" && urlMatcher.test(s))) {
       continue;
     }
 
