@@ -416,6 +416,113 @@ describe("validateWake", () => {
     expect(v.reason).toContain("not addressed by structured evidence");
   });
 
+  // -------------------------------------------------------------------------
+  // harness#364 Part A — GitHub issue URL counts as structural evidence
+  // -------------------------------------------------------------------------
+
+  it("treats a full GitHub issue URL in wakeSummary as structural evidence (harness#364)", () => {
+    // Reproduces engineering-agent's 2026-05-11 wake on EP #845: comment
+    // posted via subscription-CLI subprocess; URL lands in wakeSummary
+    // but no receipt exists. Before this fix, the wake was flagged
+    // narrative-only-claim → idle.
+    const directive = makeIssueSignal(845, ["source-directive", "assigned:engineering-agent"]);
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "Posted consent at https://github.com/xeeban/emergent-praxis/issues/845#issuecomment-4438893756. Round complete.",
+    };
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "engineering-agent" }),
+      result,
+      [],
+    );
+    expect(v.directivesUnaddressed).toEqual([]);
+  });
+
+  it("treats a bare issue URL (no comment anchor) as structural evidence", () => {
+    const directive = makeIssueSignal(845, ["source-directive", "assigned:engineering-agent"]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Done — see https://github.com/xeeban/emergent-praxis/issues/845",
+    };
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "engineering-agent" }),
+      result,
+      [],
+    );
+    expect(v.directivesUnaddressed).toEqual([]);
+  });
+
+  it("URL evidence works in governance event payloads too", () => {
+    const directive = makeIssueSignal(845, ["source-directive", "assigned:engineering-agent"]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Round complete.",
+      governanceEvents: [
+        {
+          kind: "report",
+          payload: {
+            note: "Posted consent at https://github.com/xeeban/emergent-praxis/issues/845",
+          },
+        },
+      ],
+    };
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "engineering-agent" }),
+      result,
+      [],
+    );
+    expect(v.directivesUnaddressed).toEqual([]);
+  });
+
+  it("URL word boundary: /issues/845 in the wake does not satisfy a directive on #84", () => {
+    // Directive on #84, but wakeSummary mentions #84 narratively AND has a
+    // URL pointing at #845 — the URL must NOT count as evidence for #84,
+    // and the bare #84 mention should still be flagged narrative-only-claim.
+    const directive = makeIssueSignal(84, ["source-directive", "assigned:engineering-agent"]);
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "Reviewed #84 narratively. Filed related URL: https://github.com/xeeban/emergent-praxis/issues/845",
+    };
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "engineering-agent" }),
+      result,
+      [],
+    );
+    expect(v.directivesUnaddressed).toEqual([{ issueNumber: 84, reason: "narrative-only-claim" }]);
+  });
+
+  it("URL word boundary: /issues/845 does not satisfy a directive on issue 8450", () => {
+    const directive = makeIssueSignal(8450, ["source-directive", "assigned:engineering-agent"]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Posted at https://github.com/xeeban/emergent-praxis/issues/845",
+    };
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "engineering-agent" }),
+      result,
+      [],
+    );
+    expect(v.directivesUnaddressed).toEqual([
+      { issueNumber: 8450, reason: "no-structured-action" },
+    ]);
+  });
+
+  it("bare #845 reference without URL is still narrative-only-claim (URLs are the load-bearing signal)", () => {
+    const directive = makeIssueSignal(845, ["source-directive", "assigned:engineering-agent"]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "I have posted my CONSENT to issue #845.",
+    };
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "engineering-agent" }),
+      result,
+      [],
+    );
+    expect(v.directivesUnaddressed).toEqual([{ issueNumber: 845, reason: "narrative-only-claim" }]);
+  });
+
   it("flags a directive as no-structured-action when the wake produced nothing referring to it", () => {
     const directive = makeIssueSignal(571, ["source-directive", "assigned:architecture-agent"]);
     const v = validateWake(
