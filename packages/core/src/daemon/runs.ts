@@ -196,6 +196,14 @@ export interface RunArtifactIndexEntry {
    */
   readonly unmetRequiredOutputsCount?: number;
   /**
+   * Count of behavior warnings emitted by `validateBehavior` (Phase 4
+   * PR 6a, ADR-0047 §2, ADR-0048 §1). Warning-only signal — does NOT
+   * affect `productive` or `successfulWakes`. Dashboards surface this
+   * as a yellow badge so operators can calibrate before v0.8.1 promotes
+   * behavior validation to hard-fail.
+   */
+  readonly behaviorWarningCount?: number;
+  /**
    * Subscription-CLI audit context (T-CLI-9 / harness#301).
    * Present on all subscription-CLI wakes; absent for API-provider wakes.
    */
@@ -356,6 +364,9 @@ const buildIndexEntry = (
             : {}),
           ...(validation.unmetRequiredOutputs !== undefined
             ? { unmetRequiredOutputsCount: validation.unmetRequiredOutputs.length }
+            : {}),
+          ...(validation.behaviorWarnings !== undefined
+            ? { behaviorWarningCount: validation.behaviorWarnings.length }
             : {}),
         }
       : {}),
