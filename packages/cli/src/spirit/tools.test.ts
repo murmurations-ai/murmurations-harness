@@ -81,6 +81,88 @@ describe("Spirit tools — read_file", () => {
   });
 });
 
+describe("Spirit tools — write_file (harness#366 trusted-surface protection)", () => {
+  let root = "";
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), `spirit-test-${randomUUID().slice(0, 8)}-`));
+    mkdirSync(join(root, "agents", "alpha"), { recursive: true });
+    writeFileSync(join(root, "agents", "alpha", "role.md"), "# original role\n", "utf8");
+    writeFileSync(join(root, "agents", "alpha", "soul.md"), "# original soul\n", "utf8");
+    mkdirSync(join(root, "agents", "alpha", "prompts"), { recursive: true });
+    writeFileSync(join(root, "agents", "alpha", "prompts", "wake.md"), "wake task\n", "utf8");
+    mkdirSync(join(root, "murmuration"), { recursive: true });
+    writeFileSync(join(root, "murmuration", "soul.md"), "# original mur soul\n", "utf8");
+    writeFileSync(join(root, "harness.yaml"), "version: 0\n", "utf8");
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const getTool = (name: string) => {
+    const tools = buildSpiritTools({ rootDir: root, send: noopSend });
+    const tool = tools.find((t) => t.name === name);
+    if (!tool) throw new Error(`tool ${name} not found`);
+    return tool;
+  };
+
+  it("refuses to overwrite agents/<id>/role.md (Phase 4 PR 3 trusted-segment surface)", async () => {
+    const tool = getTool("write_file");
+    const result = await tool.execute({
+      path: "agents/alpha/role.md",
+      content: "# rewritten\n",
+    });
+    expect(result).toMatch(/operator config/);
+    expect(result).toMatch(/harness#366/);
+  });
+
+  it("refuses to overwrite agents/<id>/soul.md", async () => {
+    const tool = getTool("write_file");
+    const result = await tool.execute({
+      path: "agents/alpha/soul.md",
+      content: "# rewritten\n",
+    });
+    expect(result).toMatch(/operator config/);
+  });
+
+  it("refuses to overwrite murmuration/soul.md", async () => {
+    const tool = getTool("write_file");
+    const result = await tool.execute({
+      path: "murmuration/soul.md",
+      content: "# rewritten\n",
+    });
+    expect(result).toMatch(/operator config/);
+  });
+
+  it("refuses to overwrite harness.yaml", async () => {
+    const tool = getTool("write_file");
+    const result = await tool.execute({ path: "harness.yaml", content: "version: 999\n" });
+    expect(result).toMatch(/operator config/);
+  });
+
+  it("allows writes to agents/<id>/prompts/wake.md (only role.md and soul.md are blocked)", async () => {
+    const tool = getTool("write_file");
+    const result = await tool.execute({
+      path: "agents/alpha/prompts/wake.md",
+      content: "new wake\n",
+    });
+    expect(result).toMatch(/wrote/);
+  });
+
+  it("allows writes to a normal artifact path", async () => {
+    const tool = getTool("write_file");
+    const result = await tool.execute({ path: "drafts/article.md", content: "# draft\n" });
+    expect(result).toMatch(/wrote/);
+  });
+
+  it("read_file still works on the protected files (only writes are blocked)", async () => {
+    const tool = getTool("read_file");
+    const result = await tool.execute({ path: "agents/alpha/role.md" });
+    expect(result).toBe("# original role\n");
+  });
+});
+
 describe("Spirit tools — list_dir", () => {
   let root = "";
 
