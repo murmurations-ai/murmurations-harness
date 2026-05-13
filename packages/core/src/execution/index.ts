@@ -744,6 +744,26 @@ export interface WakeValidationResult {
    * as addressing it (Boundary 5).
    */
   readonly directivesUnaddressed: readonly UnaddressedDirective[];
+  /**
+   * Contract obligation status (Phase 4 PR 4, ADR-0047 §2 obligation sub-contract,
+   * ADR-0048 §1).
+   *
+   *   `satisfied`     — every `requiredOutput` has matching successful evidence.
+   *   `unmet`         — at least one `requiredOutput` is missing — wake is
+   *                     not productive even if the legacy heuristic would
+   *                     have passed.
+   *   `not-applicable` — no contract supplied, or `requiredOutputs` is empty;
+   *                     the legacy heuristic is the sole gate.
+   *
+   * Absent when `validateWake` was called without a contract (pre-Phase-4
+   * test paths and legacy harness consumers).
+   */
+  readonly obligationStatus?: "satisfied" | "unmet" | "not-applicable";
+  /**
+   * The specific `requiredOutputs` from the contract that have no matching
+   * successful evidence. Populated only when `obligationStatus` is `"unmet"`.
+   */
+  readonly unmetRequiredOutputs?: readonly { readonly kind: string; readonly path?: string }[];
   /** If not productive, why. */
   readonly reason?: string;
 }
@@ -809,9 +829,96 @@ const buildGithubIssueUrlMatcher = (issueNum: number): RegExp => {
 };
 
 /**
+ * Brutally-simple glob matcher (Phase 4 PR 4 v1).
+ *
+ * Supports prefix + suffix matching only:
+ *   - The literal text before the first `*` becomes the required prefix.
+ *   - The literal text after the last `*` becomes the required suffix.
+ *   - Anything between is treated as "any path".
+ *
+ * Examples:
+ *   `drafts/**\/*.md` → prefix `drafts/`, suffix `.md`  → matches `drafts/foo/bar.md`
+ *   `agents/*\/role.md` → prefix `agents/`, suffix `/role.md` → matches `agents/x/role.md`
+ *   `*.md` → prefix ``, suffix `.md` → matches `foo.md`
+ *
+ * Tightening to full glob semantics (per-segment `*`, character classes,
+ * `?` single-char) is deferred to v0.8.1 per ADR-0048 / "v1 DSLs brutally
+ * simple". Operators who need exact path matching can spell out the full
+ * path with no wildcards — that takes the exact-match fast path.
+ */
+const pathMatchesGlob = (actual: string, glob: string): boolean => {
+  if (glob === actual) return true;
+  const firstStar = glob.indexOf("*");
+  if (firstStar === -1) return false;
+  const prefix = glob.slice(0, firstStar);
+  if (!actual.startsWith(prefix)) return false;
+  const lastStar = glob.lastIndexOf("*");
+  const suffix = glob.slice(lastStar + 1);
+  return suffix.length === 0 || actual.endsWith(suffix);
+};
+
+/**
+ * Check one required output against the wake's actual evidence (Phase 4 PR 4).
+ *
+ * The mapping from `RequiredOutput.kind` to evidence is intentionally lax for
+ * v1: any successful receipt of the matching action kind satisfies the
+ * obligation, plus path-glob checks where a `path` is declared. The contract
+ * narrative remains the agent's authoritative guide on _what_ to produce; the
+ * validator's job is to refuse "I claim I did it" wakes that have no
+ * structured evidence at all (Boundary 5 generalized).
+ */
+const isOutputSatisfied = (
+  req: { readonly kind: string; readonly path?: string },
+  result: {
+    readonly actions: readonly WakeAction[];
+    readonly outputs: readonly AgentOutputArtifact[];
+    readonly governanceEvents: readonly EmittedGovernanceEvent[];
+    readonly wakeSummary: string;
+  },
+  receipts: readonly WakeActionReceipt[],
+): boolean => {
+  const successfulReceiptOfKind = (actionKind: WakeAction["kind"]): boolean =>
+    receipts.some((r) => r.success && r.action.kind === actionKind);
+
+  switch (req.kind) {
+    case "summary":
+      return result.wakeSummary.trim().length > 0;
+    case "runtime-artifact":
+      // Runtime artifacts (per-wake digests) are produced by the daemon's
+      // RunArtifactWriter unconditionally on wake completion. If validateWake
+      // is being called, the wake completed, so a runtime artifact exists.
+      return true;
+    case "committed-artifact":
+    case "commit":
+      return receipts.some((r) => {
+        if (!r.success || r.action.kind !== "commit-file") return false;
+        if (req.path === undefined) return true;
+        const filePath = r.action.filePath;
+        if (filePath === undefined) return false;
+        return pathMatchesGlob(filePath, req.path);
+      });
+    case "comment":
+      return successfulReceiptOfKind("comment-issue");
+    case "issue":
+      return successfulReceiptOfKind("create-issue");
+    case "governance-event":
+      return result.governanceEvents.length > 0;
+    default:
+      // Unknown kinds default to "satisfied" — forward-compat with future
+      // contract extensions. The validator is a safety net, not a gatekeeper.
+      return true;
+  }
+};
+
+/**
  * Default validation: checks artifact count, action item coverage, and
  * structured-evidence backing for any source-directive items in signals.
  * Used when no custom validator is configured.
+ *
+ * Phase 4 PR 4: when `contract.requiredOutputs` is non-empty, each required
+ * output is checked against successful action receipts. An unmet required
+ * output marks the wake non-productive even if the legacy heuristic
+ * (artifactCount > 0, no unaddressed directives) would have passed.
  */
 export const validateWake = (
   context: {
@@ -828,6 +935,12 @@ export const validateWake = (
      */
     agentId: string;
     groupIds: readonly string[];
+    /**
+     * Optional ExecutionContract (Phase 4 PR 4, ADR-0047, ADR-0048). When
+     * supplied and `requiredOutputs` is non-empty, obligation validation
+     * runs and may override the heuristic productive flag.
+     */
+    contract?: ExecutionContract;
   },
   result: {
     actions: readonly WakeAction[];
@@ -951,34 +1064,56 @@ export const validateWake = (
     directivesUnaddressed.push({ issueNumber: issueNum, reason: "no-structured-action" });
   }
 
-  const productive =
+  // Phase 4 PR 4: contract obligation check.
+  let obligationStatus: "satisfied" | "unmet" | "not-applicable" | undefined;
+  let unmetRequiredOutputs: { readonly kind: string; readonly path?: string }[] | undefined;
+  if (context.contract !== undefined) {
+    if (context.contract.requiredOutputs.length === 0) {
+      obligationStatus = "not-applicable";
+    } else {
+      const unmet = context.contract.requiredOutputs.filter(
+        (req) => !isOutputSatisfied(req, result, actionReceipts),
+      );
+      if (unmet.length === 0) {
+        obligationStatus = "satisfied";
+      } else {
+        obligationStatus = "unmet";
+        unmetRequiredOutputs = unmet.map((req) => ({
+          kind: req.kind,
+          ...(req.path !== undefined ? { path: req.path } : {}),
+        }));
+      }
+    }
+  }
+
+  const heuristicProductive =
     directivesUnaddressed.length === 0 && (artifactCount > 0 || actionItemsAddressed > 0);
+  // Obligation enforcement: an unmet obligation marks the wake non-productive
+  // even when the heuristic would have passed. `not-applicable` and
+  // `satisfied` defer to the heuristic; `unmet` overrides to false.
+  const productive = obligationStatus === "unmet" ? false : heuristicProductive;
 
   const reason = productive
     ? undefined
-    : directivesUnaddressed.length > 0
-      ? `${String(directivesUnaddressed.length)} directive(s) in signals not addressed by structured evidence`
-      : actionItemsAssigned > 0
-        ? `${String(actionItemsAssigned)} action items assigned but none addressed`
-        : "wake completed but produced no artifacts";
+    : obligationStatus === "unmet"
+      ? `contract obligation unmet: ${String(unmetRequiredOutputs?.length ?? 0)} required output(s) without matching evidence`
+      : directivesUnaddressed.length > 0
+        ? `${String(directivesUnaddressed.length)} directive(s) in signals not addressed by structured evidence`
+        : actionItemsAssigned > 0
+          ? `${String(actionItemsAssigned)} action items assigned but none addressed`
+          : "wake completed but produced no artifacts";
 
-  if (reason !== undefined) {
-    return {
-      productive,
-      artifactCount,
-      actionItemsAddressed,
-      actionItemsAssigned,
-      directivesUnaddressed,
-      reason,
-    };
-  }
-  return {
+  const baseResult: WakeValidationResult = {
     productive,
     artifactCount,
     actionItemsAddressed,
     actionItemsAssigned,
     directivesUnaddressed,
+    ...(obligationStatus !== undefined ? { obligationStatus } : {}),
+    ...(unmetRequiredOutputs !== undefined ? { unmetRequiredOutputs } : {}),
+    ...(reason !== undefined ? { reason } : {}),
   };
+  return baseResult;
 };
 
 /**

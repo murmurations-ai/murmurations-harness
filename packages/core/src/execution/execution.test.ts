@@ -786,6 +786,145 @@ describe("validateWake", () => {
       401, 402,
     ]);
   });
+
+  // -------------------------------------------------------------------------
+  // Phase 4 PR 4 — contract obligation enforcement (ADR-0047, ADR-0048)
+  // -------------------------------------------------------------------------
+
+  const baseBudget = {
+    maxInputTokens: 0,
+    maxOutputTokens: 0,
+    maxWallClockMs: 60000,
+    model: { tier: "balanced" as const, provider: "u", model: "u", maxTokens: 4096 },
+    maxCostMicros: 0,
+  };
+
+  const mkContract = (
+    requiredOutputs: readonly {
+      readonly kind:
+        | "summary"
+        | "runtime-artifact"
+        | "committed-artifact"
+        | "comment"
+        | "issue"
+        | "commit"
+        | "governance-event";
+      readonly path?: string;
+      readonly description?: string;
+    }[],
+  ) => ({
+    wakeReason: { kind: "scheduled" as const, cronExpression: "0 9 * * *" },
+    wakeMode: "individual" as const,
+    objective: "test objective",
+    requiredOutputs: requiredOutputs.map((r) => ({
+      kind: r.kind,
+      ...(r.path !== undefined ? { path: r.path } : {}),
+      description: r.description ?? "test required output",
+    })),
+    actionItems: [],
+    completionConditions: [],
+    verification: [],
+    allowedSideEffects: ["read" as const, "write" as const],
+    budget: baseBudget,
+    approval: { mode: "none" as const },
+  });
+
+  it("contract not-applicable when requiredOutputs is empty (heuristic still applies)", () => {
+    const receipts = [
+      { action: { kind: "label-issue" as const, issueNumber: 1, label: "x" }, success: true },
+    ];
+    const v = validateWake({ ...mkCtx(), contract: mkContract([]) }, emptyResult, receipts);
+    expect(v.obligationStatus).toBe("not-applicable");
+    expect(v.productive).toBe(true);
+  });
+
+  it("contract satisfied when all required outputs have matching successful evidence", () => {
+    const contract = mkContract([
+      { kind: "committed-artifact", path: "drafts/**/*.md" },
+      { kind: "comment" },
+    ]);
+    const receipts = [
+      {
+        action: {
+          kind: "commit-file" as const,
+          filePath: "drafts/2026-05/article.md",
+          fileContent: "x",
+        },
+        success: true,
+      },
+      {
+        action: { kind: "comment-issue" as const, issueNumber: 100, body: "done" },
+        success: true,
+      },
+    ];
+    const v = validateWake({ ...mkCtx(), contract }, emptyResult, receipts);
+    expect(v.obligationStatus).toBe("satisfied");
+    expect(v.productive).toBe(true);
+    expect(v.unmetRequiredOutputs).toBeUndefined();
+  });
+
+  it("contract unmet when a required output has no matching evidence — overrides heuristic productive", () => {
+    const contract = mkContract([
+      { kind: "committed-artifact", path: "drafts/**/*.md" },
+      { kind: "comment" },
+    ]);
+    // Only the comment landed; the committed-artifact obligation is unmet.
+    const receipts = [
+      {
+        action: { kind: "comment-issue" as const, issueNumber: 100, body: "done" },
+        success: true,
+      },
+    ];
+    const v = validateWake({ ...mkCtx(), contract }, emptyResult, receipts);
+    expect(v.obligationStatus).toBe("unmet");
+    expect(v.productive).toBe(false);
+    expect(v.unmetRequiredOutputs).toHaveLength(1);
+    expect(v.unmetRequiredOutputs?.[0]).toEqual({
+      kind: "committed-artifact",
+      path: "drafts/**/*.md",
+    });
+    expect(v.reason).toContain("contract obligation unmet");
+  });
+
+  it("path glob mismatch is unmet — commit to wrong directory does not satisfy", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "drafts/**/*.md" }]);
+    const receipts = [
+      {
+        action: {
+          kind: "commit-file" as const,
+          filePath: "docs/legal/refund.md",
+          fileContent: "x",
+        },
+        success: true,
+      },
+    ];
+    const v = validateWake({ ...mkCtx(), contract }, emptyResult, receipts);
+    expect(v.obligationStatus).toBe("unmet");
+  });
+
+  it("runtime-artifact required output is always satisfied (digest writer runs on completion)", () => {
+    const contract = mkContract([{ kind: "runtime-artifact", path: ".murmuration/runs/**/*.md" }]);
+    const v = validateWake({ ...mkCtx(), contract }, emptyResult, []);
+    expect(v.obligationStatus).toBe("satisfied");
+    // But the heuristic still flags zero artifacts, so productive stays false.
+    expect(v.productive).toBe(false);
+  });
+
+  it("governance-event required output is satisfied when any governance event was emitted", () => {
+    const contract = mkContract([{ kind: "governance-event" }]);
+    const result = {
+      ...emptyResult,
+      governanceEvents: [{ kind: "test", payload: {} }],
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("obligationStatus is absent when no contract is passed (legacy callers unchanged)", () => {
+    const v = validateWake(mkCtx(), emptyResult, []);
+    expect(v.obligationStatus).toBeUndefined();
+    expect(v.unmetRequiredOutputs).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
