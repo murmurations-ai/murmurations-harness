@@ -104,6 +104,25 @@ const safePath = (rootDir: string, path: string, mode: "read" | "write" = "read"
         `writing under ".murmuration/" is not allowed — that subtree is daemon-authored runtime state`,
       );
     }
+
+    // Operator config files — identity + governance authority. ADR-0048 PR 3
+    // injects role.md content as a `trusted` system-prompt segment; if an
+    // agent could rewrite its own role.md it could escalate by editing
+    // `done_when`, clearing `approval_required_for`, or planting prompt
+    // injection in any frontmatter field. harness#366.
+    //
+    // Normalize separators once so the regex catches Windows and POSIX paths.
+    const relPosix = rel.replace(/\\/g, "/");
+    if (
+      /^agents\/[^/]+\/role\.md$/.test(relPosix) ||
+      /^agents\/[^/]+\/soul\.md$/.test(relPosix) ||
+      relPosix === "murmuration/soul.md" ||
+      relPosix === "harness.yaml"
+    ) {
+      throw new PathSafetyError(
+        `writing operator config "${path}" is not allowed — role.md, soul.md, and harness.yaml are the trusted identity surface (harness#366)`,
+      );
+    }
   }
   return abs;
 };
