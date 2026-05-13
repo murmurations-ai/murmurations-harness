@@ -3,6 +3,71 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.0] - 2026-05-19
+
+**Execution contracts — agents declare what completion looks like in `role.md`, the validator scores wakes against the obligation, and the dashboard surfaces it.**
+
+The harness shipped through v0.7.2 with the wake loop measuring whether agents _produced artifacts_, not whether they _satisfied an obligation_. v0.8.0 closes that gap by introducing the `contract:` block in `role.md`, an end-to-end pipeline that assembles a per-wake `ExecutionContract` from operator-authored declarations plus runtime context, injects the obligation into the system prompt as a `trusted` segment, and validates outcomes against the declared `requiredOutputs`. Behavioral validation (the narrative-vs-tool-call cross-check) ships in warning-only mode in v0.8.0 — operator calibration before promotion to hard-fail in v0.8.1.
+
+ADR-0047 ([Execution Contracts](docs/adr/0047-execution-contracts.md)) defines the contract shape; ADR-0048 ([Phase 4 scope lock](docs/adr/0048-phase-4-scope-lock-for-v0.8.0.md)) compresses the 22–28 day target to ~8 days by deferring `validateBehavior` hard-fail to v0.8.1.
+
+### Added
+
+- **`contract:` block in `role.md` frontmatter** (#367). Optional operator-facing declaration with five fields, all arrays defaulting to empty: `done_when`, `committed_artifacts`, `runtime_artifacts`, `verification_required_for`, `approval_required_for`. Parsed via Zod with `.strict()` so typos surface at boot. Roles without a `contract:` block continue to work — the harness synthesizes a minimal default from runtime context.
+- **`assembleExecutionContract()`** (#367). New core function that builds a full `ExecutionContract` per wake from the role's `contract:` block + signal bundle + budget + GitHub write scopes. Result lands on `AgentSpawnContext.contract` and threads through to prompt assembly + post-wake validation. Brutally-simple v1 mapping: `done_when` → `completionConditions`, `committed_artifacts` + `runtime_artifacts` → `requiredOutputs` by kind, signal action items → `ActionItemRef[]`, `verification_required_for` → required `VerificationStep[]`, `approval_required_for` → `ApprovalPolicy`.
+- **Contract-aware system prompt** (#370). `PromptAssembler` injects a `trusted` `contract` segment containing Objective, Completion conditions, Required outputs, Verification, Permitted side effects, and Source approval — so the agent reads what completion looks like before doing the wake. When no obligations are declared, the segment degrades to a short notice instead of empty sections.
+- **Obligation enforcement in `validateWake`** (#371). When the contract declares `requiredOutputs`, each one is checked against successful action receipts: `committed-artifact` / `commit` → matching `commit-file` receipt + path glob, `comment` → `comment-issue` receipt, `issue` → `create-issue` receipt, `runtime-artifact` → auto-satisfied on wake completion, `governance-event` → at least one event emitted, `summary` → non-empty `wakeSummary`. Unmet obligations override the legacy heuristic and mark the wake non-productive — counts toward `idleWakes`. New fields on `WakeValidationResult`: `obligationStatus` (`satisfied` | `unmet` | `not-applicable`) and `unmetRequiredOutputs[]`.
+- **`pathMatchesGlob` brutally-simple matcher** (#371). Prefix + suffix glob matcher supporting `drafts/**/*.md`, `agents/*/role.md`, `*.md`. Full glob semantics (per-segment `*`, character classes, `?`) deferred to v0.8.1.
+- **Dashboard surfaces `validationStatus` per wake** (#372). The TUI agents panel now shows obligation results: red `[obl-unmet:N]` badge when `requiredOutputs` go unmet, yellow `[dir-unaddr]` for unaddressed source directives (Boundary 5 carry-forward), dim `[idle-val]` for plain-idle wakes. Productive wakes show no badge. `index.jsonl` gains `validationStatus`, `obligationStatus`, `unmetRequiredOutputsCount`, and `productive` fields.
+- **`validateBehavior` in warning-only mode** (#373). Scans `wakeSummary` for action-verb patterns (`posted to #N`, `closed #N`, `labeled #N`) and cross-checks each against either a successful `WakeActionReceipt` of the matching kind + issue number OR a GitHub issue URL for the same issue number. Unmatched claims emit a `BehaviorWarning`. **Warning-only** — does NOT affect `productive`, `idleWakes`, or `successfulWakes`. Dashboard renders the count as a yellow `[beh:N]` badge.
+- **GitHub issue URLs as structural evidence** (#369). `validateWake` directive validation now treats a fully-qualified URL like `github.com/<owner>/<repo>/issues/<N>` in `wakeSummary` or any governance event payload as evidence the agent acted on that issue — eliminates the false-positive `narrative-only-claim` that fired on every consent-round response from subscription-CLI agents (whose subprocess-internal comment posts never land in `result.actions`).
+- **ADR-0047** (Execution Contracts) and **ADR-0048** (Phase 4 scope lock) accepted.
+
+### Changed
+
+- **`AgentSpawnContext.contract`** type upgraded from the Phase 0 stub (`{objective, doneWhen, allowedSideEffects}`) to the full `ExecutionContract` type. Test fixtures and pre-Phase-4 callers can still leave it `undefined`; production daemon wakes always populate it.
+- **`validateWake` signature** — context arg now accepts an optional `contract: ExecutionContract`. Legacy callers without a contract continue to use the heuristic path; `obligationStatus` is `undefined` on the result.
+- **`RunArtifactWriter.record()` and `DispatchRunArtifactWriter.record()`** accept an optional `WakeValidationResult` so `index.jsonl` entries can carry validation fields downstream to dashboards and eval queries.
+- **Spirit `write_file` blocks operator config paths** (#368). The `safePath` write guard now refuses overwrites to `agents/<id>/role.md`, `agents/<id>/soul.md`, `murmuration/soul.md`, and `harness.yaml`. Closes the trusted-segment injection path before contract content becomes prompt-trusted in #370. Read access is unaffected; subdirectory writes (`agents/<id>/prompts/wake.md`) remain allowed.
+
+### Fixed
+
+- **`validateWake` false-positive on subscription-CLI WakeAction comments** (#369, #364 Part A). Subscription-CLI agents post comments via subprocess tool calls that never reach `result.actions`. The validator now treats a `/issues/<N>` URL in `wakeSummary` or any governance event as structural evidence (with word-boundary lookahead so `/issues/845` does not satisfy `#84` or `#8450`). Part B (`verifiedActions` field on `AgentResult`) deferred to v0.8.1.
+
+### Known limitations (v0.8.1 follow-ups)
+
+- **`validateBehavior` ships warning-only**. Hallucinated tool-call claims are surfaced on the dashboard but do not mark the wake non-productive. Operators relying on `successfulWakes` as a correctness signal should be aware that behavioral hallucinations are flagged, not enforced. Hard-fail promotion lands in v0.8.1 after the 14-day composite-permission soak per ADR-0048 §Decision 2.
+- **Obligation validator only checks `requiredOutputs`** — it does NOT evaluate OR clauses in `done_when` strings. Agents whose contract has OR semantics across multiple output kinds (e.g. "commit OR comment OR governance event") may show `obligation-unmet` even when one OR branch was satisfied. Use `requiredOutputs` to express AND obligations and accept the v0.8.0 limitation, or wait for v0.8.1 DSL semantics.
+- **Glob matcher is prefix+suffix only**. `drafts/**/*.md` matches `drafts/foo/bar.md`; `agents/*/role.md` matches `agents/x/role.md` (and over-matches `agents/x/y/role.md`). Per-segment glob semantics arrive in v0.8.1. Operators needing exact path matching can spell out the full path with no wildcards.
+- **`validateWake` FP "narrative-only-claim" Part B** — the long-term clean fix is an opt-in `verifiedActions` field on `AgentResult` populated by subscription-CLI executors. Part A (URL evidence) covers most observed cases; Part B lands in v0.8.1.
+
+### Migration
+
+Operators with existing murmurations do **not** need to add a `contract:` block to their role.md files — agents continue to work unchanged with the legacy heuristic. To opt in:
+
+```yaml
+# role.md frontmatter
+contract:
+  done_when:
+    - "At least one research artifact committed under drafts/"
+    - "OR at least one substantive issue comment posted"
+  committed_artifacts:
+    - "drafts/**/*.md"
+  runtime_artifacts:
+    - ".murmuration/runs/<agent-id>/**/*.md"
+  verification_required_for: []
+  approval_required_for: []
+```
+
+See the **Execution contracts** section of [README.md](README.md#execution-contracts) for the full syntax.
+
+### Internals
+
+- 1240 tests passing across 72 test files (up from 1097 in v0.7.2; +143 new tests for the contract pipeline).
+- All Phase 4 PRs merged: #367 (PR 1+2), #368 (#366 gate), #369 (#364 gate), #370 (PR 3), #371 (PR 4), #372 (PR 5), #373 (PR 6a).
+- Cold-start cost gate measured (#365 closed): 138 ms boot phase, 0 GitHub API calls during cold-start — Phase 4 contract assembly is local file I/O.
+- Live runtime validation: intelligence-agent wake `116cd12b` (2026-05-13 15:46 UTC) fired the full pipeline end-to-end and produced the expected `obligationStatus: "unmet"` result for a wake that did its work via comments instead of commits.
+
 ## [0.7.2] - 2026-05-07
 
 **Signal routing correctness — agents now see their own directives, score only their own accountability, and read Source answers posted as comments.**
