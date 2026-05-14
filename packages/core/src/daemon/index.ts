@@ -961,6 +961,30 @@ export class Daemon {
         });
       }
 
+      // Phase 5 measurability hook (engineering-agent's harness#363 recommendation,
+      // 2026-05-14). Emit a distinct event whenever a completed wake fell back
+      // to the legacy heuristic — either because no contract was supplied
+      // (`obligationStatus === undefined`) or because the contract declared
+      // no `requiredOutputs` (`obligationStatus === "not-applicable"`).
+      //
+      // v0.9.0 retires the legacy heuristic; the promotion gate is "zero
+      // `daemon.validate.legacy-fallback` events during a 14-day soak". This
+      // event makes that gate measurable from v0.8.0 onward.
+      if (
+        isCompleted(result) &&
+        (validation.obligationStatus === undefined ||
+          validation.obligationStatus === "not-applicable")
+      ) {
+        this.#logger.info("daemon.validate.legacy-fallback", {
+          agentId: agent.agentId,
+          wakeId: event.wakeId.value,
+          reason:
+            validation.obligationStatus === undefined
+              ? "no-contract-context"
+              : "no-required-outputs-declared",
+        });
+      }
+
       // Record outcome in state store
       const outcome = isCompleted(result)
         ? ("success" as const)
