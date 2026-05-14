@@ -346,11 +346,11 @@ Select at boot: `murmuration start --governance examples/governance-s3/index.mjs
 
 ```bash
 pnpm install              # install dependencies
-pnpm build                # build all 8 packages
+pnpm build                # build all 9 packages
 pnpm typecheck            # tsc --noEmit across all packages
 pnpm lint                 # eslint (strict-type-checked)
 pnpm format:check         # prettier check
-pnpm test                 # vitest (486 tests, 40 files)
+pnpm test                 # vitest (1240 tests, 72 files)
 pnpm check                # all of the above (CI locally)
 ```
 
