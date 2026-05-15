@@ -860,6 +860,25 @@ const buildGithubIssueUrlMatcher = (issueNum: number): RegExp => {
 };
 
 /**
+ * Extract the `<path>` portion from every
+ * `github.com/<owner>/<repo>/blob/<branch>/<path>` URL in `text`.
+ * Trailing `#Lxxx` line anchors are stripped.
+ */
+const extractGithubBlobPaths = (text: string): readonly string[] => {
+  const re = /github\.com\/[^/\s]+\/[^/\s]+\/blob\/[^/\s]+\/([^\s)\]>`"']+)/gi;
+  const paths: string[] = [];
+  for (const match of text.matchAll(re)) {
+    const path = match[1];
+    if (path === undefined || path.length === 0) continue;
+    const beforeAnchor = path.split("#")[0] ?? path;
+    const cleanPath = beforeAnchor.replace(/[.,;:!?]+$/, "");
+    if (cleanPath.length === 0) continue;
+    paths.push(cleanPath);
+  }
+  return paths;
+};
+
+/**
  * Brutally-simple glob matcher (Phase 4 PR 4 v1).
  *
  * Supports prefix + suffix matching only:
@@ -920,14 +939,34 @@ const isOutputSatisfied = (
       // is being called, the wake completed, so a runtime artifact exists.
       return true;
     case "committed-artifact":
-    case "commit":
-      return receipts.some((r) => {
+    case "commit": {
+      const receiptHit = receipts.some((r) => {
         if (!r.success || r.action.kind !== "commit-file") return false;
         if (req.path === undefined) return true;
         const filePath = r.action.filePath;
         if (filePath === undefined) return false;
         return pathMatchesGlob(filePath, req.path);
       });
+      if (receiptHit) return true;
+
+      // Fallback evidence: a blob URL referenced in the wake summary or a
+      // governance event. Agents that commit via subprocess (e.g. `gh api`)
+      // leave no commit-file receipt but typically surface the resulting URL.
+      const blobPaths = [
+        ...extractGithubBlobPaths(result.wakeSummary),
+        ...result.governanceEvents.flatMap((g) => {
+          try {
+            return extractGithubBlobPaths(JSON.stringify(g));
+          } catch {
+            return [];
+          }
+        }),
+      ];
+      if (blobPaths.length === 0) return false;
+      const reqPath = req.path;
+      if (reqPath === undefined) return true;
+      return blobPaths.some((p) => pathMatchesGlob(p, reqPath));
+    }
     case "comment":
       return successfulReceiptOfKind("comment-issue");
     case "issue":
