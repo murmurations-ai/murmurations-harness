@@ -81,7 +81,7 @@ describe("Spirit tools — read_file", () => {
   });
 });
 
-describe("Spirit tools — write_file (harness#366 trusted-surface protection)", () => {
+describe("Spirit tools — write_file (trusted-surface protection)", () => {
   let root = "";
 
   beforeEach(() => {
@@ -107,14 +107,14 @@ describe("Spirit tools — write_file (harness#366 trusted-surface protection)",
     return tool;
   };
 
-  it("refuses to overwrite agents/<id>/role.md (Phase 4 PR 3 trusted-segment surface)", async () => {
+  it("refuses to overwrite agents/<id>/role.md", async () => {
     const tool = getTool("write_file");
     const result = await tool.execute({
       path: "agents/alpha/role.md",
       content: "# rewritten\n",
     });
     expect(result).toMatch(/operator config/);
-    expect(result).toMatch(/harness#366/);
+    expect(result).toMatch(/trusted identity surface/);
   });
 
   it("refuses to overwrite agents/<id>/soul.md", async () => {
@@ -584,10 +584,10 @@ describe("Spirit tools — close_issue (K3)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// harness#318 — cost tool
+// cost tool
 // ---------------------------------------------------------------------------
 
-describe("Spirit tools — cost (harness#318)", () => {
+describe("Spirit tools — cost", () => {
   it("calls send('cost.summary') and returns formatted result", async () => {
     let calledMethod = "";
     const send: typeof noopSend = (method) => {
@@ -612,10 +612,10 @@ describe("Spirit tools — cost (harness#318)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// harness#319 — backlog tool
+// backlog tool
 // ---------------------------------------------------------------------------
 
-describe("Spirit tools — backlog (harness#319)", () => {
+describe("Spirit tools — backlog", () => {
   let root = "";
 
   beforeEach(() => {
@@ -697,10 +697,10 @@ describe("Spirit tools — backlog (harness#319)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// harness#320 — doctor tool
+// doctor tool
 // ---------------------------------------------------------------------------
 
-describe("Spirit tools — doctor (harness#320)", () => {
+describe("Spirit tools — doctor", () => {
   let root = "";
 
   beforeEach(() => {

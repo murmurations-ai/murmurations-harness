@@ -418,14 +418,10 @@ describe("validateWake", () => {
   });
 
   // -------------------------------------------------------------------------
-  // harness#364 Part A — GitHub issue URL counts as structural evidence
+  // GitHub issue URL counts as structural evidence
   // -------------------------------------------------------------------------
 
-  it("treats a full GitHub issue URL in wakeSummary as structural evidence (harness#364)", () => {
-    // Reproduces engineering-agent's 2026-05-11 wake on EP #845: comment
-    // posted via subscription-CLI subprocess; URL lands in wakeSummary
-    // but no receipt exists. Before this fix, the wake was flagged
-    // narrative-only-claim → idle.
+  it("treats a full GitHub issue URL in wakeSummary as structural evidence", () => {
     const directive = makeIssueSignal(845, ["source-directive", "assigned:engineering-agent"]);
     const result = {
       ...emptyResult,
@@ -738,7 +734,7 @@ describe("validateWake", () => {
     expect(() => validateWake(mkCtx({ signals: [directive] }), result, [])).not.toThrow();
   });
 
-  // Routing filter tests (harness#354 regression coverage)
+  // Routing filter tests
 
   it("skips a directive scoped to a different agent — does not count as unaddressed", () => {
     const directive = makeIssueSignal(100, ["source-directive", "assigned:other-agent"]);
@@ -789,7 +785,7 @@ describe("validateWake", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Phase 4 PR 4 — contract obligation enforcement (ADR-0047, ADR-0048)
+  // Contract obligation enforcement
   // -------------------------------------------------------------------------
 
   const baseBudget = {
@@ -901,6 +897,91 @@ describe("validateWake", () => {
     ];
     const v = validateWake({ ...mkCtx(), contract }, emptyResult, receipts);
     expect(v.obligationStatus).toBe("unmet");
+  });
+
+  it("blob URL in wakeSummary satisfies a committed-artifact obligation", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "docs/research/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "Filed research at https://github.com/xeeban/emergent-praxis/blob/main/docs/research/competitive-positioning-2026-05-14.md.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("blob URL with #L anchor strips to the path before matching", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "docs/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "See https://github.com/xeeban/emergent-praxis/blob/main/docs/research/foo.md#L42 for details.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("blob URL whose path falls outside the glob does not satisfy", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "drafts/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "Committed https://github.com/xeeban/emergent-praxis/blob/main/docs/legal/refund.md.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("unmet");
+  });
+
+  it("multiple blob URLs — one matching the glob is enough", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "drafts/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: [
+        "Posted https://github.com/xeeban/emergent-praxis/blob/main/docs/legal/refund.md.",
+        "Then drafted https://github.com/xeeban/emergent-praxis/blob/main/drafts/2026-05/article.md.",
+      ].join(" "),
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("blob URL inside a governance event payload counts as evidence", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "docs/research/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Research complete.",
+      governanceEvents: [
+        {
+          kind: "report",
+          payload: {
+            url: "https://github.com/xeeban/emergent-praxis/blob/main/docs/research/foo.md",
+          },
+        },
+      ],
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("no receipt and no blob URL leaves a committed-artifact obligation unmet", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "drafts/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Drafted the article and was about to commit.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("unmet");
+  });
+
+  it("blob URL satisfies a committed-artifact obligation with no path declared", () => {
+    const contract = mkContract([{ kind: "committed-artifact" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "Committed https://github.com/xeeban/emergent-praxis/blob/main/anywhere/file.md.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
   });
 
   it("runtime-artifact required output is always satisfied (digest writer runs on completion)", () => {
@@ -1174,7 +1255,7 @@ describe("renderSignalForPrompt", () => {
 });
 
 // ---------------------------------------------------------------------------
-// validateBehavior — Phase 4 PR 6a (warning-only)
+// validateBehavior (advisory warnings)
 // ---------------------------------------------------------------------------
 
 describe("validateBehavior", () => {

@@ -425,11 +425,7 @@ export interface SignalBundle {
    * dropped by a sub-query failure." Absent or empty array when every
    * query succeeded; populated alongside `warnings` (which carry the
    * same info as a human-readable string) for callers that want
-   * structured access. Added in v0.7.1 (QA review of harness#331).
-   *
-   * Optional so existing callers / fixtures aren't forced to update — the
-   * aggregator always populates it; manual SignalBundle construction
-   * (tests, daemon hello-world path) may omit it.
+   * structured access.
    */
   readonly partialFailures?: readonly SignalAggregationFailure[];
   /**
@@ -625,25 +621,21 @@ export interface AgentSpawnContext {
   /**
    * Stable reference string for the prompt source (e.g. a git sha or
    * content hash). Used for prompt-level deduplication in `PromptBundle.hash`.
-   * Near-Term #1 (Proposal 07).
    */
   readonly promptRef?: string;
   /**
-   * Full execution contract for this wake (Phase 4 PR 2, ADR-0047, ADR-0048).
+   * Full execution contract for this wake.
    *
    * Assembled by `assembleExecutionContract()` from the role's
    * `contract:` block + runtime context (signals, budget, write scopes).
-   * Optional so test fixtures and pre-Phase-4 callers do not need to
-   * populate it; production daemon wakes always populate it from PR 2
-   * onward.
    *
-   * Consumers (Phase 4 PR 3/4/6a):
+   * Consumers:
    *   - PromptAssembler renders `requiredOutputs` + `actionItems` into
    *     the system prompt.
-   *   - `validateOutcomes` (PR 4) scores the wake against the obligation
+   *   - `validateOutcomes` scores the wake against the obligation
    *     sub-contract.
-   *   - `validateBehavior` (PR 6a, warning-only) reads `allowedSideEffects`
-   *     to cross-check narrative vs. tool calls.
+   *   - `validateBehavior` reads `allowedSideEffects` to cross-check
+   *     narrative vs. tool calls.
    */
   readonly contract?: ExecutionContract;
 }
@@ -719,8 +711,7 @@ export interface WakeActionReceipt {
 /**
  * A directive from the wake's signal bundle that lacked structured
  * evidence of action. Surfaced by `validateWake` so operators can
- * detect narrative-only "I have posted CONSENT" hallucinations
- * (Boundary 5 — see docs/plans/v0.5.2-boundary-5-phase-1-directive-validation.md).
+ * detect narrative-only "I have posted CONSENT" hallucinations.
  */
 export interface UnaddressedDirective {
   readonly issueNumber: number;
@@ -745,8 +736,7 @@ export interface WakeValidationResult {
    */
   readonly directivesUnaddressed: readonly UnaddressedDirective[];
   /**
-   * Contract obligation status (Phase 4 PR 4, ADR-0047 §2 obligation sub-contract,
-   * ADR-0048 §1).
+   * Contract obligation status.
    *
    *   `satisfied`     — every `requiredOutput` has matching successful evidence.
    *   `unmet`         — at least one `requiredOutput` is missing — wake is
@@ -755,8 +745,7 @@ export interface WakeValidationResult {
    *   `not-applicable` — no contract supplied, or `requiredOutputs` is empty;
    *                     the legacy heuristic is the sole gate.
    *
-   * Absent when `validateWake` was called without a contract (pre-Phase-4
-   * test paths and legacy harness consumers).
+   * Absent when `validateWake` was called without a contract.
    */
   readonly obligationStatus?: "satisfied" | "unmet" | "not-applicable";
   /**
@@ -765,14 +754,12 @@ export interface WakeValidationResult {
    */
   readonly unmetRequiredOutputs?: readonly { readonly kind: string; readonly path?: string }[];
   /**
-   * Behavior warnings from `validateBehavior` (Phase 4 PR 6a, ADR-0047 §2,
-   * ADR-0048 §1). Each warning describes a narrative claim in `wakeSummary`
-   * that lacks structured evidence (successful action receipt or URL).
+   * Behavior warnings from `validateBehavior`. Each warning describes a
+   * narrative claim in `wakeSummary` that lacks structured evidence
+   * (successful action receipt or URL).
    *
-   * **Warning-only in v0.8.0** — these do NOT affect `productive`,
-   * `idleWakes`, or `successfulWakes`. They surface on the dashboard so
-   * operators can calibrate before behavior validation is promoted to
-   * hard-fail in v0.8.1 (per ADR-0048 §Decision 2).
+   * These are advisory — they do NOT affect `productive`, `idleWakes`,
+   * or `successfulWakes`.
    */
   readonly behaviorWarnings?: readonly BehaviorWarning[];
   /** If not productive, why. */
@@ -780,11 +767,10 @@ export interface WakeValidationResult {
 }
 
 /**
- * One behavior warning from `validateBehavior` (Phase 4 PR 6a, ADR-0048 §1).
+ * One behavior warning from `validateBehavior`.
  *
- * Warning-only in v0.8.0: the wake's `productive` flag is not affected.
- * Surfaced on the dashboard for operator calibration before v0.8.1
- * promotes behavior validation to hard-fail.
+ * Advisory: the wake's `productive` flag is not affected. Surfaced on the
+ * dashboard for operator review.
  */
 export interface BehaviorWarning {
   /** Pattern that fired. v1 has a single kind; future kinds extend the
@@ -832,50 +818,51 @@ const buildIssueReferenceMatchers = (issueNum: number): readonly RegExp[] => {
 };
 
 /**
- * URL-form matcher for resolving "does this text reference a real GitHub
- * issue by URL". Used as structural evidence (Part A of harness#364):
- * subscription-CLI agents post comments via their subprocess tool layer
- * — these never reach `result.actions`/`actionReceipts`, but the URL
- * typically lands in `wakeSummary` or a governance event payload (e.g.
- * `https://github.com/xeeban/emergent-praxis/issues/845` or
- * `.../issues/845#issuecomment-NNN`).
+ * Match a fully-qualified `github.com/<owner>/<repo>/issues/<n>` URL,
+ * with word boundary on the trailing digit so `/issues/845` does not
+ * match `/issues/8450`. Comment anchors (`/issues/<n>#issuecomment-...`)
+ * are also accepted.
  *
- * Rationale: a fully-qualified GitHub URL is much harder to hallucinate
- * than a plain `#N` reference, and an agent emitting it has typically
- * received it from a real tool call's response payload. Treating these
- * as structural evidence eliminates the false-positive
- * `narrative-only-claim` that fires on every consent-round response from
- * subscription-CLI agents in EP (engineering-agent's 2026-05-12 audit).
- *
- * Full-fidelity fix (Part B) is an opt-in `verifiedActions` field on
- * `AgentResult` populated by subscription-CLI executors from confirmed
- * subprocess operations — deferred to v0.8.1 per ADR-0048.
+ * Used as structural evidence when an agent's commit/comment was made
+ * via subprocess and produced no WakeActionReceipt but left the URL in
+ * the wake summary or a governance event payload.
  */
 const buildGithubIssueUrlMatcher = (issueNum: number): RegExp => {
   const n = String(issueNum);
-  // github.com/<owner>/<repo>/issues/<n> with word boundary on the
-  // trailing digit so `/issues/845` does not match `/issues/8450`.
-  // Also handles the comment-anchor form `/issues/<n>#issuecomment-...`.
   return new RegExp(`github\\.com/[^/]+/[^/]+/issues/${n}(?!\\d)`, "i");
 };
 
 /**
- * Brutally-simple glob matcher (Phase 4 PR 4 v1).
+ * Extract the `<path>` portion from every
+ * `github.com/<owner>/<repo>/blob/<branch>/<path>` URL in `text`.
+ * Trailing `#Lxxx` line anchors are stripped.
+ */
+const extractGithubBlobPaths = (text: string): readonly string[] => {
+  const re = /github\.com\/[^/\s]+\/[^/\s]+\/blob\/[^/\s]+\/([^\s)\]>`"']+)/gi;
+  const paths: string[] = [];
+  for (const match of text.matchAll(re)) {
+    const path = match[1];
+    if (path === undefined || path.length === 0) continue;
+    const beforeAnchor = path.split("#")[0] ?? path;
+    const cleanPath = beforeAnchor.replace(/[.,;:!?]+$/, "");
+    if (cleanPath.length === 0) continue;
+    paths.push(cleanPath);
+  }
+  return paths;
+};
+
+/**
+ * Prefix + suffix glob matcher.
  *
- * Supports prefix + suffix matching only:
- *   - The literal text before the first `*` becomes the required prefix.
- *   - The literal text after the last `*` becomes the required suffix.
- *   - Anything between is treated as "any path".
+ *   - The literal text before the first `*` is the required prefix.
+ *   - The literal text after the last `*` is the required suffix.
+ *   - Anything between matches arbitrary path content.
+ *   - A glob with no `*` matches only via exact equality.
  *
  * Examples:
  *   `drafts/**\/*.md` → prefix `drafts/`, suffix `.md`  → matches `drafts/foo/bar.md`
  *   `agents/*\/role.md` → prefix `agents/`, suffix `/role.md` → matches `agents/x/role.md`
  *   `*.md` → prefix ``, suffix `.md` → matches `foo.md`
- *
- * Tightening to full glob semantics (per-segment `*`, character classes,
- * `?` single-char) is deferred to v0.8.1 per ADR-0048 / "v1 DSLs brutally
- * simple". Operators who need exact path matching can spell out the full
- * path with no wildcards — that takes the exact-match fast path.
  */
 const pathMatchesGlob = (actual: string, glob: string): boolean => {
   if (glob === actual) return true;
@@ -889,14 +876,14 @@ const pathMatchesGlob = (actual: string, glob: string): boolean => {
 };
 
 /**
- * Check one required output against the wake's actual evidence (Phase 4 PR 4).
+ * Check one required output against the wake's actual evidence.
  *
- * The mapping from `RequiredOutput.kind` to evidence is intentionally lax for
- * v1: any successful receipt of the matching action kind satisfies the
- * obligation, plus path-glob checks where a `path` is declared. The contract
- * narrative remains the agent's authoritative guide on _what_ to produce; the
- * validator's job is to refuse "I claim I did it" wakes that have no
- * structured evidence at all (Boundary 5 generalized).
+ * The mapping from `RequiredOutput.kind` to evidence is intentionally lax:
+ * any successful receipt of the matching action kind satisfies the
+ * obligation, plus path-glob checks where a `path` is declared. The
+ * contract narrative remains the agent's authoritative guide on _what_ to
+ * produce; the validator's job is to refuse "I claim I did it" wakes that
+ * have no structured evidence at all.
  */
 const isOutputSatisfied = (
   req: { readonly kind: string; readonly path?: string },
@@ -920,14 +907,34 @@ const isOutputSatisfied = (
       // is being called, the wake completed, so a runtime artifact exists.
       return true;
     case "committed-artifact":
-    case "commit":
-      return receipts.some((r) => {
+    case "commit": {
+      const receiptHit = receipts.some((r) => {
         if (!r.success || r.action.kind !== "commit-file") return false;
         if (req.path === undefined) return true;
         const filePath = r.action.filePath;
         if (filePath === undefined) return false;
         return pathMatchesGlob(filePath, req.path);
       });
+      if (receiptHit) return true;
+
+      // Fallback evidence: a blob URL referenced in the wake summary or a
+      // governance event. Agents that commit via subprocess (e.g. `gh api`)
+      // leave no commit-file receipt but typically surface the resulting URL.
+      const blobPaths = [
+        ...extractGithubBlobPaths(result.wakeSummary),
+        ...result.governanceEvents.flatMap((g) => {
+          try {
+            return extractGithubBlobPaths(JSON.stringify(g));
+          } catch {
+            return [];
+          }
+        }),
+      ];
+      if (blobPaths.length === 0) return false;
+      const reqPath = req.path;
+      if (reqPath === undefined) return true;
+      return blobPaths.some((p) => pathMatchesGlob(p, reqPath));
+    }
     case "comment":
       return successfulReceiptOfKind("comment-issue");
     case "issue":
@@ -942,25 +949,18 @@ const isOutputSatisfied = (
 };
 
 /**
- * Behavior validation (Phase 4 PR 6a, ADR-0047 §2, ADR-0048 §1).
+ * Behavior validation.
  *
  * Scans `wakeSummary` for action-verb patterns that reference issue numbers
- * ("posted to #123", "closed issue #456", "committed to drafts/foo.md") and
- * checks each against structural evidence:
+ * ("posted to #123", "closed issue #456", "labeled #789") and checks each
+ * against structural evidence:
  *
  *   - successful WakeActionReceipt of the matching kind + issueNumber
- *   - GitHub issue URL for the same issue number (per harness#364 Part A)
+ *   - a GitHub issue URL for the same issue number
  *
- * Unmatched claims produce a `BehaviorWarning`. **Warning-only in v0.8.0**:
- * results are surfaced on dashboards and recorded on the wake but do not
- * affect `productive`/`idleWakes`/`successfulWakes`. v0.8.1 will promote
- * to hard-fail after 14d composite-permission soak per the original
- * ADR-0048 calendar (deferred from v0.8.0).
- *
- * Brutally simple v1 per the project rule: regex patterns over wake
- * summary, no NLP. False-positive rate is calibrated against real wake
- * data during the warning-only window. Operators can scrub their
- * narrative phrasing if a specific pattern is over-firing.
+ * Unmatched claims produce a `BehaviorWarning`. Warnings are advisory:
+ * they surface on dashboards and the wake record but do NOT affect
+ * `productive`, `idleWakes`, or `successfulWakes`.
  */
 export const validateBehavior = (
   result: {
@@ -995,12 +995,11 @@ export const validateBehavior = (
       (r) => r.success && r.action.kind === actionKind && r.action.issueNumber === issueNum,
     );
 
-  // Pattern: "(posted|commented|replied|left a comment|added a comment) (on|to|at)? (issue)? #N"
-  // Allow up to ~80 chars between the verb and the #N to catch reasonable
-  // phrasing like "posted my consent position on issue #864". Non-greedy
-  // (`{0,80}?`) so a sentence with multiple `#N` references attributes the
-  // FIRST one to this verb, not the last. Word-boundary on the trailing
-  // digit so `#5` does not match `#54`.
+  // Up to ~80 chars between the verb and the #N catches phrasing like
+  // "posted my consent position on issue #864". The `{0,80}?` quantifier
+  // is non-greedy so a sentence with multiple `#N` references attributes
+  // the FIRST one to this verb, not the last. The trailing `(?!\d)` is a
+  // word boundary on the digit so `#5` does not match `#54`.
   const commentClaimRegex =
     /\b(posted|commented|replied|left a comment|added a comment)\b(?:[^.\n]{0,80}?)#(\d+)(?!\d)/gi;
   const closeClaimRegex = /\b(closed|resolved)\b(?:[^.\n]{0,80}?)#(\d+)(?!\d)/gi;
@@ -1057,14 +1056,13 @@ export const validateBehavior = (
  * structured-evidence backing for any source-directive items in signals.
  * Used when no custom validator is configured.
  *
- * Phase 4 PR 4: when `contract.requiredOutputs` is non-empty, each required
- * output is checked against successful action receipts. An unmet required
- * output marks the wake non-productive even if the legacy heuristic
+ * When `contract.requiredOutputs` is non-empty, each required output is
+ * also checked against successful action receipts. An unmet required
+ * output marks the wake non-productive even if the heuristic
  * (artifactCount > 0, no unaddressed directives) would have passed.
  *
- * Phase 4 PR 6a: additionally runs `validateBehavior` and attaches any
- * warnings to the result. Warnings are **warning-only**: they do not
- * affect `productive` or the legacy heuristic.
+ * `validateBehavior` runs alongside and attaches its warnings to the
+ * result. Behavior warnings are advisory and do not affect `productive`.
  */
 export const validateWake = (
   context: {
@@ -1075,16 +1073,15 @@ export const validateWake = (
      * don't intersect this agent's routing set (assigned:<id>,
      * scope:agent:<id>, scope:group:<gid>, scope:all) are treated as
      * signal, not accountability, and do not count as unaddressed.
-     * Harness #354 (effectiveness scoring scope bug).
      *
      * Pass empty groupIds when the agent has no group memberships.
      */
     agentId: string;
     groupIds: readonly string[];
     /**
-     * Optional ExecutionContract (Phase 4 PR 4, ADR-0047, ADR-0048). When
-     * supplied and `requiredOutputs` is non-empty, obligation validation
-     * runs and may override the heuristic productive flag.
+     * Optional ExecutionContract. When supplied and `requiredOutputs` is
+     * non-empty, obligation validation runs and may override the
+     * heuristic productive flag.
      */
     contract?: ExecutionContract;
   },
@@ -1118,9 +1115,8 @@ export const validateWake = (
     }
   }
 
-  // Directive validation (Boundary 5 Phase 1):
-  // every source-directive in the bundle (signals + actionItems) must
-  // be backed by a successful receipt OR a governance event whose
+  // Every source-directive in the bundle (signals + actionItems) must be
+  // backed by a successful receipt OR a governance event whose
   // payload-as-string references the issue number with a word boundary.
   // The word boundary blocks `#5` from matching `#50` / `#592`. We also
   // serialize each governance event once (outside the per-directive loop)
@@ -1143,7 +1139,7 @@ export const validateWake = (
 
   // Routing set for this agent — directives whose labels don't intersect
   // this set are visible signal (facilitator cross-visibility) but not
-  // this agent's accountability. Harness #354.
+  // this agent's accountability.
   const agentRoutingSet = new Set(buildAgentRoutingLabels(context.agentId, context.groupIds));
 
   const allBundle: readonly Signal[] = [...context.signals, ...context.actionItems];
@@ -1189,11 +1185,11 @@ export const validateWake = (
       continue;
     }
 
-    // harness#364 Part A: a fully-qualified GitHub issue URL in the wake
-    // summary or any governance event counts as structural evidence. This
-    // covers subscription-CLI agents whose subprocess-internal comment
-    // posts never land in `result.actions` but typically leave a URL in
-    // the wake summary (the tool-call response includes the issue URL).
+    // A fully-qualified GitHub issue URL in the wake summary or any
+    // governance event counts as structural evidence. This covers
+    // subscription-CLI agents whose subprocess-internal comment posts
+    // never land in `result.actions` but typically leave a URL in the
+    // wake summary (the tool-call response includes the issue URL).
     const urlMatcher = buildGithubIssueUrlMatcher(issueNum);
     if (urlMatcher.test(result.wakeSummary)) {
       continue;
@@ -1210,7 +1206,6 @@ export const validateWake = (
     directivesUnaddressed.push({ issueNumber: issueNum, reason: "no-structured-action" });
   }
 
-  // Phase 4 PR 4: contract obligation check.
   let obligationStatus: "satisfied" | "unmet" | "not-applicable" | undefined;
   let unmetRequiredOutputs: { readonly kind: string; readonly path?: string }[] | undefined;
   if (context.contract !== undefined) {
@@ -1249,10 +1244,9 @@ export const validateWake = (
           ? `${String(actionItemsAssigned)} action items assigned but none addressed`
           : "wake completed but produced no artifacts";
 
-  // Phase 4 PR 6a: behavior validation runs alongside outcome validation
-  // but is warning-only — its findings do NOT affect `productive` or
-  // any other counter. They surface on the dashboard for operator
-  // calibration before v0.8.1 promotes to hard-fail.
+  // Behavior validation runs alongside outcome validation but its
+  // findings are advisory — they do NOT affect `productive` or any other
+  // counter. They surface on the dashboard for operator review.
   const behaviorWarnings = validateBehavior(result, actionReceipts);
 
   const baseResult: WakeValidationResult = {
@@ -1287,8 +1281,6 @@ export const validateWake = (
  * affected line — the directives_unaddressed line still appends at the
  * end as a fallback, but the effectiveness downgrade is lost. Tests in
  * `execution.test.ts` lock the current format.
- *
- * Boundary 5 Phase 1.
  */
 export const amendWakeSummaryWithValidation = (
   summary: string,

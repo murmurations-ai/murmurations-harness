@@ -83,7 +83,7 @@ const CIRCUIT_BREAKER_THRESHOLD = 3;
 const MAX_IDLE_SKIP_STREAK = 12;
 
 /**
- * Hash the wake context's stable shape for idle-wake skip (harness#297).
+ * Hash the wake context's stable shape for idle-wake skip.
  * Captures everything that should cause the LLM to behave differently
  * across wakes:
  *   - all signal fields except `fetchedAt` (which is just Date.now()
@@ -193,8 +193,7 @@ export interface RegisteredAgent {
 
   /**
    * Least-privilege GitHub write surface. Empty arrays mean read-only.
-   * Enforced at the github client layer by harness#16 (P5) —
-   * declaration surfaces here.
+   * Enforced at the github client layer — this is the declaration surface.
    */
   readonly githubWriteScopes: {
     readonly issueComments: readonly string[];
@@ -259,10 +258,9 @@ export interface RegisteredAgent {
   }[];
 
   /**
-   * Parsed `contract:` block from `role.md` frontmatter (ADR-0047, ADR-0048,
-   * Phase 4 PR 1+2). Undefined when the role does not declare a contract —
-   * `assembleExecutionContract()` still produces a usable contract from
-   * runtime context in that case.
+   * Parsed `contract:` block from `role.md` frontmatter. Undefined when
+   * the role does not declare a contract — `assembleExecutionContract()`
+   * still produces a usable contract from runtime context in that case.
    */
   readonly contract?: ContractDeclaration;
 }
@@ -300,11 +298,9 @@ export const registeredAgentFromLoadedIdentity = (
       }
     : undefined;
 
-  // Auto-derive the membership-aware OR-set of routing labels (harness#331
-  // fix, with derivation moved here from boot.ts per Engineering Standard
-  // #8 — keep the composition root thin). The aggregator listens for any
-  // of these to deliver assigned items, scoped directives, group
-  // directives, and broadcast directives.
+  // Auto-derive the membership-aware OR-set of routing labels. The
+  // aggregator listens for any of these to deliver assigned items,
+  // scoped directives, group directives, and broadcast directives.
   //
   // Operator precedence: if `signals.github_scopes[].filter.any_label` is
   // explicitly set in role.md, that wins; otherwise the daemon's
@@ -807,9 +803,9 @@ export class Daemon {
     // injection needed. Agents see directives as github-issue signals
     // with the "source-directive" label and respond in their wake output.
 
-    // Idle-wake skip (harness#297): if the bound context hashes equal
-    // to what we fired last time AND the last wake succeeded AND we
-    // haven't been skipping for too long, drop the LLM call entirely.
+    // Idle-wake skip: if the bound context hashes equal to what we fired
+    // last time AND the last wake succeeded AND we haven't been skipping
+    // for too long, drop the LLM call entirely.
     // The hash captures signal IDs + their updatedAt + action items +
     // identity frontmatter, so any meaningful change forces a fire.
     // Manual triggers (`--now`, scheduler kind === "manual") always
@@ -891,8 +887,8 @@ export class Daemon {
               signals: context.signals.signals,
               agentId: agent.agentId,
               groupIds: agent.groupMemberships,
-              // Phase 4 PR 4: pass the assembled contract so obligation
-              // validation runs alongside the legacy heuristic.
+              // Pass the assembled contract so obligation validation runs
+              // alongside the legacy heuristic.
               ...(context.contract !== undefined ? { contract: context.contract } : {}),
             },
             result,
@@ -961,6 +957,27 @@ export class Daemon {
         });
       }
 
+      // Emit a distinct event whenever a completed wake fell back to the
+      // legacy heuristic — either because no contract was supplied
+      // (`obligationStatus === undefined`) or because the contract
+      // declared no `requiredOutputs` (`obligationStatus === "not-applicable"`).
+      // Operators can count these events to measure how many wakes still
+      // skip the obligation sub-contract.
+      if (
+        isCompleted(result) &&
+        (validation.obligationStatus === undefined ||
+          validation.obligationStatus === "not-applicable")
+      ) {
+        this.#logger.info("daemon.validate.legacy-fallback", {
+          agentId: agent.agentId,
+          wakeId: event.wakeId.value,
+          reason:
+            validation.obligationStatus === undefined
+              ? "no-contract-context"
+              : "no-required-outputs-declared",
+        });
+      }
+
       // Record outcome in state store
       const outcome = isCompleted(result)
         ? ("success" as const)
@@ -987,9 +1004,9 @@ export class Daemon {
                 wakeSummary: amendWakeSummaryWithValidation(result.wakeSummary, validation),
               }
             : result;
-        // Phase 4 PR 5: pass the validation result so the index entry
-        // can record validationStatus, obligationStatus, and the
-        // unmet-required-output count for dashboard surfacing.
+        // Pass the validation result so the index entry can record
+        // validationStatus, obligationStatus, and the unmet-required-output
+        // count for dashboard surfacing.
         await this.#runArtifactWriter.record(
           recordedResult,
           result.costRecord,
@@ -1410,11 +1427,10 @@ const buildSpawnContext = async (
   const wakeMode = "individual" as const;
   const wakeReason = event.wakeReason;
 
-  // Phase 4 PR 2: assemble the full ExecutionContract for this wake.
-  // Empty when the role lacks a `contract:` block — assembleExecutionContract
-  // handles the missing-declaration case and still returns a usable contract
-  // populated from runtime context (objective derived from wake reason,
-  // allowedSideEffects derived from write scopes).
+  // Assemble the full ExecutionContract for this wake. When the role
+  // lacks a `contract:` block, `assembleExecutionContract` still returns
+  // a usable contract populated from runtime context (objective derived
+  // from wake reason, allowedSideEffects derived from write scopes).
   const contract = assembleExecutionContract({
     wakeReason,
     wakeMode,
