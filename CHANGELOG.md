@@ -21,6 +21,8 @@ ADR-0047 ([Execution Contracts](docs/adr/0047-execution-contracts.md)) defines t
 - **Dashboard surfaces `validationStatus` per wake** (#372). The TUI agents panel now shows obligation results: red `[obl-unmet:N]` badge when `requiredOutputs` go unmet, yellow `[dir-unaddr]` for unaddressed source directives (Boundary 5 carry-forward), dim `[idle-val]` for plain-idle wakes. Productive wakes show no badge. `index.jsonl` gains `validationStatus`, `obligationStatus`, `unmetRequiredOutputsCount`, and `productive` fields.
 - **`validateBehavior` in warning-only mode** (#373). Scans `wakeSummary` for action-verb patterns (`posted to #N`, `closed #N`, `labeled #N`) and cross-checks each against either a successful `WakeActionReceipt` of the matching kind + issue number OR a GitHub issue URL for the same issue number. Unmatched claims emit a `BehaviorWarning`. **Warning-only** — does NOT affect `productive`, `idleWakes`, or `successfulWakes`. Dashboard renders the count as a yellow `[beh:N]` badge.
 - **GitHub issue URLs as structural evidence** (#369). `validateWake` directive validation now treats a fully-qualified URL like `github.com/<owner>/<repo>/issues/<N>` in `wakeSummary` or any governance event payload as evidence the agent acted on that issue — eliminates the false-positive `narrative-only-claim` that fired on every consent-round response from subscription-CLI agents (whose subprocess-internal comment posts never land in `result.actions`).
+- **GitHub blob URLs as `committed-artifact` evidence** (#377). The obligation validator now treats `github.com/<owner>/<repo>/blob/<branch>/<path>` URLs in `wakeSummary` or governance event payloads as evidence for `committed-artifact` / `commit` obligations when no `commit-file` receipt is present. Closes the same gap for subscription-CLI agents that commit via subprocess `gh api` calls.
+- **`daemon.validate.legacy-fallback` event** (#375). Emitted whenever a completed wake falls back to the legacy heuristic — either because no contract was supplied or because the contract declared no `requiredOutputs`. Operators can count these events to measure how many wakes still skip the obligation sub-contract.
 - **ADR-0047** (Execution Contracts) and **ADR-0048** (Phase 4 scope lock) accepted.
 
 ### Changed
@@ -33,6 +35,7 @@ ADR-0047 ([Execution Contracts](docs/adr/0047-execution-contracts.md)) defines t
 ### Fixed
 
 - **`validateWake` false-positive on subscription-CLI WakeAction comments** (#369, #364 Part A). Subscription-CLI agents post comments via subprocess tool calls that never reach `result.actions`. The validator now treats a `/issues/<N>` URL in `wakeSummary` or any governance event as structural evidence (with word-boundary lookahead so `/issues/845` does not satisfy `#84` or `#8450`). Part B (`verifiedActions` field on `AgentResult`) deferred to v0.8.1.
+- **`validateWake` false-positive on subprocess `gh api` commits** (#377, #364 Part C). Same class of bug for `committed-artifact` obligations: agents committing via `gh api` produce no `commit-file` receipt but leave a blob URL in the wake summary. Blob URLs are now accepted as evidence (with trailing sentence-punctuation stripped so `…/foo.md.` extracts `…/foo.md`).
 
 ### Known limitations (v0.8.1 follow-ups)
 
