@@ -26,7 +26,7 @@ import { buildReport, type ReportScope } from "./reports.js";
 import { spiritSkillsDir } from "./system-prompt.js";
 
 // ---------------------------------------------------------------------------
-// Strict tool type for Spirit — ADR-0038 CF-D (harness#283)
+// Strict tool type for Spirit
 // ---------------------------------------------------------------------------
 //
 // Spirit's tools must use `z.object(...)` for `parameters` because the MCP
@@ -105,11 +105,11 @@ const safePath = (rootDir: string, path: string, mode: "read" | "write" = "read"
       );
     }
 
-    // Operator config files — identity + governance authority. ADR-0048 PR 3
-    // injects role.md content as a `trusted` system-prompt segment; if an
-    // agent could rewrite its own role.md it could escalate by editing
-    // `done_when`, clearing `approval_required_for`, or planting prompt
-    // injection in any frontmatter field. harness#366.
+    // Operator config files carry identity + governance authority and are
+    // rendered into agent prompts as `trusted` segments. Letting an agent
+    // rewrite its own role.md / soul.md / harness.yaml would let it edit
+    // `done_when`, clear `approval_required_for`, or inject prompts via
+    // any frontmatter field. Block writes to those paths.
     //
     // Normalize separators once so the regex catches Windows and POSIX paths.
     const relPosix = rel.replace(/\\/g, "/");
@@ -120,7 +120,7 @@ const safePath = (rootDir: string, path: string, mode: "read" | "write" = "read"
       relPosix === "harness.yaml"
     ) {
       throw new PathSafetyError(
-        `writing operator config "${path}" is not allowed — role.md, soul.md, and harness.yaml are the trusted identity surface (harness#366)`,
+        `writing operator config "${path}" is not allowed — role.md, soul.md, and harness.yaml are the trusted identity surface`,
       );
     }
   }
@@ -619,7 +619,6 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     },
   };
 
-  // harness#318 — cost tool
   const costTool: SpiritTool = {
     name: "cost",
     description:
@@ -628,7 +627,6 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     execute: async () => formatSocketResponse(await send("cost.summary")),
   };
 
-  // harness#319 — backlog tool
   const backlogTool: SpiritTool = {
     name: "backlog",
     description:
@@ -668,7 +666,6 @@ export const buildSpiritTools = (ctx: ToolContext): readonly SpiritTool[] => {
     },
   };
 
-  // harness#320 — doctor tool
   const doctorTool: SpiritTool = {
     name: "doctor",
     description:
