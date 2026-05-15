@@ -903,6 +903,91 @@ describe("validateWake", () => {
     expect(v.obligationStatus).toBe("unmet");
   });
 
+  it("blob URL in wakeSummary satisfies a committed-artifact obligation", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "docs/research/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "Filed research at https://github.com/xeeban/emergent-praxis/blob/main/docs/research/competitive-positioning-2026-05-14.md.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("blob URL with #L anchor strips to the path before matching", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "docs/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "See https://github.com/xeeban/emergent-praxis/blob/main/docs/research/foo.md#L42 for details.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("blob URL whose path falls outside the glob does not satisfy", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "drafts/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "Committed https://github.com/xeeban/emergent-praxis/blob/main/docs/legal/refund.md.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("unmet");
+  });
+
+  it("multiple blob URLs — one matching the glob is enough", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "drafts/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: [
+        "Posted https://github.com/xeeban/emergent-praxis/blob/main/docs/legal/refund.md.",
+        "Then drafted https://github.com/xeeban/emergent-praxis/blob/main/drafts/2026-05/article.md.",
+      ].join(" "),
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("blob URL inside a governance event payload counts as evidence", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "docs/research/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Research complete.",
+      governanceEvents: [
+        {
+          kind: "report",
+          payload: {
+            url: "https://github.com/xeeban/emergent-praxis/blob/main/docs/research/foo.md",
+          },
+        },
+      ],
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("no receipt and no blob URL leaves a committed-artifact obligation unmet", () => {
+    const contract = mkContract([{ kind: "committed-artifact", path: "drafts/**/*.md" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Drafted the article and was about to commit.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("unmet");
+  });
+
+  it("blob URL satisfies a committed-artifact obligation with no path declared", () => {
+    const contract = mkContract([{ kind: "committed-artifact" }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "Committed https://github.com/xeeban/emergent-praxis/blob/main/anywhere/file.md.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
   it("runtime-artifact required output is always satisfied (digest writer runs on completion)", () => {
     const contract = mkContract([{ kind: "runtime-artifact", path: ".murmuration/runs/**/*.md" }]);
     const v = validateWake({ ...mkCtx(), contract }, emptyResult, []);
