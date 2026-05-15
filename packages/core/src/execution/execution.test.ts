@@ -418,14 +418,10 @@ describe("validateWake", () => {
   });
 
   // -------------------------------------------------------------------------
-  // harness#364 Part A — GitHub issue URL counts as structural evidence
+  // GitHub issue URL counts as structural evidence
   // -------------------------------------------------------------------------
 
-  it("treats a full GitHub issue URL in wakeSummary as structural evidence (harness#364)", () => {
-    // Reproduces engineering-agent's 2026-05-11 wake on EP #845: comment
-    // posted via subscription-CLI subprocess; URL lands in wakeSummary
-    // but no receipt exists. Before this fix, the wake was flagged
-    // narrative-only-claim → idle.
+  it("treats a full GitHub issue URL in wakeSummary as structural evidence", () => {
     const directive = makeIssueSignal(845, ["source-directive", "assigned:engineering-agent"]);
     const result = {
       ...emptyResult,
@@ -738,7 +734,7 @@ describe("validateWake", () => {
     expect(() => validateWake(mkCtx({ signals: [directive] }), result, [])).not.toThrow();
   });
 
-  // Routing filter tests (harness#354 regression coverage)
+  // Routing filter tests
 
   it("skips a directive scoped to a different agent — does not count as unaddressed", () => {
     const directive = makeIssueSignal(100, ["source-directive", "assigned:other-agent"]);
@@ -789,7 +785,7 @@ describe("validateWake", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Phase 4 PR 4 — contract obligation enforcement (ADR-0047, ADR-0048)
+  // Contract obligation enforcement
   // -------------------------------------------------------------------------
 
   const baseBudget = {
@@ -1259,7 +1255,7 @@ describe("renderSignalForPrompt", () => {
 });
 
 // ---------------------------------------------------------------------------
-// validateBehavior — Phase 4 PR 6a (warning-only)
+// validateBehavior (advisory warnings)
 // ---------------------------------------------------------------------------
 
 describe("validateBehavior", () => {
