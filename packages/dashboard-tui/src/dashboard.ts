@@ -120,10 +120,10 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
         : a.subscriptionCliPermissionMode === "operator-approved"
           ? cyan(" [op-approved]")
           : "";
-    // Phase 4 PR 5: surface validationStatus from the last wake.
-    // Only show the badge when it carries operator-relevant signal.
-    // `productive` is the silent happy path; `unknown` and absent are
-    // both elided to keep the row terse.
+    // Surface validationStatus from the last wake. Only show the badge
+    // when it carries operator-relevant signal — `productive` is the
+    // silent happy path; `unknown` and absent are both elided to keep
+    // the row terse.
     const validStr =
       a.validationStatus === "obligation-unmet"
         ? red(
@@ -138,8 +138,8 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
           : a.validationStatus === "idle"
             ? dim(" [idle-val]")
             : "";
-    // Phase 4 PR 6a: surface behavior warnings (warning-only, does NOT
-    // affect productive/successfulWakes). Yellow to distinguish from the
+    // Surface behavior warnings (advisory, does NOT affect
+    // productive/successfulWakes). Yellow to distinguish from the
     // load-bearing red `obl-unmet`. Elided when count is 0/null.
     const behStr =
       a.behaviorWarningCount !== null && a.behaviorWarningCount > 0

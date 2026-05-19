@@ -35,6 +35,16 @@ import { fileURLToPath, pathToFileURL } from "node:url";
  * `exitCode` is the conventional sysexits value the bin entrypoint
  * should propagate (78 = configuration error per `sysexits.h`).
  */
+/**
+ * Replace ANSI/control bytes with `?` before writing operator-visible
+ * text to stderr. Used for filesystem entries (directory names from
+ * `readdir`) and CLI argv values that an attacker could plant with
+ * escape sequences to spoof terminal output.
+ */
+export const sanitizeForTerminal = (s: string): string =>
+  // eslint-disable-next-line no-control-regex
+  s.replace(/[\x00-\x1f\x7f]/g, "?");
+
 export class BootError extends Error {
   public readonly kind:
     | "incomplete-agent-single"
@@ -972,7 +982,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     if (incompleteSingle !== undefined) {
       throw new BootError(
         "incomplete-agent-single",
-        `murmuration: agent "${options.agentDir}" is incomplete — missing ${incompleteSingle.missing.join(", ")}. ` +
+        `murmuration: agent "${sanitizeForTerminal(options.agentDir)}" is incomplete — missing ${incompleteSingle.missing.join(", ")}. ` +
           `Add the missing file before booting this agent.`,
       );
     }
@@ -989,7 +999,8 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     const incompleteAgents = await loader.findIncompleteAgents();
     if (incompleteAgents.length > 0) {
       const lines = incompleteAgents.map(
-        ({ dir, missing }) => `  - agents/${dir}/  (missing: ${missing.join(", ")})`,
+        ({ dir, missing }) =>
+          `  - agents/${sanitizeForTerminal(dir)}/  (missing: ${missing.join(", ")})`,
       );
       process.stderr.write(
         `murmuration: skipping ${String(incompleteAgents.length)} incomplete agent(s) — ` +

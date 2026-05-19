@@ -130,11 +130,23 @@ export interface ExecutionContract {
  * downstream in `assembleExecutionContract`). Operators with no
  * `contract:` block fall back to a synthesized minimal default.
  */
+/**
+ * A path glob may not start with `/` (no absolute paths) or contain `..`
+ * segments (no traversal). Operators who need a path outside the
+ * murmuration root should fix the murmuration root instead.
+ */
+const safePathGlob = z
+  .string()
+  .refine(
+    (s) => !s.startsWith("/") && !s.split("/").includes(".."),
+    "path glob must not start with `/` or contain `..` segments",
+  );
+
 export const contractDeclarationSchema = z
   .object({
     done_when: z.array(z.string()).default([]),
-    committed_artifacts: z.array(z.string()).default([]),
-    runtime_artifacts: z.array(z.string()).default([]),
+    committed_artifacts: z.array(safePathGlob).default([]),
+    runtime_artifacts: z.array(safePathGlob).default([]),
     verification_required_for: z.array(z.string()).default([]),
     approval_required_for: z.array(z.string()).default([]),
   })

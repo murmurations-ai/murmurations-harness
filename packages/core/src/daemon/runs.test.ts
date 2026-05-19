@@ -318,7 +318,7 @@ describe("RunArtifactWriter", () => {
     });
   });
 
-  describe("validation propagation (Phase 4 PR 5, ADR-0048)", () => {
+  describe("validation propagation", () => {
     it("omits validation fields when no WakeValidationResult is passed", async () => {
       const writer = new RunArtifactWriter({
         rootDir,

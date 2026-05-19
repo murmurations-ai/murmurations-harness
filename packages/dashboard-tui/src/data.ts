@@ -35,9 +35,8 @@ export interface AgentStatus {
    */
   readonly subscriptionCliPermissionMode: "restricted" | "operator-approved" | "trusted" | null;
   /**
-   * Validation status of the last wake (Phase 4 PR 5, ADR-0047, ADR-0048).
-   * Null when the agent has not yet completed a wake or the entry pre-dates
-   * Phase 4 wiring.
+   * Validation status of the last wake. Null when the agent has not yet
+   * completed a wake or the entry pre-dates contract wiring.
    */
   readonly validationStatus:
     | "productive"
@@ -48,20 +47,18 @@ export interface AgentStatus {
     | null;
   /**
    * Contract obligation status of the last wake. Null when no contract
-   * was supplied (legacy entries or roles without a `contract:` block when
-   * the daemon predates Phase 4 wiring).
+   * was supplied (legacy entries or roles without a `contract:` block).
    */
   readonly obligationStatus: "satisfied" | "unmet" | "not-applicable" | null;
   /**
    * Number of `requiredOutputs` from the contract that had no matching
-   * successful evidence (Phase 4 PR 4). Null when obligationStatus is not "unmet".
+   * successful evidence. Null when obligationStatus is not "unmet".
    */
   readonly unmetRequiredOutputsCount: number | null;
   /**
-   * Count of behavior warnings (Phase 4 PR 6a). Null when validation
-   * data is unavailable. Warning-only signal — does NOT mark the wake
-   * non-productive; rendered as a yellow `[beh:N]` badge for operator
-   * calibration.
+   * Count of behavior warnings. Null when validation data is unavailable.
+   * Advisory signal — does NOT mark the wake non-productive; rendered as
+   * a yellow `[beh:N]` badge for operator review.
    */
   readonly behaviorWarningCount: number | null;
   readonly stale: boolean; // stalled or no wake in > 48h
