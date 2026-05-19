@@ -57,6 +57,38 @@ export interface VerificationStep {
   readonly required: boolean;
 }
 
+/**
+ * The closed set of obligation kinds the validator recognizes. The literal
+ * union is load-bearing — every consumer of {@link RequiredOutput} switches
+ * on this field, and `default: never` exhaustiveness checks catch new kinds
+ * at compile time.
+ */
+export type RequiredOutputKind =
+  | "summary"
+  | "runtime-artifact"
+  | "committed-artifact"
+  | "comment"
+  | "issue"
+  | "commit"
+  | "governance-event";
+
+/**
+ * One obligation an agent must satisfy this wake.
+ *
+ * `paths` is OR semantics: any one matching glob satisfies the obligation.
+ * The assembler folds a multi-entry `committed_artifacts:` list into a
+ * single `RequiredOutput` whose `paths` array carries every declared glob;
+ * a single-entry declaration is the same shape with `paths.length === 1`.
+ *
+ * `paths` is omitted entirely for non-path obligation kinds
+ * (`summary`, `comment`, `issue`, `governance-event`).
+ */
+export interface RequiredOutput {
+  readonly kind: RequiredOutputKind;
+  readonly paths?: readonly string[];
+  readonly description: string;
+}
+
 // ---------------------------------------------------------------------------
 // ExecutionContract
 // ---------------------------------------------------------------------------
@@ -74,29 +106,8 @@ export interface ExecutionContract {
   // Injected as a `trusted` prompt segment at spawn time.
   // Checked by WakeValidator POST-WAKE against actuals (Phase 4).
 
-  /**
-   * Artifacts the agent must produce to satisfy the contract.
-   *
-   * Each obligation accepts either a single `path` glob OR a list of `paths`.
-   * When `paths` is set, any one of the listed globs satisfies the obligation
-   * (OR semantics) — this is how the assembler folds a multi-entry
-   * `committed_artifacts:` list into a single obligation. `path` and `paths`
-   * are exclusive; a caller setting both is using the older (single-path)
-   * shape and `paths` is ignored.
-   */
-  readonly requiredOutputs: readonly {
-    readonly kind:
-      | "summary"
-      | "runtime-artifact"
-      | "committed-artifact"
-      | "comment"
-      | "issue"
-      | "commit"
-      | "governance-event";
-    readonly path?: string;
-    readonly paths?: readonly string[];
-    readonly description: string;
-  }[];
+  /** Artifacts the agent must produce to satisfy the contract. */
+  readonly requiredOutputs: readonly RequiredOutput[];
   /** Action items from the signal bundle mapped into the contract. */
   readonly actionItems: readonly ActionItemRef[];
   /** Testable completion conditions (Phase 4 validator checks these). */
@@ -228,41 +239,25 @@ export const assembleExecutionContract = (
 ): ExecutionContract => {
   const declaration = args.declaration;
 
-  // Fold a multi-entry path list into ONE obligation with OR semantics
-  // across the listed globs. A single-entry list becomes a single-path
-  // obligation (no `paths` field) for backwards-compatible output shape.
-  const foldPaths = <K extends "committed-artifact" | "runtime-artifact">(
-    kind: K,
+  // Multi-path declarations fold into ONE obligation whose `paths` carries
+  // every declared glob — the validator OR-matches across them. Single-path
+  // declarations are the same shape with `paths.length === 1`.
+  const buildPathObligation = (
+    kind: "committed-artifact" | "runtime-artifact",
     list: readonly string[],
-    describe: (p: string) => string,
-    describeMany: (n: number) => string,
-  ): readonly {
-    kind: K;
-    path?: string;
-    paths?: readonly string[];
-    description: string;
-  }[] => {
+  ): readonly RequiredOutput[] => {
     if (list.length === 0) return [];
-    if (list.length === 1) {
-      const path = list[0]!;
-      return [{ kind, path, description: describe(path) }];
-    }
-    return [{ kind, paths: list, description: describeMany(list.length) }];
+    const description =
+      list.length === 1
+        ? `${kind === "committed-artifact" ? "Committed" : "Runtime"} artifact matching: ${list[0] ?? ""}`
+        : `${kind === "committed-artifact" ? "Committed" : "Runtime"} artifact matching any of ${String(list.length)} declared paths`;
+    return [{ kind, paths: list, description }];
   };
 
-  const committedOutputs = foldPaths(
-    "committed-artifact",
-    declaration?.committed_artifacts ?? [],
-    (p) => `Committed artifact matching: ${p}`,
-    (n) => `Committed artifact matching any of ${String(n)} declared paths`,
-  );
-  const runtimeOutputs = foldPaths(
-    "runtime-artifact",
-    declaration?.runtime_artifacts ?? [],
-    (p) => `Runtime artifact matching: ${p}`,
-    (n) => `Runtime artifact matching any of ${String(n)} declared paths`,
-  );
-  const requiredOutputs = [...committedOutputs, ...runtimeOutputs];
+  const requiredOutputs: readonly RequiredOutput[] = [
+    ...buildPathObligation("committed-artifact", declaration?.committed_artifacts ?? []),
+    ...buildPathObligation("runtime-artifact", declaration?.runtime_artifacts ?? []),
+  ];
 
   const actionItems = args.signals.actionItems.map(toActionItemRef);
 
@@ -389,9 +384,10 @@ export const renderContractForPrompt = (contract: ExecutionContract): string => 
     for (const out of contract.requiredOutputs) {
       let pathPart = "";
       if (out.paths !== undefined && out.paths.length > 0) {
-        pathPart = ` (any of: ${out.paths.map((p) => `\`${p}\``).join(", ")})`;
-      } else if (out.path !== undefined) {
-        pathPart = ` \`${out.path}\``;
+        pathPart =
+          out.paths.length === 1
+            ? ` \`${out.paths[0] ?? ""}\``
+            : ` (any of: ${out.paths.map((p) => `\`${p}\``).join(", ")})`;
       }
       lines.push(`- **${out.kind}**${pathPart} — ${out.description}`);
     }

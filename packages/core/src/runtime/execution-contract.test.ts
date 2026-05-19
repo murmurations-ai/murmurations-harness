@@ -94,8 +94,9 @@ describe("assembleExecutionContract", () => {
     });
 
     expect(contract.objective).toBe("Commit at least one research artifact under drafts/");
-    // Multi-path committed_artifacts folds into ONE obligation with `paths`;
-    // single-entry runtime_artifacts stays as a single-path obligation.
+    // Every path-bearing obligation uses the same `paths` shape — single-path
+    // declarations carry `paths.length === 1`, multi-path declarations OR-fold
+    // into one obligation whose `paths` is the full list.
     expect(contract.requiredOutputs).toHaveLength(2);
     expect(contract.requiredOutputs[0]).toMatchObject({
       kind: "committed-artifact",
@@ -103,7 +104,7 @@ describe("assembleExecutionContract", () => {
     });
     expect(contract.requiredOutputs[1]).toMatchObject({
       kind: "runtime-artifact",
-      path: ".murmuration/runs/**/*.md",
+      paths: [".murmuration/runs/**/*.md"],
     });
     expect(contract.completionConditions).toHaveLength(2);
     expect(contract.completionConditions[0]?.id).toBe("done-when-0");

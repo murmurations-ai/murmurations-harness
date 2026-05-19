@@ -796,6 +796,9 @@ describe("validateWake", () => {
     maxCostMicros: 0,
   };
 
+  // `path` is a test-helper convenience that maps to `paths: [path]` so
+  // existing single-path test inputs stay terse. The contract type itself
+  // only carries `paths`.
   const mkContract = (
     requiredOutputs: readonly {
       readonly kind:
@@ -814,12 +817,14 @@ describe("validateWake", () => {
     wakeReason: { kind: "scheduled" as const, cronExpression: "0 9 * * *" },
     wakeMode: "individual" as const,
     objective: "test objective",
-    requiredOutputs: requiredOutputs.map((r) => ({
-      kind: r.kind,
-      ...(r.path !== undefined ? { path: r.path } : {}),
-      ...(r.paths !== undefined ? { paths: r.paths } : {}),
-      description: r.description ?? "test required output",
-    })),
+    requiredOutputs: requiredOutputs.map((r) => {
+      const paths = r.paths ?? (r.path !== undefined ? [r.path] : undefined);
+      return {
+        kind: r.kind,
+        ...(paths !== undefined ? { paths } : {}),
+        description: r.description ?? "test required output",
+      };
+    }),
     actionItems: [],
     completionConditions: [],
     verification: [],
@@ -878,9 +883,9 @@ describe("validateWake", () => {
     expect(v.obligationStatus).toBe("unmet");
     expect(v.productive).toBe(false);
     expect(v.unmetRequiredOutputs).toHaveLength(1);
-    expect(v.unmetRequiredOutputs?.[0]).toEqual({
+    expect(v.unmetRequiredOutputs?.[0]).toMatchObject({
       kind: "committed-artifact",
-      path: "drafts/**/*.md",
+      paths: ["drafts/**/*.md"],
     });
     expect(v.reason).toContain("contract obligation unmet");
   });
@@ -1047,29 +1052,6 @@ describe("validateWake", () => {
       kind: "committed-artifact",
       paths: ["drafts/**/*.md", "docs/research/**/*.md", "pipeline/**/*.md"],
     });
-  });
-
-  it("paths wins over path when both are set on an obligation", () => {
-    const contract = mkContract([
-      {
-        kind: "committed-artifact",
-        path: "drafts/**/*.md",
-        paths: ["docs/research/**/*.md"],
-      },
-    ]);
-    // Receipt matches `paths[0]` but NOT `path` — should still satisfy (paths wins).
-    const receipts = [
-      {
-        action: {
-          kind: "commit-file" as const,
-          filePath: "docs/research/foo.md",
-          fileContent: "x",
-        },
-        success: true,
-      },
-    ];
-    const v = validateWake({ ...mkCtx(), contract }, emptyResult, receipts);
-    expect(v.obligationStatus).toBe("satisfied");
   });
 
   it("runtime-artifact required output is always satisfied (digest writer runs on completion)", () => {
