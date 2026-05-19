@@ -3,7 +3,7 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.8.0] - 2026-05-19
 
 **Execution contracts — agents declare what completion looks like in `role.md`, the validator scores wakes against the obligation, and the dashboard surfaces it.**
 
@@ -39,6 +39,19 @@ ADR-0047 ([Execution Contracts](docs/adr/0047-execution-contracts.md)) defines t
 
 - **`validateWake` false-positive on subscription-CLI WakeAction comments** (#369, #364 Part A). Subscription-CLI agents post comments via subprocess tool calls that never reach `result.actions`. The validator now treats a `/issues/<N>` URL in `wakeSummary` or any governance event as structural evidence (with word-boundary lookahead so `/issues/845` does not satisfy `#84` or `#8450`). Part B (`verifiedActions` field on `AgentResult`) deferred to v0.8.1.
 - **`validateWake` false-positive on subprocess `gh api` commits** (#377, #364 Part C). Same class of bug for `committed-artifact` obligations: agents committing via `gh api` produce no `commit-file` receipt but leave a blob URL in the wake summary. Blob URLs are now accepted as evidence (with trailing sentence-punctuation stripped so `…/foo.md.` extracts `…/foo.md`).
+- **Spirit `safePath` followed symlinks and was case-sensitive** (#385). An agent could create `agents/foo/role.md → /etc/something` (or symlink a `drafts/` path that resolved into a sibling agent's directory) and Spirit's `read_file` / `write_file` followed the link, bypassing the trusted-surface guard. The check is now realpath-based — both the murmuration root and the target are resolved before any safety check, with walk-up to the closest existing ancestor for new-file writes. On macOS APFS (case-insensitive by default) the prior regex bypassed `agents/foo/Role.md` despite that being the same inode as `role.md`; comparison is now lowercased.
+- **`murmuration list` terminal-injection via attacker-controlled `ps` output** (#385). The orphan-daemon scanner read `--root <value>` from another local process's command line and echoed it unsanitized to the operator's terminal. Any local user could spawn `sleep 1d --root $'\e[2J\e[H[FAKE row]'` and inject ANSI controls into the listing. Captured roots containing control bytes are now rejected; the parser also switched from BSD-only `command=` to POSIX `args=` with a fallback for non-GNU `ps`.
+- **`RequiredOutput.kind` discriminated union widened to `string` in three of four declaration sites** (#386). The OR-semantics fix shipped earlier in the cycle propagated `kind: string` through `WakeValidationResult.unmetRequiredOutputs`, `isOutputSatisfied`, and the local validator builder, eliminating the exhaustive-switch safety the literal union was meant to introduce. Extracted `RequiredOutput` and `RequiredOutputKind` as named exports; the `isOutputSatisfied` switch now uses a `never` exhaustiveness check.
+- **`path` vs. `paths` exclusive-but-coexisting on obligations** (#386). The previous shape carried both fields with a runtime tie-breaker documented one way and implemented the other. Collapsed to `paths` always; single-path declarations carry `paths.length === 1`. Eliminates the contradiction and removes the dead `length === 1` special-case from the assembler.
+- **`isOutputSatisfied` default-`true` for unknown obligation kinds** (#386). Speculative "forward-compat" against the closed Zod kind enum. Replaced with exhaustive `never` so a new kind forces a compile-time deliberate decision rather than silently satisfying.
+- **`boot.ts` called `process.exit` for configuration errors** (#387). Engineering Standard #6 says only `bin.ts` may exit the process. Boot now throws a typed `BootError` carrying its own `exitCode`; `bin.ts` catches and maps to sysexits-78. Covers incomplete-agent-single, no-agents-found, governance-plugin-invalid, and secrets-load-failed paths.
+- **Dead `actionItems` field on `ExecutionContract`** (#388). Populated by the assembler from `signals.actionItems` but never read by the prompt renderer, validator, or any other consumer. Removed the field plus the `toActionItemRef` helper and the `ActionItemRef` interface. Live action-item reads continue through `context.signals.actionItems` on `validateWake`.
+- **`renderContractForPrompt` always emitted `## Permitted side effects`** (#388). For the common read-only contract this was prompt-token noise. Now emitted only when the contract grants anything beyond `read`.
+- **Progress-note comments re-introduced after the #378 cleanup pass** (#388, #390). ~17 `Phase 4 PR N`, `(harness#NNN)`, "before v0.8.1 promotes...", and forward-plan markers crept back across `runtime/execution-contract.ts`, `daemon/runs.ts`, `identity/index.ts`, `runtime/prompt-assembler.ts`, two test files, and `dashboard-tui/src/{data,dashboard}.ts`. Scrubbed.
+- **Validator-spoof via blob URL with `..` segments** (#390). The path→paths collapse from #386 widened the validator surface — a compromised agent could declare `committed_artifacts: ["../../etc/**"]` and synthesize a blob URL whose extracted path traversed out of the repo, spoofing obligation satisfaction without an actual commit. `extractGithubBlobPaths` now rejects `..` segments and absolute paths; `contractDeclarationSchema` rejects the same at parse time so the operator gets a clean error rather than a silently-broken contract.
+- **`boot.ts` stderr writes filtered for terminal injection** (#390). Same class as the `murmuration list` injection fix in #385: a directory dropped under `agents/` with a name containing ANSI escape bytes would have been echoed unsanitized into the operator's terminal by the incomplete-agent warning block. New `sanitizeForTerminal` helper replaces control bytes with `?` before any operator-visible write.
+- **S3 vocabulary in the fallback role template** (#390). `IdentityLoader`'s synthesized `role.md` referenced "tensions" and "consent rounds" — S3-specific terminology that contradicted the governance-model-independence claim in `CLAUDE.md`. Every fallback-synthesized agent picked it up regardless of the operator's governance plugin. Rewritten to generic "governance items" / "approval-required" language.
+- **`mkContract` test helper re-leaked the `RequiredOutput.kind` literal union** (#390). The validator obligation test helper re-declared the seven literal kinds inline rather than importing `RequiredOutputKind` — the same anti-pattern #386 closed in production code. Imported the named type.
 
 ### Known limitations (v0.8.1 follow-ups)
 
@@ -69,10 +82,9 @@ See the **Execution contracts** section of [README.md](README.md#execution-contr
 
 ### Internals
 
-- 1240 tests passing across 72 test files (up from 1097 in v0.7.2; +143 new tests for the contract pipeline).
-- All Phase 4 PRs merged: #367 (PR 1+2), #368 (#366 gate), #369 (#364 gate), #370 (PR 3), #371 (PR 4), #372 (PR 5), #373 (PR 6a).
-- Cold-start cost gate measured (#365 closed): 138 ms boot phase, 0 GitHub API calls during cold-start — Phase 4 contract assembly is local file I/O.
-- Live runtime validation: intelligence-agent wake `116cd12b` (2026-05-13 15:46 UTC) fired the full pipeline end-to-end and produced the expected `obligationStatus: "unmet"` result for a wake that did its work via comments instead of commits.
+- 1264 tests passing across 72 test files (up from 1097 in v0.7.2).
+- Cold-start cost gate measured (#365 closed): 138 ms boot phase, 0 GitHub API calls during cold-start — contract assembly is local file I/O.
+- The release was walked back after a first tag (#384) following two rounds of multi-agent code review (architecture / security / TypeScript / quality). Round 1 surfaced 16 findings closed in #385 (security), #386 (type tightening), #387 (boot typed errors), and #388 (cleanup sweep). Round 2 verified the round-1 fixes and surfaced five more — including a real regression introduced by #386 — closed in #390 before the final tag.
 
 ## [0.7.2] - 2026-05-07
 
