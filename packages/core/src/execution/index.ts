@@ -752,7 +752,11 @@ export interface WakeValidationResult {
    * The specific `requiredOutputs` from the contract that have no matching
    * successful evidence. Populated only when `obligationStatus` is `"unmet"`.
    */
-  readonly unmetRequiredOutputs?: readonly { readonly kind: string; readonly path?: string }[];
+  readonly unmetRequiredOutputs?: readonly {
+    readonly kind: string;
+    readonly path?: string;
+    readonly paths?: readonly string[];
+  }[];
   /**
    * Behavior warnings from `validateBehavior`. Each warning describes a
    * narrative claim in `wakeSummary` that lacks structured evidence
@@ -886,7 +890,11 @@ const pathMatchesGlob = (actual: string, glob: string): boolean => {
  * have no structured evidence at all.
  */
 const isOutputSatisfied = (
-  req: { readonly kind: string; readonly path?: string },
+  req: {
+    readonly kind: string;
+    readonly path?: string;
+    readonly paths?: readonly string[];
+  },
   result: {
     readonly actions: readonly WakeAction[];
     readonly outputs: readonly AgentOutputArtifact[];
@@ -908,12 +916,23 @@ const isOutputSatisfied = (
       return true;
     case "committed-artifact":
     case "commit": {
+      // Build the set of acceptable globs. `paths` (OR semantics) wins over
+      // `path` (single glob) when both are set. An obligation with neither
+      // matches any commit-file receipt or any blob URL — a "did the agent
+      // commit anything" check.
+      const globs: readonly string[] | undefined =
+        req.paths !== undefined && req.paths.length > 0
+          ? req.paths
+          : req.path !== undefined
+            ? [req.path]
+            : undefined;
+
       const receiptHit = receipts.some((r) => {
         if (!r.success || r.action.kind !== "commit-file") return false;
-        if (req.path === undefined) return true;
+        if (globs === undefined) return true;
         const filePath = r.action.filePath;
         if (filePath === undefined) return false;
-        return pathMatchesGlob(filePath, req.path);
+        return globs.some((g) => pathMatchesGlob(filePath, g));
       });
       if (receiptHit) return true;
 
@@ -931,9 +950,8 @@ const isOutputSatisfied = (
         }),
       ];
       if (blobPaths.length === 0) return false;
-      const reqPath = req.path;
-      if (reqPath === undefined) return true;
-      return blobPaths.some((p) => pathMatchesGlob(p, reqPath));
+      if (globs === undefined) return true;
+      return blobPaths.some((p) => globs.some((g) => pathMatchesGlob(p, g)));
     }
     case "comment":
       return successfulReceiptOfKind("comment-issue");
@@ -1207,7 +1225,9 @@ export const validateWake = (
   }
 
   let obligationStatus: "satisfied" | "unmet" | "not-applicable" | undefined;
-  let unmetRequiredOutputs: { readonly kind: string; readonly path?: string }[] | undefined;
+  let unmetRequiredOutputs:
+    | { readonly kind: string; readonly path?: string; readonly paths?: readonly string[] }[]
+    | undefined;
   if (context.contract !== undefined) {
     if (context.contract.requiredOutputs.length === 0) {
       obligationStatus = "not-applicable";
@@ -1222,6 +1242,7 @@ export const validateWake = (
         unmetRequiredOutputs = unmet.map((req) => ({
           kind: req.kind,
           ...(req.path !== undefined ? { path: req.path } : {}),
+          ...(req.paths !== undefined ? { paths: req.paths } : {}),
         }));
       }
     }

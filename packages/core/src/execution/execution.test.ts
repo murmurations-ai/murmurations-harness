@@ -807,6 +807,7 @@ describe("validateWake", () => {
         | "commit"
         | "governance-event";
       readonly path?: string;
+      readonly paths?: readonly string[];
       readonly description?: string;
     }[],
   ) => ({
@@ -816,6 +817,7 @@ describe("validateWake", () => {
     requiredOutputs: requiredOutputs.map((r) => ({
       kind: r.kind,
       ...(r.path !== undefined ? { path: r.path } : {}),
+      ...(r.paths !== undefined ? { paths: r.paths } : {}),
       description: r.description ?? "test required output",
     })),
     actionItems: [],
@@ -981,6 +983,92 @@ describe("validateWake", () => {
         "Committed https://github.com/xeeban/emergent-praxis/blob/main/anywhere/file.md.",
     };
     const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("multi-path obligation: any matching commit-file receipt satisfies (OR semantics)", () => {
+    const contract = mkContract([
+      {
+        kind: "committed-artifact",
+        paths: ["drafts/**/*.md", "docs/research/**/*.md", "pipeline/**/*.md"],
+      },
+    ]);
+    const receipts = [
+      {
+        action: {
+          kind: "commit-file" as const,
+          filePath: "docs/research/foo.md",
+          fileContent: "x",
+        },
+        success: true,
+      },
+    ];
+    const v = validateWake({ ...mkCtx(), contract }, emptyResult, receipts);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("multi-path obligation: any matching blob URL satisfies (URL fallback works with OR paths)", () => {
+    const contract = mkContract([
+      {
+        kind: "committed-artifact",
+        paths: ["drafts/**/*.md", "docs/research/**/*.md", "pipeline/**/*.md"],
+      },
+    ]);
+    const result = {
+      ...emptyResult,
+      wakeSummary:
+        "Filed at https://github.com/xeeban/emergent-praxis/blob/main/docs/research/digest.md.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("satisfied");
+  });
+
+  it("multi-path obligation: no matching path leaves the obligation unmet", () => {
+    const contract = mkContract([
+      {
+        kind: "committed-artifact",
+        paths: ["drafts/**/*.md", "docs/research/**/*.md", "pipeline/**/*.md"],
+      },
+    ]);
+    const receipts = [
+      {
+        action: {
+          kind: "commit-file" as const,
+          filePath: "docs/legal/refund.md",
+          fileContent: "x",
+        },
+        success: true,
+      },
+    ];
+    const v = validateWake({ ...mkCtx(), contract }, emptyResult, receipts);
+    expect(v.obligationStatus).toBe("unmet");
+    expect(v.unmetRequiredOutputs).toHaveLength(1);
+    expect(v.unmetRequiredOutputs?.[0]).toMatchObject({
+      kind: "committed-artifact",
+      paths: ["drafts/**/*.md", "docs/research/**/*.md", "pipeline/**/*.md"],
+    });
+  });
+
+  it("paths wins over path when both are set on an obligation", () => {
+    const contract = mkContract([
+      {
+        kind: "committed-artifact",
+        path: "drafts/**/*.md",
+        paths: ["docs/research/**/*.md"],
+      },
+    ]);
+    // Receipt matches `paths[0]` but NOT `path` — should still satisfy (paths wins).
+    const receipts = [
+      {
+        action: {
+          kind: "commit-file" as const,
+          filePath: "docs/research/foo.md",
+          fileContent: "x",
+        },
+        success: true,
+      },
+    ];
+    const v = validateWake({ ...mkCtx(), contract }, emptyResult, receipts);
     expect(v.obligationStatus).toBe("satisfied");
   });
 

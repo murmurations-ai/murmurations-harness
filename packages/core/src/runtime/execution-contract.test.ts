@@ -94,12 +94,14 @@ describe("assembleExecutionContract", () => {
     });
 
     expect(contract.objective).toBe("Commit at least one research artifact under drafts/");
-    expect(contract.requiredOutputs).toHaveLength(3);
+    // Multi-path committed_artifacts folds into ONE obligation with `paths`;
+    // single-entry runtime_artifacts stays as a single-path obligation.
+    expect(contract.requiredOutputs).toHaveLength(2);
     expect(contract.requiredOutputs[0]).toMatchObject({
       kind: "committed-artifact",
-      path: "drafts/**/*.md",
+      paths: ["drafts/**/*.md", "docs/research/**/*.md"],
     });
-    expect(contract.requiredOutputs[2]).toMatchObject({
+    expect(contract.requiredOutputs[1]).toMatchObject({
       kind: "runtime-artifact",
       path: ".murmuration/runs/**/*.md",
     });
@@ -285,7 +287,9 @@ describe("renderContractForPrompt", () => {
     expect(rendered).toContain("- Commit at least one research artifact under drafts/");
     expect(rendered).toContain("- OR post a substantive comment on an open issue");
     expect(rendered).toContain("## Required outputs");
-    expect(rendered).toContain("**committed-artifact** `drafts/**/*.md`");
+    expect(rendered).toContain(
+      "**committed-artifact** (any of: `drafts/**/*.md`, `docs/research/**/*.md`)",
+    );
     expect(rendered).toContain("**runtime-artifact** `.murmuration/runs/**/*.md`");
     expect(rendered).toContain("## Verification required");
     expect(rendered).toContain("Verification required for: github.create_pull_request (required)");
