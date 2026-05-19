@@ -41,7 +41,7 @@ import type { WakeCostRecord } from "../cost/record.js";
 import type { AgentResult, WakeValidationResult } from "../execution/index.js";
 
 /**
- * Audit record for subscription-CLI wakes (T-CLI-9 / harness#301).
+ * Audit record for subscription-CLI wakes.
  *
  * Recorded before the subprocess is spawned so the record reflects
  * what was **configured**, not what the subprocess reported. A
@@ -67,7 +67,7 @@ export interface SubscriptionCliAuditContext {
    * restricted by the CLI's own defaults — see ADR-0036).
    */
   readonly allowedTools: readonly string[];
-  /** Always `true` — harness#300 (env allowlist) landed before this field. */
+  /** Always `true` — env allowlist is applied unconditionally. */
   readonly envAllowlistApplied: true;
 }
 
@@ -92,7 +92,7 @@ export interface RunArtifactWriterConfig {
    */
   readonly now?: () => Date;
   /**
-   * Subscription-CLI audit context for T-CLI-9 / harness#301.
+   * Subscription-CLI audit context.
    * When set, every index.jsonl entry written by this writer will
    * include a `subscriptionCli` block. Absent for API-provider agents.
    */
@@ -166,10 +166,8 @@ export interface RunArtifactIndexEntry {
    * `unaddressed-directives` — one or more source-directives were not
    *   backed by structured evidence.
    * `obligation-unmet` — the role.md `contract.requiredOutputs` had at
-   *   least one entry without matching successful evidence (Phase 4 PR 4,
-   *   ADR-0047 §2 obligation sub-contract).
+   *   least one entry without matching successful evidence.
    * `unknown` — validation data unavailable (legacy entry or failed wake).
-   * Near-Term #4 (Proposal 07 Phase 1), extended in Phase 4 PR 5.
    */
   readonly validationStatus?:
     | "productive"
@@ -184,28 +182,24 @@ export interface RunArtifactIndexEntry {
    */
   readonly directivesUnaddressed?: number;
   /**
-   * Contract obligation status (Phase 4 PR 4, ADR-0047 §2).
-   * Absent when no contract was supplied (e.g. roles without a
-   * `contract:` block when the daemon predates Phase 4 wiring).
+   * Contract obligation status. Absent when no contract was supplied
+   * (e.g. roles without a `contract:` block).
    */
   readonly obligationStatus?: "satisfied" | "unmet" | "not-applicable";
   /**
    * Number of `requiredOutputs` from the contract that had no matching
-   * successful evidence (Phase 4 PR 4). Populated only when
-   * `obligationStatus === "unmet"`.
+   * successful evidence. Populated only when `obligationStatus === "unmet"`.
    */
   readonly unmetRequiredOutputsCount?: number;
   /**
-   * Count of behavior warnings emitted by `validateBehavior` (Phase 4
-   * PR 6a, ADR-0047 §2, ADR-0048 §1). Warning-only signal — does NOT
-   * affect `productive` or `successfulWakes`. Dashboards surface this
-   * as a yellow badge so operators can calibrate before v0.8.1 promotes
-   * behavior validation to hard-fail.
+   * Count of behavior warnings emitted by `validateBehavior`. Advisory
+   * signal — does NOT affect `productive` or `successfulWakes`.
+   * Dashboards surface this as a yellow badge for operator review.
    */
   readonly behaviorWarningCount?: number;
   /**
-   * Subscription-CLI audit context (T-CLI-9 / harness#301).
-   * Present on all subscription-CLI wakes; absent for API-provider wakes.
+   * Subscription-CLI audit context. Present on all subscription-CLI
+   * wakes; absent for API-provider wakes.
    */
   readonly subscriptionCli?: SubscriptionCliAuditContext;
 }
@@ -227,7 +221,7 @@ export class RunArtifactWriter {
    * loop is never blocked by a failed write.
    *
    * `validation` is optional so test fixtures and legacy callers
-   * continue to work; production daemon wakes always pass it (Phase 4 PR 5).
+   * continue to work; production daemon wakes always pass it.
    */
   public async record(
     result: AgentResult,

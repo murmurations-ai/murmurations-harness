@@ -14,7 +14,6 @@
 import { describe, expect, it } from "vitest";
 
 import type {
-  ActionItemRef,
   CompletionCondition,
   ExecutionContract,
   VerificationStep,
@@ -97,11 +96,6 @@ const minimalEnv: EnvironmentSpec = {
   publicEnv: { MURMURATION_ENV: "test" },
   secretGrants: [],
   network: "none",
-};
-
-const actionItemRef: ActionItemRef = {
-  signalId: "github-issue:xeeban/ep#1",
-  sourceRef: "https://github.com/xeeban/ep/issues/1",
 };
 
 const completionCondition: CompletionCondition = {
@@ -282,7 +276,6 @@ describe("Proposal 07 Phase 0 boundary types", () => {
         wakeMode: "individual",
         objective: "Review open action items and post one comment.",
         requiredOutputs: [{ kind: "comment", description: "At least one issue comment" }],
-        actionItems: [actionItemRef],
         completionConditions: [completionCondition],
         verification: [verificationStep],
         allowedSideEffects: ["read", "write"],
@@ -302,7 +295,6 @@ describe("Proposal 07 Phase 0 boundary types", () => {
       };
       expect(contract.wakeMode).toBe("individual");
       expect(contract.allowedSideEffects).toContain("write");
-      expect(contract.actionItems[0]?.signalId).toBe("github-issue:xeeban/ep#1");
     });
   });
 
@@ -344,7 +336,6 @@ describe("Proposal 07 Phase 0 boundary types", () => {
           wakeMode: "individual",
           objective: "Test wake.",
           requiredOutputs: [],
-          actionItems: [],
           completionConditions: [],
           verification: [],
           allowedSideEffects: [],

@@ -4,7 +4,7 @@
  * Covers:
  *   - Missing-declaration path: contract still assembles from runtime context
  *   - Full declaration: every contract field maps through
- *   - actionItems mapping from SignalBundle to ActionItemRef (with/without sourceRef)
+ *   - requiredOutputs mapping from committed/runtime artifacts
  *   - allowedSideEffects derived from githubWriteScopes (read-only vs read+write)
  *   - objective synthesis precedence: done_when[0] > wakeReason
  *   - approval policy switches on `approval_required_for`
@@ -17,8 +17,8 @@ import {
   contractDeclarationSchema,
   renderContractForPrompt,
 } from "./execution-contract.js";
-import type { Signal, SignalBundle } from "../execution/index.js";
-import { makeAgentId, makeWakeId } from "../execution/index.js";
+import type { SignalBundle } from "../execution/index.js";
+import { makeWakeId } from "../execution/index.js";
 
 const wakeId = makeWakeId("wake-test");
 
@@ -65,7 +65,6 @@ describe("assembleExecutionContract", () => {
 
     expect(contract.objective).toBe("Scheduled wake (0 9 * * *)");
     expect(contract.requiredOutputs).toEqual([]);
-    expect(contract.actionItems).toEqual([]);
     expect(contract.completionConditions).toEqual([]);
     expect(contract.verification).toEqual([]);
     expect(contract.allowedSideEffects).toEqual(["read"]);
@@ -115,51 +114,6 @@ describe("assembleExecutionContract", () => {
       mode: "required",
       reason: "Source approval required for: admin",
     });
-  });
-
-  it("maps SignalBundle.actionItems to ActionItemRef with sourceRef for github-issue signals", () => {
-    const issueSignal: Signal = {
-      id: "github-issue:xeeban/emergent-praxis#861",
-      kind: "github-issue",
-      trust: "trusted",
-      fetchedAt: new Date(),
-      number: 861,
-      title: "Action item: intelligence-agent — add conformant contract: block",
-      url: "https://github.com/xeeban/emergent-praxis/issues/861",
-      labels: ["assigned:intelligence-agent"],
-      excerpt: "...",
-    };
-    const inboxSignal: Signal = {
-      id: "inbox:msg-42",
-      kind: "inbox-message",
-      trust: "trusted",
-      fetchedAt: new Date(),
-      fromAgent: makeAgentId("memory-agent"),
-      path: "agents/intelligence-agent/inbox/msg-42.md",
-      excerpt: "...",
-    };
-
-    const signals: SignalBundle = {
-      ...emptySignals,
-      actionItems: [issueSignal, inboxSignal],
-    };
-
-    const contract = assembleExecutionContract({
-      wakeReason: { kind: "scheduled", cronExpression: "0 9 * * *" },
-      wakeMode: "individual",
-      declaration: undefined,
-      signals,
-      budget: baseBudget,
-      githubWriteScopes: emptyScopes,
-    });
-
-    expect(contract.actionItems).toHaveLength(2);
-    expect(contract.actionItems[0]).toEqual({
-      signalId: "github-issue:xeeban/emergent-praxis#861",
-      sourceRef: "https://github.com/xeeban/emergent-praxis/issues/861",
-    });
-    // inbox-message has no url, so sourceRef is absent
-    expect(contract.actionItems[1]).toEqual({ signalId: "inbox:msg-42" });
   });
 
   it("derives allowedSideEffects from write scopes (read-only when all empty)", () => {
@@ -252,8 +206,9 @@ describe("renderContractForPrompt", () => {
     expect(rendered).toMatch(/^# Execution Contract\n/);
     expect(rendered).toContain("**Objective:** Scheduled wake (0 9 * * *)");
     expect(rendered).toContain("_No explicit obligations declared");
-    expect(rendered).toContain("Permitted side effects");
-    expect(rendered).toContain("`read`");
+    // Read-only contracts no longer render the Permitted side effects
+    // section — the agent learns nothing actionable from "you may read".
+    expect(rendered).not.toContain("## Permitted side effects");
     expect(rendered).not.toContain("## Completion conditions");
     expect(rendered).not.toContain("## Required outputs");
     expect(rendered).not.toContain("## Source approval");
