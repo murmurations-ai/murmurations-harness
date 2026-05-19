@@ -26,20 +26,12 @@
 
 import { z } from "zod";
 
-import type { CostBudget, Signal, SignalBundle, WakeMode, WakeReason } from "../execution/index.js";
+import type { CostBudget, SignalBundle, WakeMode, WakeReason } from "../execution/index.js";
 import type { ApprovalPolicy, ToolPermission } from "../tools/registry.js";
 
 // ---------------------------------------------------------------------------
 // Sub-types
 // ---------------------------------------------------------------------------
-
-/** Machine-readable reference to an action item from the signal bundle. */
-export interface ActionItemRef {
-  /** Signal id of the action item issue (e.g. `"github-issue:xeeban/ep#842"`). */
-  readonly signalId: string;
-  /** Optional source ref for provenance (e.g. the issue URL). */
-  readonly sourceRef?: string;
-}
 
 /** One testable condition that must be true for the wake to be considered done. */
 export interface CompletionCondition {
@@ -108,11 +100,9 @@ export interface ExecutionContract {
 
   /** Artifacts the agent must produce to satisfy the contract. */
   readonly requiredOutputs: readonly RequiredOutput[];
-  /** Action items from the signal bundle mapped into the contract. */
-  readonly actionItems: readonly ActionItemRef[];
-  /** Testable completion conditions (Phase 4 validator checks these). */
+  /** Testable completion conditions checked post-wake by the validator. */
   readonly completionConditions: readonly CompletionCondition[];
-  /** Post-wake verification steps (Phase 4). */
+  /** Post-wake verification steps. */
   readonly verification: readonly VerificationStep[];
 
   // ── Permission sub-contract ───────────────────────────────────────────
@@ -130,21 +120,15 @@ export interface ExecutionContract {
 // ---------------------------------------------------------------------------
 
 /**
- * Zod schema for the optional `contract:` block in `role.md` frontmatter
- * (ADR-0047 §4, Phase 4 PR 1). All arrays default to empty so a partial
- * `contract: {}` block parses cleanly; unknown keys are rejected via
- * `.strict()` so typos surface at boot rather than silently degrading.
+ * Zod schema for the optional `contract:` block in `role.md` frontmatter.
+ * All arrays default to empty so a partial `contract: {}` block parses
+ * cleanly; unknown keys are rejected via `.strict()` so typos surface at
+ * boot rather than silently degrading.
  *
- * The schema is intentionally minimal per the "v1 brutally simple"
- * design principle in `docs/plans/proposal-07-phase4-implementation.md`:
- * no nesting, no expressions, no operators beyond single-level `OR` in
- * `done_when[]` strings (parsed downstream in `buildSpawnContext` —
- * PR 2). When operators demand more expressive grammar, file a
- * follow-up ADR rather than extending this schema.
- *
- * The downstream mapping into {@link ExecutionContract} happens at
- * spawn time in PR 2. Operators with no `contract:` block fall back
- * to the synthesized minimal default (ADR-0047 §4 fallback).
+ * The schema is intentionally minimal: no nesting, no expressions, no
+ * operators beyond single-level `OR` in `done_when[]` strings (parsed
+ * downstream in `assembleExecutionContract`). Operators with no
+ * `contract:` block fall back to a synthesized minimal default.
  */
 export const contractDeclarationSchema = z
   .object({
@@ -162,7 +146,7 @@ export const contractDeclarationSchema = z
 export type ContractDeclaration = z.infer<typeof contractDeclarationSchema>;
 
 // ---------------------------------------------------------------------------
-// assembleExecutionContract (Phase 4 PR 2)
+// assembleExecutionContract
 // ---------------------------------------------------------------------------
 
 /** GitHub write scope shape consumed by {@link assembleExecutionContract}.
@@ -188,51 +172,31 @@ export interface AssembleExecutionContractArgs {
   readonly githubWriteScopes: GithubWriteScopesView;
 }
 
-/** Maps a single action-item Signal to an {@link ActionItemRef}. */
-const toActionItemRef = (signal: Signal): ActionItemRef => {
-  const sourceRef =
-    signal.kind === "github-issue" || signal.kind === "governance-round" ? signal.url : undefined;
-  return {
-    signalId: signal.id,
-    ...(sourceRef !== undefined ? { sourceRef } : {}),
-  };
-};
-
 /**
  * Build a full {@link ExecutionContract} for one wake.
  *
  * Combines the operator-authored `contract:` block from `role.md` with
  * runtime context (signal bundle, budget, wake reason, GitHub write
- * scopes). The result is the single source of truth used by:
+ * scopes). The result is the single source of truth used by the prompt
+ * assembler (to render `requiredOutputs` into the system prompt) and
+ * `validateOutcomes` (to score the wake against the declared obligations).
  *
- *   - The prompt assembler (PR 3) to render `requiredOutputs` and
- *     `actionItems` into the system prompt.
- *   - `validateOutcomes` (PR 4) to score the wake against the
- *     declared obligations.
- *
- * Phase 4 PR 2 keeps the assembly intentionally minimal:
+ * Mapping:
  *
  *   - `objective` is the first `done_when` string when present, else
  *     a synthesized one-line derived from `wakeReason`.
  *   - `requiredOutputs` is the concatenation of `committed_artifacts`
- *     and `runtime_artifacts` from the declaration; each entry becomes
- *     a glob-style required-output descriptor.
- *   - `actionItems` is the SignalBundle's action-item array mapped 1:1
- *     to {@link ActionItemRef}.
+ *     and `runtime_artifacts` from the declaration; each declaration
+ *     becomes one obligation whose `paths` array OR-matches across
+ *     every declared glob.
  *   - `completionConditions` is one entry per `done_when` string.
  *   - `verification` is one required step per `verification_required_for`
  *     entry.
  *   - `allowedSideEffects` is derived from `githubWriteScopes`: `read`
  *     is always granted; `write` is added when any write scope is
- *     non-empty. Finer-grained tool permission grants land in a later
- *     PR.
+ *     non-empty.
  *   - `approval` requires Source approval when `approval_required_for`
  *     is non-empty; the reason string lists the gated keys.
- *
- * Phase 5+ will replace this with full Tsinghua NLAH semantics
- * (disjunction, exemption, partial-credit). The v1 form is brutally
- * simple per ADR-0048 §Decision-drivers (1) and the
- * "v1 DSLs brutally simple" project rule.
  */
 export const assembleExecutionContract = (
   args: AssembleExecutionContractArgs,
@@ -258,8 +222,6 @@ export const assembleExecutionContract = (
     ...buildPathObligation("committed-artifact", declaration?.committed_artifacts ?? []),
     ...buildPathObligation("runtime-artifact", declaration?.runtime_artifacts ?? []),
   ];
-
-  const actionItems = args.signals.actionItems.map(toActionItemRef);
 
   const completionConditions: readonly CompletionCondition[] = (declaration?.done_when ?? []).map(
     (description, idx) => ({
@@ -307,7 +269,6 @@ export const assembleExecutionContract = (
     wakeMode: args.wakeMode,
     objective,
     requiredOutputs,
-    actionItems,
     completionConditions,
     verification,
     allowedSideEffects,
@@ -317,7 +278,7 @@ export const assembleExecutionContract = (
 };
 
 // ---------------------------------------------------------------------------
-// renderContractForPrompt (Phase 4 PR 3)
+// renderContractForPrompt
 // ---------------------------------------------------------------------------
 
 /**
@@ -405,14 +366,21 @@ export const renderContractForPrompt = (contract: ExecutionContract): string => 
     }
   }
 
-  lines.push("");
-  lines.push("## Permitted side effects");
-  lines.push("");
-  const sideEffectList = contract.allowedSideEffects.join(", ");
-  lines.push(
-    `You may exercise tools whose permission is one of: \`${sideEffectList}\`. ` +
-      "Tools requiring permissions outside this set will be refused at the tool layer.",
-  );
+  // Only emit "Permitted side effects" when the contract grants anything
+  // beyond plain `read`. Read-only contracts are the common case; rendering
+  // the section every wake wastes prompt tokens without telling the agent
+  // anything new.
+  const writePermissions = contract.allowedSideEffects.filter((p) => p !== "read");
+  if (writePermissions.length > 0) {
+    lines.push("");
+    lines.push("## Permitted side effects");
+    lines.push("");
+    const sideEffectList = contract.allowedSideEffects.join(", ");
+    lines.push(
+      `You may exercise tools whose permission is one of: \`${sideEffectList}\`. ` +
+        "Tools requiring permissions outside this set will be refused at the tool layer.",
+    );
+  }
 
   if (contract.approval.mode !== "none") {
     lines.push("");

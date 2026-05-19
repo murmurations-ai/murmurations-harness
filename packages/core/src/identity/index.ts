@@ -460,11 +460,11 @@ export const roleFrontmatterSchema = z.object({
   // EFFECTIVENESS reflection without machine-checked done conditions.
   accountabilities: accountabilitiesSchema,
 
-  // ADR-0047: execution contract declaration (Phase 4 PR 1). Optional —
-  // roles without a `contract:` block fall back to the synthesized
-  // minimal default at spawn time (ADR-0047 §4 fallback). Unknown keys
-  // are rejected via `.strict()` so typos in `done_when` / etc. surface
-  // at boot rather than silently degrading validation.
+  // Execution contract declaration (ADR-0047). Optional — roles without
+  // a `contract:` block fall back to the synthesized minimal default at
+  // spawn time. Unknown keys are rejected via `.strict()` so typos in
+  // `done_when` / etc. surface at boot rather than silently degrading
+  // validation.
   contract: contractDeclarationSchema.optional(),
 });
 
