@@ -20,6 +20,7 @@ import {
   type Signal,
 } from "./index.js";
 import { SpawnError, HandleUnknownError, InternalExecutorError } from "./index.js";
+import type { RequiredOutputKind } from "../runtime/execution-contract.js";
 
 describe("branded primitives", () => {
   it("makeAgentId produces a discriminated object", () => {
@@ -798,17 +799,11 @@ describe("validateWake", () => {
 
   // `path` is a test-helper convenience that maps to `paths: [path]` so
   // existing single-path test inputs stay terse. The contract type itself
-  // only carries `paths`.
+  // only carries `paths`. `kind` reuses `RequiredOutputKind` so a new
+  // member of that union forces this helper to update with it.
   const mkContract = (
     requiredOutputs: readonly {
-      readonly kind:
-        | "summary"
-        | "runtime-artifact"
-        | "committed-artifact"
-        | "comment"
-        | "issue"
-        | "commit"
-        | "governance-event";
+      readonly kind: RequiredOutputKind;
       readonly path?: string;
       readonly paths?: readonly string[];
       readonly description?: string;
@@ -975,6 +970,35 @@ describe("validateWake", () => {
     const result = {
       ...emptyResult,
       wakeSummary: "Drafted the article and was about to commit.",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("unmet");
+  });
+
+  it("blob URL containing `..` segments is rejected — no path-traversal spoofing", () => {
+    // An agent declares a contract glob like `committed_artifacts:
+    // ["../../etc/**"]` (in real life, blocked by the schema, but tested
+    // here directly on the validator) and synthesizes a matching blob
+    // URL. The extractor must reject the URL before it can satisfy the
+    // obligation.
+    const contract = mkContract([{ kind: "committed-artifact", paths: ["../../etc/**"] }]);
+    const result = {
+      ...emptyResult,
+      wakeSummary: "Committed https://github.com/xeeban/emergent-praxis/blob/main/../../etc/passwd",
+    };
+    const v = validateWake({ ...mkCtx(), contract }, result, []);
+    expect(v.obligationStatus).toBe("unmet");
+  });
+
+  it("blob URL starting with `/` (absolute path) is rejected", () => {
+    const contract = mkContract([{ kind: "committed-artifact", paths: ["**/*.md"] }]);
+    const result = {
+      ...emptyResult,
+      // A malformed URL where the captured path starts with `/`. The
+      // realistic capture would require a stray `/` after `/blob/<branch>/`
+      // which the regex doesn't produce — but defense-in-depth: even if a
+      // future regex change does, the absolute-path reject catches it.
+      wakeSummary: "See https://github.com/o/r/blob/main//absolute.md",
     };
     const v = validateWake({ ...mkCtx(), contract }, result, []);
     expect(v.obligationStatus).toBe("unmet");

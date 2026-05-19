@@ -250,12 +250,12 @@ export class PromptAssembler {
       content: MEMORY_PASSIVE_DATA_INSTRUCTION,
     };
 
-    // 4. Execution contract — emitted when spawn carries a contract
-    //    (Phase 4 PR 3, ADR-0047, ADR-0048). The contract is trusted because
-    //    it is assembled from the operator-authored role.md contract: block
-    //    plus harness-controlled runtime fields (budget, write scopes, signal
-    //    action items). Tells the agent what completion looks like and which
-    //    side effects are permitted.
+    // 4. Execution contract — emitted when spawn carries a contract. The
+    //    contract is trusted because it is assembled from the operator-
+    //    authored role.md contract: block plus harness-controlled runtime
+    //    fields (budget, write scopes, signal action items). Tells the
+    //    agent what completion looks like and which side effects are
+    //    permitted.
     const contractSegment: PromptSegment | undefined =
       spawn.contract !== undefined
         ? {

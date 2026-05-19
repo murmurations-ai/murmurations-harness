@@ -1,5 +1,5 @@
 /**
- * Tests for `assembleExecutionContract` — Phase 4 PR 2 (ADR-0047, ADR-0048).
+ * Tests for `assembleExecutionContract`.
  *
  * Covers:
  *   - Missing-declaration path: contract still assembles from runtime context
@@ -51,6 +51,40 @@ const writeScopes = {
   labels: ["xeeban/emergent-praxis"],
   issues: ["xeeban/emergent-praxis"],
 };
+
+describe("contractDeclarationSchema", () => {
+  it("rejects committed_artifacts entries containing `..` segments", () => {
+    expect(() =>
+      contractDeclarationSchema.parse({
+        committed_artifacts: ["../../etc/**"],
+      }),
+    ).toThrow(/must not start with .* or contain/);
+  });
+
+  it("rejects committed_artifacts entries starting with `/`", () => {
+    expect(() =>
+      contractDeclarationSchema.parse({
+        committed_artifacts: ["/absolute/path/**"],
+      }),
+    ).toThrow(/must not start with/);
+  });
+
+  it("rejects runtime_artifacts with `..` segments too", () => {
+    expect(() =>
+      contractDeclarationSchema.parse({
+        runtime_artifacts: ["foo/../bar/**"],
+      }),
+    ).toThrow(/must not start with .* or contain/);
+  });
+
+  it("accepts normal relative globs", () => {
+    const d = contractDeclarationSchema.parse({
+      committed_artifacts: ["drafts/**/*.md", "docs/research/**/*.md"],
+      runtime_artifacts: [".murmuration/runs/**/*.md"],
+    });
+    expect(d.committed_artifacts).toEqual(["drafts/**/*.md", "docs/research/**/*.md"]);
+  });
+});
 
 describe("assembleExecutionContract", () => {
   it("returns a valid contract when no declaration is present", () => {

@@ -835,7 +835,13 @@ const buildGithubIssueUrlMatcher = (issueNum: number): RegExp => {
 /**
  * Extract the `<path>` portion from every
  * `github.com/<owner>/<repo>/blob/<branch>/<path>` URL in `text`.
- * Trailing `#Lxxx` line anchors are stripped.
+ * Trailing `#Lxxx` line anchors and sentence punctuation are stripped.
+ *
+ * Paths containing `..` segments or starting with `/` are rejected.
+ * A compromised agent could otherwise synthesize a blob URL whose path
+ * traverses out of the repo (`/blob/main/../../etc/passwd`) and pair it
+ * with an equally-traversing `committed_artifacts:` glob to spoof
+ * obligation satisfaction without an actual commit landing.
  */
 const extractGithubBlobPaths = (text: string): readonly string[] => {
   const re = /github\.com\/[^/\s]+\/[^/\s]+\/blob\/[^/\s]+\/([^\s)\]>`"']+)/gi;
@@ -846,6 +852,7 @@ const extractGithubBlobPaths = (text: string): readonly string[] => {
     const beforeAnchor = path.split("#")[0] ?? path;
     const cleanPath = beforeAnchor.replace(/[.,;:!?]+$/, "");
     if (cleanPath.length === 0) continue;
+    if (cleanPath.startsWith("/") || cleanPath.split("/").includes("..")) continue;
     paths.push(cleanPath);
   }
   return paths;

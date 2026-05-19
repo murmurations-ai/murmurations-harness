@@ -760,7 +760,7 @@ describe("roleFrontmatterSchema (ADR-0016 extensions)", () => {
     await expect(loader.load("bad-plugins")).rejects.toThrow(FrontmatterInvalidError);
   });
 
-  // ── ADR-0047 contract declaration (Phase 4 PR 1) ─────────────────────────
+  // ── ADR-0047 contract declaration ────────────────────────────────────────
   // Optional block in role.md frontmatter. All 5 arrays default to empty;
   // unknown keys rejected via .strict(); non-string array entries rejected
   // by z.array(z.string()).
