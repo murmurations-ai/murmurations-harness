@@ -81,9 +81,10 @@ export const listSessions = async (): Promise<void> => {
   const { HARNESS_VERSION, AgentStateStore } = await import("@murmurations-ai/core");
 
   const running = await listRunningSessions();
+  const orphans = await findOrphanDaemons(running.map((s) => s.root));
   console.log("murmuration-harness v" + HARNESS_VERSION + "\n");
 
-  if (running.length === 0) {
+  if (running.length === 0 && orphans.length === 0) {
     console.log(
       "No running murmurations.\n\n" +
         "  Start one with:   murmuration start --root <path>\n" +
@@ -92,8 +93,8 @@ export const listSessions = async (): Promise<void> => {
     return;
   }
 
-  console.log("NAME".padEnd(20) + " " + "STATUS".padEnd(20) + " " + "AGENTS".padEnd(8) + " ROOT");
-  console.log("─".repeat(80));
+  console.log("NAME".padEnd(20) + " " + "STATUS".padEnd(28) + " " + "AGENTS".padEnd(8) + " ROOT");
+  console.log("─".repeat(90));
 
   for (const session of running) {
     const status = session.pid !== undefined ? `running (PID ${String(session.pid)})` : "running";
@@ -111,9 +112,63 @@ export const listSessions = async (): Promise<void> => {
     }
 
     console.log(
-      `${session.name.padEnd(20)} ${status.padEnd(20)} ${agentCount.padEnd(8)} ${session.root}`,
+      `${session.name.padEnd(20)} ${status.padEnd(28)} ${agentCount.padEnd(8)} ${session.root}`,
     );
   }
+
+  // Orphan daemons — running `murmuration start --root <X>` processes
+  // whose socket isn't registered (e.g. the daemon predates the
+  // sockets-dir feature, or its pid file was overwritten by a later
+  // start that registered its own socket). Surfacing them in `list`
+  // lets the operator notice and `kill` them.
+  for (const orphan of orphans) {
+    const name = `(orphan)`;
+    const status = `running (PID ${String(orphan.pid)}) ⚠`;
+    console.log(`${name.padEnd(20)} ${status.padEnd(28)} ${"-".padEnd(8)} ${orphan.root}`);
+  }
+
+  if (orphans.length > 0) {
+    console.log(
+      `\n${String(orphans.length)} orphan daemon(s) detected — running murmuration processes ` +
+        `whose socket is not registered. They may be firing scheduled wakes from stale state. ` +
+        `Stop them with \`kill -TERM <PID>\`.`,
+    );
+  }
+};
+
+/**
+ * Scan the OS process table for `murmuration start --root <X>`
+ * processes whose root isn't in `knownRoots`. Used to surface orphan
+ * daemons in `murmuration list`. Best-effort — returns an empty list
+ * if `ps` is unavailable or its output can't be parsed.
+ */
+const findOrphanDaemons = async (
+  knownRoots: readonly string[],
+): Promise<readonly { readonly pid: number; readonly root: string }[]> => {
+  const { spawnSync } = await import("node:child_process");
+  // `ps -A -o pid=,command=` works on macOS and Linux. The `=` suffix
+  // suppresses headers so we don't have to skip a first line.
+  const result = spawnSync("ps", ["-A", "-o", "pid=,command="], { encoding: "utf8" });
+  if (result.status !== 0) return [];
+  const stdout = typeof result.stdout === "string" ? result.stdout : "";
+  if (stdout.length === 0) return [];
+  const myPid = process.pid;
+  const known = new Set(knownRoots.map((r) => resolve(r)));
+  const orphans: { pid: number; root: string }[] = [];
+  for (const line of stdout.split("\n")) {
+    const m = /^\s*(\d+)\s+(.+)$/.exec(line);
+    if (m === null) continue;
+    const pid = Number(m[1]);
+    const cmd = m[2] ?? "";
+    if (Number.isNaN(pid) || pid === myPid) continue;
+    if (!/\bmurmuration\b.*\bstart\b/.test(cmd)) continue;
+    const rootMatch = /--root\s+(\S+)/.exec(cmd);
+    if (rootMatch === null) continue;
+    const root = resolve(rootMatch[1] ?? "");
+    if (known.has(root)) continue;
+    orphans.push({ pid, root });
+  }
+  return orphans;
 };
 
 /** Update heartbeat for a running daemon. Called periodically by the daemon. */
