@@ -635,6 +635,54 @@ export class IdentityLoader {
   }
 
   /**
+   * Find agent directories that look agent-like (have a `role.md` OR
+   * a `soul.md`) but are missing one of the required identity files.
+   * Used by the daemon at boot to refuse to spawn a roster with
+   * half-configured agents instead of silently synthesizing defaults.
+   *
+   * Returns one entry per incomplete directory with the names of the
+   * missing files. Directories with both files are not returned;
+   * directories with neither file are skipped (they're scaffolding, not
+   * half-configured agents).
+   */
+  public async findIncompleteAgents(): Promise<
+    readonly { readonly dir: string; readonly missing: readonly string[] }[]
+  > {
+    const agentsRoot = join(this.#rootDir, this.#agentsDir);
+    let entries: string[];
+    try {
+      entries = await readdir(agentsRoot);
+    } catch {
+      return [];
+    }
+    const results: { dir: string; missing: readonly string[] }[] = [];
+    for (const entry of entries.sort()) {
+      try {
+        const entryPath = join(agentsRoot, entry);
+        const info = await stat(entryPath);
+        if (!info.isDirectory()) continue;
+        const hasRole = await stat(join(entryPath, "role.md")).then(
+          () => true,
+          () => false,
+        );
+        const hasSoul = await stat(join(entryPath, "soul.md")).then(
+          () => true,
+          () => false,
+        );
+        if (hasRole && hasSoul) continue;
+        if (!hasRole && !hasSoul) continue;
+        const missing: string[] = [];
+        if (!hasRole) missing.push("role.md");
+        if (!hasSoul) missing.push("soul.md");
+        results.push({ dir: entry, missing });
+      } catch {
+        // not a valid agent directory — skip
+      }
+    }
+    return results;
+  }
+
+  /**
    * Resolve the default `soul.md` content for an agent that doesn't
    * have one on disk. Prefers the operator-provided template at
    * `<root>/murmuration/default-agent/soul.md`; falls back to the

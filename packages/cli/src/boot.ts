@@ -940,13 +940,50 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
 
   let agentDirs: readonly string[];
   if (options.agentDir !== undefined) {
+    // Single-agent path (`--agent <id>`). Validate that the requested
+    // agent directory has BOTH identity files — refuse to boot otherwise
+    // rather than fall back to silent synthesis.
+    const incompleteAgents = await loader.findIncompleteAgents();
+    const incompleteSingle = incompleteAgents.find((i) => i.dir === options.agentDir);
+    if (incompleteSingle !== undefined) {
+      process.stderr.write(
+        `murmuration: agent "${options.agentDir}" is incomplete — missing ${incompleteSingle.missing.join(", ")}. ` +
+          `Add the missing file before booting this agent.\n`,
+      );
+      process.exit(78);
+    }
     agentDirs = [options.agentDir];
   } else if (options.rootDir !== undefined) {
     // Explicit --root without --agent → discover all agents.
-    agentDirs = await loader.discover();
-    if (agentDirs.length === 0) {
+    // Half-configured agent dirs (have role.md OR soul.md but not both)
+    // are surfaced to the operator and skipped — the daemon proceeds
+    // with the agents that ARE fully configured. Silent fallback
+    // synthesis is the wrong behavior: a missing role.md or soul.md
+    // means the operator hasn't finished wiring that agent, and waking
+    // it with a generated default produces phantom activity in the
+    // murmuration's audit trail.
+    const incompleteAgents = await loader.findIncompleteAgents();
+    if (incompleteAgents.length > 0) {
+      const lines = incompleteAgents.map(
+        ({ dir, missing }) => `  - agents/${dir}/  (missing: ${missing.join(", ")})`,
+      );
       process.stderr.write(
-        `murmuration: no agents found in ${resolve(exampleRoot, "agents")}/*/ (looking for role.md)\n`,
+        `murmuration: skipping ${String(incompleteAgents.length)} incomplete agent(s) — ` +
+          `each directory has one identity file but not the other:\n\n` +
+          `${lines.join("\n")}\n\n` +
+          `Add the missing file or remove the directory. Boot continues with the ` +
+          `agents that are fully configured.\n\n`,
+      );
+    }
+    const incompleteSet = new Set(incompleteAgents.map((i) => i.dir));
+    agentDirs = (await loader.discover()).filter((d) => !incompleteSet.has(d));
+    if (agentDirs.length === 0) {
+      const hint =
+        incompleteAgents.length > 0
+          ? ` — ${String(incompleteAgents.length)} directory(s) skipped as incomplete (see warnings above)`
+          : "";
+      process.stderr.write(
+        `murmuration: no agents found in ${resolve(exampleRoot, "agents")}/*/ (looking for role.md + soul.md)${hint}\n`,
       );
       process.exit(78);
     }
