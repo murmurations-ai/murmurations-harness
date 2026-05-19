@@ -24,6 +24,12 @@ type SessionRegistry = Record<string, SessionEntry>;
 const REGISTRY_DIR = join(homedir(), ".murmuration");
 const REGISTRY_PATH = join(REGISTRY_DIR, "sessions.json");
 
+// Anything outside printable ASCII + Unicode letters is a red flag in a
+// filesystem path read from another process's command line. The check is
+// intentionally narrow — controls, ESC, CR, LF, BEL, BS, and so on.
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;
+
 const loadRegistry = (): SessionRegistry => {
   if (!existsSync(REGISTRY_PATH)) return {};
   try {
@@ -141,30 +147,51 @@ export const listSessions = async (): Promise<void> => {
  * processes whose root isn't in `knownRoots`. Used to surface orphan
  * daemons in `murmuration list`. Best-effort — returns an empty list
  * if `ps` is unavailable or its output can't be parsed.
+ *
+ * Captured `--root` values are read from another process's command
+ * line, which any local user can populate with arbitrary bytes —
+ * including ANSI escape sequences that would inject controls into the
+ * operator's terminal when the row is printed. We reject any captured
+ * root that contains control characters and prefer `args=` (POSIX)
+ * over `command=` (BSD-only) when both are available.
  */
 const findOrphanDaemons = async (
   knownRoots: readonly string[],
 ): Promise<readonly { readonly pid: number; readonly root: string }[]> => {
   const { spawnSync } = await import("node:child_process");
-  // `ps -A -o pid=,command=` works on macOS and Linux. The `=` suffix
-  // suppresses headers so we don't have to skip a first line.
-  const result = spawnSync("ps", ["-A", "-o", "pid=,command="], { encoding: "utf8" });
+  // POSIX-portable selector. Some non-GNU `ps` implementations reject the
+  // `=`-suffix shorthand; we fall back to plain header output if needed.
+  const psArgs = ["-A", "-o", "pid=,args="];
+  let result = spawnSync("ps", psArgs, { encoding: "utf8" });
+  if (result.status !== 0) {
+    result = spawnSync("ps", ["-A", "-o", "pid,args"], { encoding: "utf8" });
+  }
   if (result.status !== 0) return [];
-  const stdout = typeof result.stdout === "string" ? result.stdout : "";
-  if (stdout.length === 0) return [];
+  const stdoutRaw = typeof result.stdout === "string" ? result.stdout : "";
+  if (stdoutRaw.length === 0) return [];
+
   const myPid = process.pid;
   const known = new Set(knownRoots.map((r) => resolve(r)));
   const orphans: { pid: number; root: string }[] = [];
-  for (const line of stdout.split("\n")) {
+  // First line of the fallback (`-o pid,args` without `=`) is the header.
+  // The `=`-suffix form has no header. Defensively treat any line whose
+  // first token isn't a digit as a header and skip it.
+  for (const line of stdoutRaw.split("\n")) {
     const m = /^\s*(\d+)\s+(.+)$/.exec(line);
     if (m === null) continue;
-    const pid = Number(m[1]);
+    const pidStr = m[1] ?? "";
     const cmd = m[2] ?? "";
+    const pid = Number(pidStr);
     if (Number.isNaN(pid) || pid === myPid) continue;
     if (!/\bmurmuration\b.*\bstart\b/.test(cmd)) continue;
     const rootMatch = /--root\s+(\S+)/.exec(cmd);
     if (rootMatch === null) continue;
-    const root = resolve(rootMatch[1] ?? "");
+    const captured = rootMatch[1];
+    if (captured === undefined || captured.length === 0) continue;
+    // Reject anything with control bytes (ANSI escape, CR, LF, etc.) so a
+    // malicious process can't terminal-inject via its --root argv.
+    if (CONTROL_CHAR_RE.test(captured)) continue;
+    const root = resolve(captured);
     if (known.has(root)) continue;
     orphans.push({ pid, root });
   }

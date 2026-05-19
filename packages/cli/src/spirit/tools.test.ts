@@ -3,7 +3,7 @@
  * LLM: path-safety enforcement and skill loading.
  */
 
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -160,6 +160,44 @@ describe("Spirit tools — write_file (trusted-surface protection)", () => {
     const tool = getTool("read_file");
     const result = await tool.execute({ path: "agents/alpha/role.md" });
     expect(result).toBe("# original role\n");
+  });
+
+  it("refuses uppercase variants of protected paths (case-fold protection)", async () => {
+    const tool = getTool("write_file");
+    // macOS APFS is case-insensitive by default — Role.md and role.md are
+    // the same file. The guard must catch case-shifted variants.
+    const result = await tool.execute({
+      path: "agents/alpha/Role.md",
+      content: "# rewritten\n",
+    });
+    expect(result).toMatch(/operator config/);
+  });
+
+  it("refuses writes whose target is a symlink to a protected path", async () => {
+    // An attacker-controlled symlink `drafts/x.md → ../agents/alpha/role.md`
+    // must not bypass the regex check on the literal write path.
+    mkdirSync(join(root, "drafts"), { recursive: true });
+    symlinkSync(join(root, "agents", "alpha", "role.md"), join(root, "drafts", "trojan.md"));
+    const tool = getTool("write_file");
+    const result = await tool.execute({
+      path: "drafts/trojan.md",
+      content: "# pwn\n",
+    });
+    expect(result).toMatch(/operator config/);
+  });
+
+  it("refuses writes whose containing directory is a symlink to a sibling agent", async () => {
+    // An attacker creates `agents/squatter → agents/alpha`, then writes
+    // to `agents/squatter/role.md`. The realpath resolution must catch
+    // this by walking the symlinked parent.
+    mkdirSync(join(root, "agents"), { recursive: true });
+    symlinkSync(join(root, "agents", "alpha"), join(root, "agents", "squatter"));
+    const tool = getTool("write_file");
+    const result = await tool.execute({
+      path: "agents/squatter/role.md",
+      content: "# stolen\n",
+    });
+    expect(result).toMatch(/operator config/);
   });
 });
 
