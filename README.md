@@ -4,9 +4,9 @@
 
 The Murmuration Harness is an open-source TypeScript runtime that lets a single human — the **Source** — coordinate a murmuration of AI agents to do real work. It is not an autonomous agent framework. It is a tool that amplifies human agency.
 
-> **v0.7.2** (current) — Spirit-as-operator-execution-environment, subscription-CLI providers (Claude/Codex/Gemini Pro/Max), prompt boundary with trust classification, Phase 3 governance plugin extraction complete. 9 packages, 1178 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
+> **v0.8.0** (current) — Execution contracts: agents declare `done_when` / `committed_artifacts` / `verification_required_for` in `role.md`, the validator scores wakes against the obligation, and the dashboard surfaces `[obl-unmet:N]` when output paths go unmet. `validateBehavior` ships warning-only — calibration before hard-fail in v0.8.1. 9 packages, 1240 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
 >
-> **In flight (v0.8+):** ADR-0047 "Execution Contracts" (proposed) gates Phase 4 contract-backed completion — see [`docs/plans/proposal-07-phase4-implementation.md`](./docs/plans/proposal-07-phase4-implementation.md).
+> **In flight (v0.8.1+):** Promote `validateBehavior` to hard-fail after 14d composite-permission soak; per-segment glob matcher; `verifiedActions` field on `AgentResult` for the long-term subscription-CLI evidence fix.
 
 ## Quickstart (5 minutes, 6 commands)
 
@@ -144,6 +144,56 @@ tools:
 ```
 
 At wake time, the runner connects to declared MCP servers, discovers tools, and passes them to the LLM. The LLM can call tools in a multi-step loop (up to 5 rounds). Connections are cleaned up after each wake.
+
+### Execution contracts
+
+Agents can declare what completion looks like via an optional `contract:` block in `role.md` frontmatter. The harness assembles a per-wake `ExecutionContract` from the declaration plus runtime context (signals, budget, write scopes), injects it as a trusted prompt segment, and validates the wake's outcome against the obligation. Wakes that fail to produce declared `requiredOutputs` are marked non-productive and count toward `idleWakes`.
+
+```yaml
+# role.md frontmatter
+contract:
+  # Plain-language conditions an operator can read at review time.
+  # Note: v0.8.0 displays these in the prompt but does NOT evaluate OR clauses —
+  # they are advisory. The validator only enforces `requiredOutputs` (below).
+  done_when:
+    - "At least one research artifact committed under drafts/"
+    - "OR at least one substantive issue comment posted"
+
+  # Glob paths the agent must produce a `commit-file` for to satisfy the obligation.
+  # Prefix+suffix matching (v0.8.0): `drafts/**/*.md` matches `drafts/foo/bar.md`.
+  committed_artifacts:
+    - "drafts/**/*.md"
+    - "docs/research/**/*.md"
+
+  # Glob paths the daemon writes automatically (digests). Auto-satisfied
+  # on wake completion — listed for operator clarity, not for enforcement.
+  runtime_artifacts:
+    - ".murmuration/runs/<agent-id>/**/*.md"
+
+  # Tool / action IDs that require post-wake verification before the wake counts.
+  # v0.8.0 emits a VerificationStep with `required: true` for each entry;
+  # Phase 5+ wires actual verification steps.
+  verification_required_for:
+    - "github.create_pull_request"
+
+  # Permission classes requiring Source approval. When non-empty, the contract's
+  # `approval.mode` becomes `required` and approval-gated actions pause the wake.
+  approval_required_for: []
+```
+
+**Dashboard surfacing.** The TUI agents panel shows the validation result of the last wake as a colored badge after the wake count:
+
+| Badge           | Meaning                                                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------- |
+| _(none)_        | Wake productive — all obligations met, no warnings.                                                                   |
+| `[obl-unmet:N]` | **N** `requiredOutputs` had no matching successful evidence (red — load-bearing).                                     |
+| `[dir-unaddr]`  | One or more source directives in the signal bundle were not addressed (yellow).                                       |
+| `[idle-val]`    | Wake produced no artifacts and had no directives (dim).                                                               |
+| `[beh:N]`       | **N** behavior warnings from the narrative-vs-tool-call cross-check (yellow). Warning-only in v0.8.0 — see CHANGELOG. |
+
+**No `contract:` block?** Agents continue to work with the legacy heuristic: a wake is productive when it produces ≥1 artifact and addresses any source directives in its bundle. The `contract:` block is opt-in.
+
+**Spec references.** [ADR-0047](docs/adr/0047-execution-contracts.md) defines the contract shape and the obligation/permission split. [ADR-0048](docs/adr/0048-phase-4-scope-lock-for-v0.8.0.md) documents the v0.8.0 scope lock (warning-only behavioral validation, prefix+suffix glob matcher, deferred 14d soak — all promoted to hard-fail in v0.8.1).
 
 ### Agent skills (AgentSkills.io)
 
@@ -296,11 +346,11 @@ Select at boot: `murmuration start --governance examples/governance-s3/index.mjs
 
 ```bash
 pnpm install              # install dependencies
-pnpm build                # build all 8 packages
+pnpm build                # build all 9 packages
 pnpm typecheck            # tsc --noEmit across all packages
 pnpm lint                 # eslint (strict-type-checked)
 pnpm format:check         # prettier check
-pnpm test                 # vitest (486 tests, 40 files)
+pnpm test                 # vitest (1240 tests, 72 files)
 pnpm check                # all of the above (CI locally)
 ```
 
