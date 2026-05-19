@@ -12,6 +12,7 @@
  * anyway. JSON is stringified; filesystem reads return raw bytes.
  */
 
+import { existsSync, realpathSync } from "node:fs";
 import { readFile, readdir, stat, writeFile, mkdir } from "node:fs/promises";
 import { join, resolve, relative, basename, dirname } from "node:path";
 
@@ -79,52 +80,92 @@ class PathSafetyError extends Error {
  * `.env*` file in either direction. For writes, additionally refuses
  * anything under `.murmuration/` — that subtree is daemon-authored
  * runtime state; Spirit may read it but never write into it.
+ *
+ * Symlink resolution: every path comparison runs against the realpath
+ * of both `rootDir` and the target. An agent that creates a symlink
+ * `agents/foo/role.md → /etc/something` (or to a sibling agent's
+ * `role.md`) cannot use it to escape the root or reach a blocked path.
+ * When the target itself does not exist (the typical case for writes
+ * about to create a new file) the parent directory is realpath-resolved
+ * and the basename re-joined, so a symlinked containing directory is
+ * still caught.
+ *
+ * Case folding: the trusted-surface regex matches case-insensitively.
+ * macOS APFS is case-insensitive by default — `agents/foo/Role.md` and
+ * `agents/foo/role.md` write the same inode, and the guard must catch
+ * both. On case-sensitive filesystems this is mildly over-protective
+ * but never wrong.
  */
 const safePath = (rootDir: string, path: string, mode: "read" | "write" = "read"): string => {
-  const abs = resolve(rootDir, path);
-  const rel = relative(rootDir, abs);
+  const realRoot = realpathOrLexical(rootDir);
+  const lexicalAbs = resolve(rootDir, path);
+  const realAbs = realpathOfTargetOrParent(lexicalAbs);
+  const rel = relative(realRoot, realAbs);
   if (rel.startsWith("..") || rel === "..") {
     throw new PathSafetyError(`path "${path}" escapes the murmuration root`);
   }
-  const base = basename(abs);
+  const base = basename(realAbs);
   for (const pattern of BLOCKED_BASENAME_PATTERNS) {
     if (pattern.test(base)) {
       throw new PathSafetyError(`access to "${path}" is not allowed (contains secrets)`);
     }
   }
   if (mode === "write") {
-    // Use platform-correct separator handling: relative() on POSIX returns
-    // forward slashes; the leading-segment check works either way.
-    if (
-      rel === ".murmuration" ||
-      rel.startsWith(".murmuration/") ||
-      rel.startsWith(".murmuration\\")
-    ) {
+    const relPosixLower = rel.replace(/\\/g, "/").toLowerCase();
+    if (relPosixLower === ".murmuration" || relPosixLower.startsWith(".murmuration/")) {
       throw new PathSafetyError(
         `writing under ".murmuration/" is not allowed — that subtree is daemon-authored runtime state`,
       );
     }
-
-    // Operator config files carry identity + governance authority and are
-    // rendered into agent prompts as `trusted` segments. Letting an agent
-    // rewrite its own role.md / soul.md / harness.yaml would let it edit
-    // `done_when`, clear `approval_required_for`, or inject prompts via
-    // any frontmatter field. Block writes to those paths.
-    //
-    // Normalize separators once so the regex catches Windows and POSIX paths.
-    const relPosix = rel.replace(/\\/g, "/");
     if (
-      /^agents\/[^/]+\/role\.md$/.test(relPosix) ||
-      /^agents\/[^/]+\/soul\.md$/.test(relPosix) ||
-      relPosix === "murmuration/soul.md" ||
-      relPosix === "harness.yaml"
+      /^agents\/[^/]+\/role\.md$/.test(relPosixLower) ||
+      /^agents\/[^/]+\/soul\.md$/.test(relPosixLower) ||
+      relPosixLower === "murmuration/soul.md" ||
+      relPosixLower === "harness.yaml"
     ) {
       throw new PathSafetyError(
         `writing operator config "${path}" is not allowed — role.md, soul.md, and harness.yaml are the trusted identity surface`,
       );
     }
   }
-  return abs;
+  return realAbs;
+};
+
+/** Realpath the given path, falling back to lexical resolution on error. */
+const realpathOrLexical = (p: string): string => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+};
+
+/**
+ * Realpath `target` if it exists; otherwise walk up until we find an
+ * existing ancestor, realpath that, and re-join the trailing path.
+ *
+ * Required for two cases:
+ *   1. Write to a path whose leaf does not exist yet (we still need to
+ *      realpath the containing directory to catch a symlinked parent).
+ *   2. Platforms where the root itself is a symlink (e.g. macOS `/tmp`
+ *      → `/private/tmp`). Without ancestor-walking, `realpath(rootDir)`
+ *      and the lexical `resolve()` of a non-existent target disagree
+ *      and `relative()` reports a false escape.
+ */
+const realpathOfTargetOrParent = (target: string): string => {
+  if (existsSync(target)) {
+    return realpathOrLexical(target);
+  }
+  let current = dirname(target);
+  let tail = basename(target);
+  while (current !== dirname(current)) {
+    if (existsSync(current)) {
+      return join(realpathOrLexical(current), tail);
+    }
+    tail = join(basename(current), tail);
+    current = dirname(current);
+  }
+  return target;
 };
 
 // ---------------------------------------------------------------------------
