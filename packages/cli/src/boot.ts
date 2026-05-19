@@ -26,6 +26,30 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+/**
+ * Typed boot-time error. Thrown instead of `process.exit` so the
+ * composition root stays library-like — `bin.ts` is the only place
+ * that turns errors into exit codes (Engineering Standard #6).
+ *
+ * `kind` is a stable discriminator for testing and structured logging.
+ * `exitCode` is the conventional sysexits value the bin entrypoint
+ * should propagate (78 = configuration error per `sysexits.h`).
+ */
+export class BootError extends Error {
+  public readonly kind:
+    | "incomplete-agent-single"
+    | "no-agents-found"
+    | "governance-plugin-invalid"
+    | "secrets-load-failed";
+  public readonly exitCode: number;
+  public constructor(kind: BootError["kind"], message: string, exitCode = 78) {
+    super(message);
+    this.name = "BootError";
+    this.kind = kind;
+    this.exitCode = exitCode;
+  }
+}
+
 import {
   AgentStateStore,
   Daemon,
@@ -877,10 +901,10 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       typeof (candidate as { name?: unknown }).name !== "string" ||
       typeof (candidate as { onEventsEmitted?: unknown }).onEventsEmitted !== "function"
     ) {
-      process.stderr.write(
-        `murmuration: governance module at ${governancePath} must export a GovernancePlugin as default\n`,
+      throw new BootError(
+        "governance-plugin-invalid",
+        `murmuration: governance module at ${governancePath} must export a GovernancePlugin as default`,
       );
-      process.exit(78);
     }
     governancePlugin = candidate as import("@murmurations-ai/core").GovernancePlugin;
     const range = governancePlugin.compatibleCoreVersionRange;
@@ -946,11 +970,11 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     const incompleteAgents = await loader.findIncompleteAgents();
     const incompleteSingle = incompleteAgents.find((i) => i.dir === options.agentDir);
     if (incompleteSingle !== undefined) {
-      process.stderr.write(
+      throw new BootError(
+        "incomplete-agent-single",
         `murmuration: agent "${options.agentDir}" is incomplete — missing ${incompleteSingle.missing.join(", ")}. ` +
-          `Add the missing file before booting this agent.\n`,
+          `Add the missing file before booting this agent.`,
       );
-      process.exit(78);
     }
     agentDirs = [options.agentDir];
   } else if (options.rootDir !== undefined) {
@@ -982,10 +1006,10 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         incompleteAgents.length > 0
           ? ` — ${String(incompleteAgents.length)} directory(s) skipped as incomplete (see warnings above)`
           : "";
-      process.stderr.write(
-        `murmuration: no agents found in ${resolve(exampleRoot, "agents")}/*/ (looking for role.md + soul.md)${hint}\n`,
+      throw new BootError(
+        "no-agents-found",
+        `murmuration: no agents found in ${resolve(exampleRoot, "agents")}/*/ (looking for role.md + soul.md)${hint}`,
       );
-      process.exit(78);
     }
   } else {
     // No --root, no --agent → default hello-world example.
@@ -1170,7 +1194,7 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
           reason: "secrets load failed",
         })}\n`,
       );
-      process.exit(78);
+      throw new BootError("secrets-load-failed", "murmuration: secrets load failed");
     }
     if (provider.has(GITHUB_TOKEN)) {
       // Resolve the target repo once, so the shared githubClient has
