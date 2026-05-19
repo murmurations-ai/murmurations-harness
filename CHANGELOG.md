@@ -3,7 +3,7 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.8.0] - 2026-05-19
+## [Unreleased]
 
 **Execution contracts — agents declare what completion looks like in `role.md`, the validator scores wakes against the obligation, and the dashboard surfaces it.**
 
