@@ -414,8 +414,12 @@ describe("RunArtifactWriter", () => {
         directivesUnaddressed: [],
         obligationStatus: "unmet",
         unmetRequiredOutputs: [
-          { kind: "committed-artifact", path: "drafts/**/*.md" },
-          { kind: "comment" },
+          {
+            kind: "committed-artifact",
+            paths: ["drafts/**/*.md"],
+            description: "test",
+          },
+          { kind: "comment", description: "test" },
         ],
         reason: "contract obligation unmet: 2 required output(s) without matching evidence",
       });
@@ -441,7 +445,7 @@ describe("RunArtifactWriter", () => {
         actionItemsAssigned: 0,
         directivesUnaddressed: [{ issueNumber: 1, reason: "narrative-only-claim" }],
         obligationStatus: "unmet",
-        unmetRequiredOutputs: [{ kind: "committed-artifact" }],
+        unmetRequiredOutputs: [{ kind: "committed-artifact", description: "test" }],
       });
 
       const entry = JSON.parse(
