@@ -6,7 +6,8 @@ on:
       - "v*"
 
 permissions:
-  contents: write # for gh release create
+  contents: write # gh release create
+  id-token: write # npm Trusted Publishing (OIDC exchange at registry.npmjs.org)
 
 jobs:
   publish:
@@ -19,6 +20,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install pnpm
+        # Trusted Publishing requires pnpm >= 10.7. Pinned to a known-good
+        # release; bump when npm's OIDC contract changes.
         uses: pnpm/action-setup@v4
         with:
           version: 10.33.0
@@ -70,10 +73,16 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Publish to npm
-        run: pnpm -r publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm (Trusted Publishing via OIDC)
+        # No NODE_AUTH_TOKEN: pnpm exchanges the GitHub OIDC token for a
+        # short-lived npm publish token via the configured trusted publisher
+        # for each @murmurations-ai/* package. The trusted publisher
+        # binding lives in each package's npmjs.com Settings → Publishing
+        # access tab and must name this repo + this workflow + this branch.
+        # If npm errors with "no trusted publisher configured", finish the
+        # setup at https://www.npmjs.com/package/@murmurations-ai/<pkg>/access
+        # before re-running this workflow.
+        run: pnpm -r publish --access public --no-git-checks --provenance
 
       - name: Create GitHub release
         env:
