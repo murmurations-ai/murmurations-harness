@@ -42,6 +42,11 @@ Releases are **milestone-based**, not time-based. A release ships when its miles
 
 ### How to release
 
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which runs the
+full gate (build / typecheck / lint / format / test), publishes all 8
+packages to npm via Trusted Publishing (OIDC — no long-lived tokens), and
+creates the GitHub Release.
+
 ```bash
 # 1. Ensure clean main branch
 git checkout main && git pull
@@ -51,25 +56,53 @@ pnpm version --recursive <major|minor|patch>
 
 # 3. Update CHANGELOG.md with the release notes
 
-# 4. Commit and tag
+# 4. Commit, tag, push
 git add -A
 git commit -m "release: v0.2.0"
 git tag v0.2.0
-
-# 5. Push tag (triggers CI)
 git push origin main --tags
-
-# 6. Publish to npm
-pnpm build
-pnpm publish --recursive --access public --no-git-checks
-
-# 7. Create GitHub Release from the tag
-gh release create v0.2.0 --title "v0.2.0" --notes-file CHANGELOG-ENTRY.md
+# The Release workflow handles npm publish + GH release automatically.
 ```
 
-### Automated releases (future)
+### npm Trusted Publishing setup (one-time, per package)
 
-A GitHub Action will automate steps 6-7 when a version tag is pushed. Until then, releases are manual.
+The release workflow uses [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers)
+via GitHub OIDC. Each `@murmurations-ai/*` package must be configured on
+npmjs.com to trust this repository's `release.yml` workflow.
+
+Setup, once per package:
+
+1. Sign in to npmjs.com as a maintainer of `@murmurations-ai/*`.
+2. Go to the package page → **Settings** → **Publishing access**.
+3. Under **Trusted Publishers**, click **Add publisher**.
+4. Select **GitHub Actions** and fill:
+   - Repository: `murmurations-ai/murmurations-harness`
+   - Workflow filename: `release.yml`
+   - Environment: (leave blank unless we wire an env later)
+5. Save.
+
+Repeat for all 8 packages: `cli`, `core`, `dashboard-tui`, `github`, `llm`,
+`mcp`, `secrets-dotenv`, `signals`.
+
+Once configured, the workflow's `pnpm -r publish --provenance` step
+exchanges a GitHub OIDC token for a short-lived npm publish token per
+package — no `NPM_TOKEN` secret needed in the repo. The `--provenance`
+flag attaches a signed attestation linking the published tarball to the
+source commit and workflow run, visible on each package's npmjs.com page.
+
+### Manual publish (fallback)
+
+When Trusted Publishing isn't viable (e.g. tagging from a fork, or npm
+OIDC outage), publish manually from a clean local checkout of the tag:
+
+```bash
+git checkout v0.2.0
+pnpm install --frozen-lockfile
+pnpm build && pnpm check
+pnpm -r publish --access public --no-git-checks
+# This will prompt for npm 2FA. An automation token in ~/.npmrc bypasses
+# the prompt but is subject to npm's periodic security rotations.
+```
 
 ## Milestones
 
