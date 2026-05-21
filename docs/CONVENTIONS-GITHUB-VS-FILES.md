@@ -72,16 +72,31 @@ Issues are append-only by construction (comments + timeline). Files are not. If 
 - **Cumulative artifacts are append-only or versioned.** `baseline.md`, FAQs, knowledge files — if multiple wakes contribute, either append (clearly date-stamped) or maintain prior versions under `archive/`.
 - **Don't squash the audit trail.** A force-pushed branch that rewrites a chronicle file destroys the audit property the issue would have given you for free.
 
-## Cross-agent visibility (open question, harness-level)
+## Cross-agent visibility
 
 Issues had a side benefit the convention removes: by sitting in every agent's signal bundle, digest issues inadvertently kept agents aware of each other's state. With digests in files, no agent sees another's daily report unless something specific surfaces it.
 
-Two paths to restore cross-agent visibility, neither shipped yet:
+Two layers compensate.
 
-- **File-signal aggregator source.** The signal aggregator currently reads GitHub issues + private notes. A file-signal source would surface recent commits under `chronicles/` into peer agents' signal bundles, capped to a small number per peer per wake.
-- **Weekly synthesis issue per group.** One bot-owned aggregator issue (per the Renovate pattern in §Exceptions) that the facilitator updates with last-week's chronicle file links. Lower harness surface area, requires facilitator discipline.
+### Operator-side convention (shipped, applies today)
 
-Tracked at murmurations-ai/murmurations-harness#394.
+**Weekly synthesis issue per group**, per the Renovate "Dependency Dashboard" pattern in §Three exceptions.
+
+For each group whose members benefit from cross-pollination (typically: any group that meets on a cadence and has more than one member agent):
+
+- The group's **facilitator-agent** maintains exactly **one** rolling open issue titled `[SYNTHESIS] <group-id>` (e.g. `[SYNTHESIS] partnership-circle`, `[SYNTHESIS] content-circle`).
+- The facilitator **rewrites the body in place** (no comment appending) on a regular cadence — typically per meeting cycle or weekly.
+- The body contains: one paragraph per group member-agent summarising last cycle's chronicle file(s), with file-path links; any cross-cutting items spotted; the date of the last rewrite.
+- The issue is labeled `signal:synthesis` (and the standard `circle:<group-id>`) so other agents can recognize it as the cross-pollination surface.
+- The issue stays **perpetually open** — it is the rolling state. Closing it ends the synthesis.
+
+This convention works today with no harness change. The cost is one issue per group in everyone's signal bundle — replacing N daily-digest issues with 1 weekly synthesis issue.
+
+### Harness-side mechanism (v0.8.1, more durable)
+
+The signal aggregator currently reads GitHub issues + private notes. A **file-signal aggregator source** would surface recent commits under `chronicles/` into peer agents' signal bundles, capped to a small number per peer per wake. This makes peer visibility automatic regardless of facilitator discipline.
+
+Tracked at murmurations-ai/murmurations-harness#394. The synthesis-issue convention above is the bridge until the harness mechanism ships.
 
 ## Anti-patterns to avoid
 
