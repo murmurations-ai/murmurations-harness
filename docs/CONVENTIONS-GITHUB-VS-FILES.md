@@ -80,17 +80,21 @@ Two layers compensate.
 
 ### Operator-side convention (shipped, applies today)
 
-**Weekly synthesis issue per group**, per the Renovate "Dependency Dashboard" pattern in §Three exceptions.
+**Synthesis issue per group**, per the Renovate "Dependency Dashboard" pattern in §Three exceptions. The facilitator-agent is the role that holds this duty — domain agents stay focused on their own chronicles and don't read peer files themselves.
 
-For each group whose members benefit from cross-pollination (typically: any group that meets on a cadence and has more than one member agent):
+**Facilitator duty:**
 
-- The group's **facilitator-agent** maintains exactly **one** rolling open issue titled `[SYNTHESIS] <group-id>` (e.g. `[SYNTHESIS] partnership-circle`, `[SYNTHESIS] content-circle`).
-- The facilitator **rewrites the body in place** (no comment appending) on a regular cadence — typically per meeting cycle or weekly.
-- The body contains: one paragraph per group member-agent summarising last cycle's chronicle file(s), with file-path links; any cross-cutting items spotted; the date of the last rewrite.
-- The issue is labeled `signal:synthesis` (and the standard `circle:<group-id>`) so other agents can recognize it as the cross-pollination surface.
-- The issue stays **perpetually open** — it is the rolling state. Closing it ends the synthesis.
+1. **Look at what changed.** On each meeting-cycle wake (or weekly if the group doesn't meet on a cadence), `git log --since="<last-cycle>" -- chronicles/` (or equivalent) to enumerate files added/changed by peer agents since the last synthesis.
+2. **Read the diffs.** For each changed chronicle, read the file (not just the diff) so the synthesis isn't fooled by edits.
+3. **Maintain one rolling issue per group.** Title `[SYNTHESIS] <group-id>` (e.g. `[SYNTHESIS] partnership-circle`, `[SYNTHESIS] content-circle`). Labels: `signal:synthesis` plus the standard `circle:<group-id>`.
+4. **Rewrite the body in place** (no comment appending). Body structure: one paragraph per member-agent summarising what changed in their chronicle files this cycle, with file-path links; any cross-cutting observations; the date of the last rewrite.
+5. **The issue stays perpetually open** — it IS the rolling state. Closing ends the synthesis.
 
-This convention works today with no harness change. The cost is one issue per group in everyone's signal bundle — replacing N daily-digest issues with 1 weekly synthesis issue.
+**For domain agents:** keep writing chronicle files normally; the facilitator does the peer-awareness work so you don't have to read 9 other agents' chronicles each wake.
+
+**Cost:** one issue per group in everyone's signal bundle, rewritten on the meeting cadence. Replaces N daily-digest issues with 1 cadence-paced synthesis issue per group. Works today with no harness change.
+
+**Cadence guidance:** match the synthesis rewrite to the group's natural rhythm. A weekly-meeting group → weekly synthesis. A daily-standup group → daily synthesis (but consider if daily synthesis is actually necessary; weekly often suffices).
 
 ### Harness-side mechanism (v0.8.1, more durable)
 
