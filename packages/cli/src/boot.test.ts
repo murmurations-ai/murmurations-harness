@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  isOrphanedSchedule,
   makeAgentId,
   makeWakeId,
   registeredAgentFromLoadedIdentity,
@@ -20,7 +21,7 @@ import {
   type LoadedAgentIdentity,
 } from "@murmurations-ai/core";
 
-import { isOrphanedSchedule, makeDaemonHook } from "./boot.js";
+import { makeDaemonHook, sanitizeForTerminal } from "./boot.js";
 
 describe("makeDaemonHook", () => {
   const builder = (): WakeCostBuilder =>
@@ -290,5 +291,47 @@ describe("isOrphanedSchedule (harness#380)", () => {
         }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("sanitizeForTerminal (harness#380 review hardening)", () => {
+  it("strips C0 controls and DEL", () => {
+    expect(sanitizeForTerminal("a\x00b\x1bc\x7fd")).toBe("a?b?c?d");
+  });
+
+  it("strips C1 controls including 8-bit CSI (\\x9b)", () => {
+    // \x9b renders as ESC [ in xterm / Terminal.app — leaving it
+    // unfiltered would let a malicious dir name inject color/cursor codes.
+    expect(sanitizeForTerminal("a\x80b\x9bc\x9fd")).toBe("a?b?c?d");
+  });
+
+  it("strips Unicode bidi overrides (CVE-2021-42574 Trojan Source)", () => {
+    // U+202E (RIGHT-TO-LEFT OVERRIDE) is the classic Trojan Source primitive:
+    // a directory named `agent-‮dm.elor` renders as `agent-role.md`.
+    const tricked = "agent-‮dm.elor";
+    expect(sanitizeForTerminal(tricked)).toBe("agent-?dm.elor");
+    // Also covers isolates U+2066-U+2069.
+    expect(sanitizeForTerminal("⁦hidden⁩")).toBe("?hidden?");
+  });
+
+  it("strips zero-width and format characters", () => {
+    // U+200B zero-width space — invisible filename padding.
+    expect(sanitizeForTerminal("foo​bar")).toBe("foo?bar");
+    // U+FEFF BOM — also invisible.
+    expect(sanitizeForTerminal("﻿foo")).toBe("?foo");
+  });
+
+  it("strips line/paragraph separators", () => {
+    // U+2028 / U+2029 break terminal line accounting in some renderers.
+    expect(sanitizeForTerminal("a b c")).toBe("a?b?c");
+  });
+
+  it("passes through safe ASCII unchanged", () => {
+    expect(sanitizeForTerminal("agent-name_42.dir")).toBe("agent-name_42.dir");
+  });
+
+  it("passes through ordinary Unicode unchanged", () => {
+    // CJK + accented letters are not security-relevant — keep them.
+    expect(sanitizeForTerminal("agent-名前-é")).toBe("agent-名前-é");
   });
 });
