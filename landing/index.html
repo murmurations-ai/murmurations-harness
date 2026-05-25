@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Murmuration Harness — a suit of power armor for human-led AI coordination</title>
+    <meta
+      name="description"
+      content="Open-source TypeScript runtime that lets a single human — the Source — coordinate a flock of AI agents to do real work. Pluggable governance. GitHub-first. v0.8.0."
+    />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Familjen+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      /* --- Reset ------------------------------------------------------- */
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+      /* --- Tokens ------------------------------------------------------ */
+      :root {
+        --bg: #0e1320;
+        --bg-soft: #131a2a;
+        --bg-deep: #080c17;
+        --ink: #ebe5d6;
+        --ink-soft: rgba(235, 229, 214, 0.66);
+        --ink-faint: rgba(235, 229, 214, 0.38);
+        --rule: rgba(235, 229, 214, 0.16);
+        --rule-strong: rgba(235, 229, 214, 0.3);
+        --ember: #f25c2c;
+        --ember-glow: rgba(242, 92, 44, 0.18);
+
+        --serif: "Instrument Serif", "Times New Roman", serif;
+        --sans: "Familjen Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+        --mono: "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+        --gutter: clamp(1.25rem, 4vw, 3rem);
+        --max: 1320px;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--sans);
+        font-weight: 400;
+        line-height: 1.55;
+        font-size: 17px;
+        overflow-x: hidden;
+      }
+
+      /* --- Selection --------------------------------------------------- */
+      ::selection { background: var(--ember); color: var(--bg); }
+
+      /* --- Containers -------------------------------------------------- */
+      .wrap { max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter); }
+      .rule { border: none; border-top: 1px solid var(--rule); margin: 0; }
+
+      /* --- Top nav ----------------------------------------------------- */
+      header.nav {
+        position: sticky; top: 0; z-index: 50;
+        background: rgba(14, 19, 32, 0.78);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--rule);
+      }
+      header.nav .wrap {
+        display: flex; align-items: baseline; justify-content: space-between;
+        padding-top: 1rem; padding-bottom: 1rem;
+      }
+      .brand {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-weight: 500;
+      }
+      .brand .dot { color: var(--ember); }
+      nav.links {
+        display: flex; gap: 1.5rem;
+        font-family: var(--mono);
+        font-size: 0.74rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+      nav.links a {
+        color: var(--ink-soft); text-decoration: none;
+        transition: color 0.2s ease;
+      }
+      nav.links a:hover { color: var(--ember); }
+      nav.links .ver { color: var(--ink-faint); }
+
+      @media (max-width: 720px) {
+        nav.links { display: none; }
+      }
+
+      /* --- Hero -------------------------------------------------------- */
+      .hero {
+        position: relative;
+        padding-top: clamp(3rem, 9vw, 6rem);
+        padding-bottom: clamp(3rem, 7vw, 5.5rem);
+        overflow: hidden;
+      }
+      .hero .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+        gap: clamp(2rem, 5vw, 4rem);
+        align-items: end;
+      }
+      @media (max-width: 960px) {
+        .hero .grid { grid-template-columns: 1fr; }
+      }
+
+      .eyebrow {
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--ember);
+        margin-bottom: 1.5rem;
+        display: inline-flex; align-items: center; gap: 0.7rem;
+      }
+      .eyebrow::before {
+        content: ""; width: 22px; height: 1px; background: var(--ember);
+      }
+
+      h1.headline {
+        font-family: var(--serif);
+        font-weight: 400;
+        font-style: normal;
+        font-size: clamp(3.2rem, 8.6vw, 8.5rem);
+        line-height: 0.94;
+        letter-spacing: -0.025em;
+        color: var(--ink);
+      }
+      h1.headline em {
+        font-style: italic;
+        color: var(--ember);
+      }
+      h1.headline .ampersand {
+        font-style: italic;
+        font-size: 1.05em;
+        color: var(--ink-faint);
+        font-feature-settings: "salt" on;
+      }
+
+      .lede {
+        font-family: var(--serif);
+        font-style: italic;
+        font-size: clamp(1.15rem, 2.2vw, 1.55rem);
+        line-height: 1.45;
+        color: var(--ink-soft);
+        margin-top: 1.8rem;
+        max-width: 30ch;
+      }
+
+      .meta-row {
+        display: flex; flex-wrap: wrap; gap: 1.2rem 2rem;
+        margin-top: 2.4rem;
+        font-family: var(--mono); font-size: 0.72rem;
+        letter-spacing: 0.06em; color: var(--ink-faint);
+        text-transform: uppercase;
+      }
+      .meta-row span strong {
+        color: var(--ink); font-weight: 500;
+      }
+
+      /* --- Hero CTA ---------------------------------------------------- */
+      .hero-cta {
+        display: flex; flex-wrap: wrap; gap: 0.75rem;
+        margin-top: 2rem;
+      }
+      .btn {
+        display: inline-flex; align-items: center; gap: 0.6rem;
+        padding: 0.85rem 1.4rem;
+        font-family: var(--mono); font-size: 0.78rem;
+        letter-spacing: 0.08em; text-transform: uppercase;
+        text-decoration: none;
+        border: 1px solid var(--rule-strong);
+        color: var(--ink);
+        background: transparent;
+        transition: all 0.18s ease;
+        cursor: pointer;
+      }
+      .btn:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+      .btn.primary {
+        background: var(--ember); color: var(--bg); border-color: var(--ember);
+      }
+      .btn.primary:hover {
+        background: var(--ink); color: var(--bg); border-color: var(--ink);
+      }
+      .btn .arrow {
+        transition: transform 0.18s ease;
+      }
+      .btn:hover .arrow { transform: translateX(3px); }
+
+      /* --- Murmuration canvas (hero-right) ----------------------------- */
+      .flock {
+        position: relative;
+        height: clamp(280px, 36vw, 460px);
+        background: linear-gradient(160deg, var(--bg-soft) 0%, var(--bg-deep) 100%);
+        border: 1px solid var(--rule);
+        overflow: hidden;
+      }
+      .flock svg {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+      }
+      .flock .corner {
+        position: absolute;
+        bottom: 0.9rem; left: 1rem;
+        font-family: var(--mono);
+        font-size: 0.66rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+        z-index: 2;
+      }
+      .flock .agents-count {
+        position: absolute;
+        top: 0.9rem; right: 1rem;
+        font-family: var(--mono);
+        font-size: 0.66rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--ember);
+        z-index: 2;
+      }
+      .flock .agents-count .pulse {
+        display: inline-block; width: 6px; height: 6px;
+        background: var(--ember); border-radius: 50%;
+        margin-right: 0.4rem; vertical-align: middle;
+        animation: pulse 1.6s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+      }
+
+      /* --- Section pattern --------------------------------------------- */
+      section {
+        padding-top: clamp(3.5rem, 7vw, 6rem);
+        padding-bottom: clamp(3.5rem, 7vw, 6rem);
+        position: relative;
+      }
+      section .label {
+        display: flex; align-items: center; gap: 1rem;
+        font-family: var(--mono); font-size: 0.72rem;
+        letter-spacing: 0.18em; text-transform: uppercase;
+        color: var(--ink-faint);
+        margin-bottom: clamp(2rem, 4vw, 3rem);
+      }
+      section .label .num {
+        color: var(--ember);
+      }
+      section .label .line {
+        flex: 1; height: 1px; background: var(--rule);
+      }
+
+      h2.section-head {
+        font-family: var(--serif);
+        font-weight: 400;
+        font-size: clamp(2rem, 5vw, 3.6rem);
+        line-height: 1.05;
+        letter-spacing: -0.02em;
+        max-width: 22ch;
+      }
+      h2.section-head em { font-style: italic; color: var(--ember); }
+
+      /* --- Philosophy -------------------------------------------------- */
+      .philosophy .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+        gap: clamp(2rem, 6vw, 5rem);
+        align-items: start;
+      }
+      @media (max-width: 880px) {
+        .philosophy .grid { grid-template-columns: 1fr; }
+      }
+      .philosophy .quote {
+        font-family: var(--serif);
+        font-style: italic;
+        font-size: clamp(1.4rem, 2.6vw, 1.9rem);
+        line-height: 1.4;
+        color: var(--ink);
+      }
+      .philosophy .quote .pull {
+        color: var(--ember);
+        font-style: normal;
+      }
+      .philosophy .body p {
+        font-size: 1.05rem; line-height: 1.65;
+        color: var(--ink-soft);
+        margin-top: 1rem;
+        max-width: 56ch;
+      }
+      .philosophy .body p:first-child { margin-top: 0; }
+      .philosophy .body strong { color: var(--ink); font-weight: 600; }
+      .philosophy .body a {
+        color: var(--ember); text-decoration: none;
+        border-bottom: 1px solid transparent;
+      }
+      .philosophy .body a:hover { border-color: var(--ember); }
+
+      /* --- How it works ------------------------------------------------ */
+      .how .list {
+        display: flex; flex-direction: column;
+      }
+      .how .item {
+        display: grid;
+        grid-template-columns: 0.5fr 1.5fr 2fr;
+        gap: clamp(1.5rem, 4vw, 3rem);
+        padding: clamp(1.6rem, 3vw, 2.4rem) 0;
+        border-bottom: 1px solid var(--rule);
+        align-items: start;
+      }
+      @media (max-width: 800px) {
+        .how .item { grid-template-columns: 1fr; gap: 0.4rem; padding: 1.4rem 0; }
+      }
+      .how .item:last-child { border-bottom: none; }
+      .how .item .step-num {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        letter-spacing: 0.14em;
+        color: var(--ember);
+      }
+      .how .item h3 {
+        font-family: var(--serif);
+        font-size: clamp(1.45rem, 2.8vw, 2rem);
+        font-weight: 400;
+        line-height: 1.15;
+        color: var(--ink);
+        letter-spacing: -0.01em;
+      }
+      .how .item h3 em { font-style: italic; }
+      .how .item p {
+        font-size: 1.02rem; line-height: 1.65; color: var(--ink-soft);
+        max-width: 52ch;
+      }
+      .how .item p code {
+        font-family: var(--mono);
+        font-size: 0.86em;
+        color: var(--ember);
+        background: rgba(242, 92, 44, 0.08);
+        padding: 0.06em 0.45em;
+        border-radius: 2px;
+      }
+
+      /* --- Quickstart -------------------------------------------------- */
+      .quickstart .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+        gap: clamp(2rem, 5vw, 4rem);
+        align-items: start;
+      }
+      @media (max-width: 960px) {
+        .quickstart .grid { grid-template-columns: 1fr; }
+      }
+      .tabs {
+        display: flex;
+        font-family: var(--mono); font-size: 0.74rem;
+        letter-spacing: 0.1em; text-transform: uppercase;
+        border-bottom: 1px solid var(--rule);
+        margin-bottom: 0;
+      }
+      .tabs button {
+        flex: 1;
+        background: transparent;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--ink-faint);
+        padding: 0.9rem 1rem;
+        cursor: pointer;
+        font-family: inherit; font-size: inherit;
+        letter-spacing: inherit; text-transform: inherit;
+        transition: color 0.18s, border-color 0.18s;
+        text-align: left;
+      }
+      .tabs button.active {
+        color: var(--ember); border-bottom-color: var(--ember);
+      }
+      .tabs button:hover:not(.active) { color: var(--ink); }
+      .tabs button .badge {
+        display: inline-block; margin-left: 0.6rem;
+        font-size: 0.66rem; padding: 0.1em 0.5em;
+        background: rgba(242, 92, 44, 0.15);
+        color: var(--ember);
+        letter-spacing: 0.06em;
+      }
+
+      .terminal {
+        background: var(--bg-deep);
+        border: 1px solid var(--rule);
+        border-top: none;
+        font-family: var(--mono);
+        font-size: 0.86rem;
+        line-height: 1.7;
+        color: var(--ink);
+        position: relative;
+      }
+      .terminal-pane { display: none; padding: 1.6rem 1.5rem 1.8rem; overflow-x: auto; }
+      .terminal-pane.active { display: block; }
+      .terminal .comment { color: var(--ink-faint); }
+      .terminal .prompt { color: var(--ember); user-select: none; margin-right: 0.4em; }
+      .terminal .flag { color: #d4a85e; }
+      .terminal .str { color: #8fc1a9; }
+      .terminal .ok { color: var(--ember); }
+
+      .quickstart .body p {
+        font-size: 1.05rem; line-height: 1.65;
+        color: var(--ink-soft);
+        margin-top: 1.1rem; max-width: 55ch;
+      }
+      .quickstart .body p:first-child { margin-top: 0; }
+      .quickstart .body p strong { color: var(--ink); font-weight: 600; }
+
+      /* --- Providers --------------------------------------------------- */
+      .providers .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0;
+      }
+      @media (max-width: 800px) {
+        .providers .grid { grid-template-columns: 1fr; }
+      }
+      .providers .col {
+        padding: 2rem clamp(1.4rem, 3vw, 2.2rem);
+        border: 1px solid var(--rule);
+        background: var(--bg-soft);
+      }
+      .providers .col + .col { border-left: none; }
+      @media (max-width: 800px) {
+        .providers .col + .col { border-left: 1px solid var(--rule); border-top: none; }
+      }
+      .providers .col h3 {
+        font-family: var(--serif);
+        font-size: 1.8rem;
+        font-weight: 400;
+        line-height: 1.1;
+        margin-bottom: 0.6rem;
+      }
+      .providers .col h3 em { font-style: italic; color: var(--ember); }
+      .providers .col .price {
+        font-family: var(--mono);
+        font-size: 0.74rem; letter-spacing: 0.12em; text-transform: uppercase;
+        color: var(--ember);
+        margin-bottom: 1.2rem;
+      }
+      .providers .col ul {
+        list-style: none;
+        font-size: 0.96rem; line-height: 1.7;
+        color: var(--ink-soft);
+      }
+      .providers .col li { padding: 0.35rem 0; border-bottom: 1px solid var(--rule); }
+      .providers .col li:last-child { border-bottom: none; }
+      .providers .col li strong { color: var(--ink); font-weight: 600; }
+      .providers .col li code {
+        font-family: var(--mono); font-size: 0.86em;
+        color: var(--ink); opacity: 0.85;
+      }
+
+      /* --- Shipped log ------------------------------------------------- */
+      .shipped .log {
+        display: flex; flex-direction: column;
+      }
+      .shipped .entry {
+        display: grid;
+        grid-template-columns: 110px 1fr;
+        gap: clamp(1rem, 3vw, 2rem);
+        padding: 1.4rem 0;
+        border-bottom: 1px solid var(--rule);
+        align-items: start;
+      }
+      @media (max-width: 720px) {
+        .shipped .entry { grid-template-columns: 1fr; gap: 0.3rem; }
+      }
+      .shipped .entry:last-child { border-bottom: none; }
+      .shipped .when {
+        font-family: var(--mono);
+        font-size: 0.74rem; letter-spacing: 0.06em;
+        color: var(--ember); text-transform: uppercase;
+      }
+      .shipped .what {
+        font-size: 1.02rem; line-height: 1.55; color: var(--ink);
+      }
+      .shipped .what .meta {
+        display: block;
+        margin-top: 0.3rem;
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        color: var(--ink-faint);
+      }
+
+      /* --- Role.md sample --------------------------------------------- */
+      .role-sample {
+        margin-top: 2rem;
+        background: var(--bg-deep);
+        border: 1px solid var(--rule);
+        padding: 1.5rem;
+        font-family: var(--mono); font-size: 0.85rem; line-height: 1.7;
+        white-space: pre;
+        overflow-x: auto;
+        color: var(--ink);
+      }
+      .role-sample .fence { color: var(--ink-faint); }
+      .role-sample .key { color: #d4a85e; }
+      .role-sample .val { color: #8fc1a9; }
+      .role-sample .h { color: var(--ember); }
+
+      /* --- Big CTA ----------------------------------------------------- */
+      .cta {
+        padding-top: clamp(4rem, 9vw, 7rem);
+        padding-bottom: clamp(4rem, 9vw, 7rem);
+        text-align: center;
+        border-top: 1px solid var(--rule);
+        background: linear-gradient(180deg, transparent, var(--ember-glow));
+      }
+      .cta h2 {
+        font-family: var(--serif);
+        font-weight: 400;
+        font-size: clamp(2.6rem, 6vw, 4.8rem);
+        line-height: 1.0;
+        letter-spacing: -0.02em;
+        margin-bottom: 1.8rem;
+      }
+      .cta h2 em { font-style: italic; color: var(--ember); }
+      .cta p {
+        font-family: var(--serif); font-style: italic;
+        font-size: clamp(1.1rem, 1.8vw, 1.35rem);
+        color: var(--ink-soft);
+        max-width: 38ch;
+        margin: 0 auto 2.2rem;
+        line-height: 1.5;
+      }
+      .cta .pair { display: flex; gap: 0.8rem; justify-content: center; flex-wrap: wrap; }
+
+      /* --- Footer ------------------------------------------------------ */
+      footer.foot {
+        border-top: 1px solid var(--rule);
+        padding: 2.5rem 0 3rem;
+        font-family: var(--mono);
+        font-size: 0.74rem;
+        letter-spacing: 0.06em;
+        color: var(--ink-faint);
+      }
+      footer.foot .wrap {
+        display: flex; justify-content: space-between; align-items: baseline;
+        flex-wrap: wrap; gap: 1rem;
+      }
+      footer.foot a { color: var(--ink-soft); text-decoration: none; }
+      footer.foot a:hover { color: var(--ember); }
+      footer.foot .colophon {
+        max-width: 50ch;
+        line-height: 1.6;
+        font-family: var(--sans);
+        text-transform: none; letter-spacing: 0;
+        font-size: 0.84rem;
+        color: var(--ink-faint);
+      }
+      footer.foot .links { display: flex; gap: 1.6rem; flex-wrap: wrap; }
+
+      /* --- Utility ---------------------------------------------------- */
+      .mono { font-family: var(--mono); }
+      .uppercase { text-transform: uppercase; letter-spacing: 0.1em; }
+      .ember { color: var(--ember); }
+      .stripe-bg {
+        background: repeating-linear-gradient(
+          135deg,
+          transparent 0,
+          transparent 6px,
+          var(--rule) 6px,
+          var(--rule) 7px
+        );
+      }
+    </style>
+  </head>
+  <body>
+    <!-- =========================== NAV =========================== -->
+    <header class="nav">
+      <div class="wrap">
+        <div class="brand"><span class="dot">●</span>&nbsp;&nbsp;Murmuration&nbsp;/&nbsp;Harness</div>
+        <nav class="links">
+          <a href="#philosophy">Philosophy</a>
+          <a href="#how">How it works</a>
+          <a href="#quickstart">Quickstart</a>
+          <a href="#providers">Providers</a>
+          <a href="https://github.com/murmurations-ai/murmurations-harness" target="_blank" rel="noopener">GitHub →</a>
+          <span class="ver">v0.8.0</span>
+        </nav>
+      </div>
+    </header>
+
+    <!-- =========================== HERO =========================== -->
+    <section class="hero">
+      <div class="wrap">
+        <div class="grid">
+          <div>
+            <div class="eyebrow">Open-source TypeScript runtime · v0.8.0</div>
+            <h1 class="headline">
+              A&nbsp;suit&nbsp;of <em>power&nbsp;armor</em><br />
+              for human-led<br />
+              AI&nbsp;coordination.
+            </h1>
+            <p class="lede">
+              The harness runs a flock of agents. The human flies the flock. One Source,
+              many wings, every signal accounted for.
+            </p>
+
+            <div class="hero-cta">
+              <a class="btn primary" href="#quickstart">
+                Five-minute quickstart <span class="arrow">→</span>
+              </a>
+              <a class="btn" href="https://github.com/murmurations-ai/murmurations-harness" target="_blank" rel="noopener">
+                GitHub <span class="arrow">↗</span>
+              </a>
+            </div>
+
+            <div class="meta-row">
+              <span><strong>9</strong> packages</span>
+              <span><strong>1,298</strong> tests</span>
+              <span><strong>5</strong> governance models</span>
+              <span><strong>MIT</strong></span>
+            </div>
+          </div>
+
+          <!-- Murmuration animation pane -->
+          <div class="flock" aria-hidden="true">
+            <span class="agents-count"><span class="pulse"></span>agents · flocking</span>
+            <span class="corner">live runtime · idle wakes throttled</span>
+            <svg id="murmuration" viewBox="0 0 400 400" preserveAspectRatio="xMidYMid slice">
+              <!-- dots injected via JS so we can animate -->
+            </svg>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- =========================== PHILOSOPHY =========================== -->
+    <section class="philosophy" id="philosophy">
+      <div class="wrap">
+        <div class="label">
+          <span class="num">01</span><span>Philosophy</span><span class="line"></span><span>Source as a human role</span>
+        </div>
+
+        <div class="grid">
+          <div>
+            <h2 class="section-head">The human <em>holds the vision.</em> The harness holds the flock.</h2>
+          </div>
+
+          <div class="body">
+            <p>
+              Most agent frameworks treat the human as a configuration step. The Murmuration Harness
+              treats the human as <strong>Source</strong> — the person who initiated the creative
+              impulse, holds the vision, and bears accountability for the work.
+            </p>
+            <p>
+              Source is not a configuration. It is a role. It cannot be delegated, optimized away,
+              or rotated. The concept comes from <a href="https://www.source-principle.com/" target="_blank" rel="noopener">Peter Koenig</a>
+              and <a href="https://www.tomnixon.co.uk/" target="_blank" rel="noopener">Tom Nixon</a>'s work on creative
+              authorship in collaborative organizations.
+            </p>
+            <p>
+              Think of it as a suit of power armor. The human provides direction, judgment, and
+              values. The harness provides strength, reach, and tirelessness. Neither is useful
+              without the other.
+            </p>
+            <p class="philosophy-pull">
+              <span class="mono uppercase ember" style="font-size: 0.74rem">It is not an autonomous agent framework.</span><br />
+              <span style="color: var(--ink)">It is a tool that amplifies human agency.</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- =========================== HOW IT WORKS =========================== -->
+    <section class="how" id="how">
+      <div class="wrap">
+        <div class="label">
+          <span class="num">02</span><span>How it works</span><span class="line"></span><span>Four moving parts</span>
+        </div>
+
+        <div class="list">
+          <div class="item">
+            <div class="step-num">/01</div>
+            <h3>Agents <em>wake</em>, then decide.</h3>
+            <p>
+              Each agent has a <code>role.md</code> declaring its identity, schedule, signal scopes,
+              and write surface. On every wake the daemon assembles a signal bundle — GitHub issues
+              you've labeled for them, private notes, governance events — and the agent reads what
+              changed, decides what to do, and produces structured actions. Idle wakes are skipped
+              when nothing has changed; bundle load is surfaced as a <code>[b:N]</code> badge in the
+              dashboard.
+            </p>
+          </div>
+
+          <div class="item">
+            <div class="step-num">/02</div>
+            <h3>Governance is <em>pluggable.</em></h3>
+            <p>
+              Five governance models ship bundled — S3 sociocracy, Chain of Command, Meritocratic,
+              Consensus, Parliamentary. Or write your own plugin and load it by path. The core
+              harness contains no S3-specific terms; consent rounds, objections, and ratification
+              live in the plugin. Switch models by changing one line in <code>harness.yaml</code>.
+            </p>
+          </div>
+
+          <div class="item">
+            <div class="step-num">/03</div>
+            <h3>GitHub is the <em>system of record.</em></h3>
+            <p>
+              Every action item, every meeting outcome, every directive — written to GitHub Issues.
+              Operators reading <code>gh issue list</code> see the same truth the agents do. Local
+              files capture only ephemeral runtime state (<code>.murmuration/</code>) and durable
+              identity (<code>agents/</code>, <code>governance/</code>). Nothing important hides on
+              one machine.
+            </p>
+          </div>
+
+          <div class="item">
+            <div class="step-num">/04</div>
+            <h3>The <em>dashboard</em> shows what's true now.</h3>
+            <p>
+              A read-only TUI panel surfaces every agent's last wake, productivity status,
+              cost burn, signal-bundle load, and obligation results. Badges like
+              <code>[obl-unmet:2]</code> and <code>[b:23]</code> flag drift the second it happens.
+              <code>murmuration doctor</code> diagnoses setup; <code>list-stale-issues</code>
+              inventories the issues bloating per-wake context.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- =========================== QUICKSTART =========================== -->
+    <section class="quickstart" id="quickstart">
+      <div class="wrap">
+        <div class="label">
+          <span class="num">03</span><span>Quickstart</span><span class="line"></span><span>Five minutes</span>
+        </div>
+
+        <div class="grid">
+          <div class="body">
+            <h2 class="section-head">From <em>install</em><br />to first meeting.</h2>
+            <p>
+              The harness ships an interactive scaffolder. <code>murmuration init</code> writes a
+              working configuration, a sample agent, and a starter <code>.env.example</code>.
+              <code>doctor</code> validates the setup before the daemon starts.
+            </p>
+            <p>
+              <strong>If you already have a CLI subscription</strong> (Claude Code Pro/Max, ChatGPT,
+              or Google), the scaffolder auto-detects it. Pick "subscription-cli" at the prompt
+              and skip the API key. <strong>$0 marginal cost.</strong>
+            </p>
+            <p>
+              Otherwise paste a free-tier Gemini key. Either path lands at the same first meeting.
+            </p>
+          </div>
+
+          <div>
+            <div class="tabs" role="tablist">
+              <button id="tab-sub" class="active" data-target="pane-sub" role="tab">
+                Subscription path <span class="badge">$0</span>
+              </button>
+              <button id="tab-api" data-target="pane-api" role="tab">
+                API-key path
+              </button>
+            </div>
+            <div class="terminal">
+              <div class="terminal-pane active" id="pane-sub">
+<span class="comment"># 1. Install</span>
+<span class="prompt">$</span> npm install -g @murmurations-ai/cli
+
+<span class="comment"># 2. Scaffold from the bundled example</span>
+<span class="prompt">$</span> murmuration init <span class="flag">--example</span> hello my-first-murm
+<span class="prompt">$</span> cd my-first-murm
+
+<span class="comment"># 3. init auto-detects claude / codex / gemini</span>
+<span class="comment">#    pick "subscription-cli" — no API key needed</span>
+
+<span class="comment"># 4. Verify</span>
+<span class="prompt">$</span> murmuration doctor
+  Layout................. <span class="ok">✓</span>
+  Schema................. <span class="ok">✓</span>
+  Secrets................ <span class="ok">✓</span>
+  Governance............. <span class="ok">✓</span>
+
+<span class="comment"># 5. First meeting</span>
+<span class="prompt">$</span> murmuration convene <span class="flag">--group</span> example \
+    <span class="flag">--directive</span> <span class="str">"what should we scout next?"</span>
+              </div>
+
+              <div class="terminal-pane" id="pane-api">
+<span class="comment"># 1. Install</span>
+<span class="prompt">$</span> npm install -g @murmurations-ai/cli
+
+<span class="comment"># 2. Scaffold</span>
+<span class="prompt">$</span> murmuration init <span class="flag">--example</span> hello my-first-murm
+<span class="prompt">$</span> cd my-first-murm
+
+<span class="comment"># 3. Paste a free-tier Gemini key</span>
+<span class="comment">#    https://aistudio.google.com/apikey</span>
+<span class="prompt">$</span> cp .env.example .env
+<span class="prompt">$</span> chmod 600 .env
+<span class="comment">#    edit GEMINI_API_KEY=AIza...</span>
+
+<span class="comment"># 4. Verify</span>
+<span class="prompt">$</span> murmuration doctor <span class="flag">--live</span>
+
+<span class="comment"># 5. First meeting</span>
+<span class="prompt">$</span> murmuration convene <span class="flag">--group</span> example \
+    <span class="flag">--directive</span> <span class="str">"what should we scout next?"</span>
+              </div>
+            </div>
+
+            <!-- Real role.md sample (from examples/hello-world-agent) -->
+            <div class="role-sample" aria-label="hello-world agent role.md">
+<span class="fence">---</span>
+<span class="key">agent_id:</span>     <span class="val">"hello-world"</span>
+<span class="key">name:</span>         <span class="val">"Hello World Agent"</span>
+<span class="key">model_tier:</span>   <span class="val">fast</span>
+<span class="key">group_memberships:</span>
+  - <span class="val">engineering</span>
+<span class="key">wake_schedule:</span>
+  <span class="key">delayMs:</span>     <span class="val">2000</span>
+<span class="fence">---</span>
+
+<span class="h"># Hello World Agent — Role</span>
+
+<span class="h">## Accountabilities</span>
+1. On wake, print a wake summary confirming the identity
+2. Exit with status 0
+3. Nothing else
+              </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- =========================== PROVIDERS =========================== -->
+    <section class="providers" id="providers">
+      <div class="wrap">
+        <div class="label">
+          <span class="num">04</span><span>LLM providers</span><span class="line"></span><span>Two routes, same agents</span>
+        </div>
+
+        <div class="grid">
+          <div class="col">
+            <h3>Subscription <em>CLI</em></h3>
+            <div class="price">$0 marginal cost · ADR-0034</div>
+            <ul>
+              <li><strong>Claude Code</strong> — Pro/Max OAuth, default model <code>claude-sonnet-4-6</code></li>
+              <li><strong>Codex CLI</strong> — ChatGPT subscription, default model <code>gpt-5.5</code></li>
+              <li><strong>Gemini CLI</strong> — Google subscription, default model <code>gemini-2.5-flash</code></li>
+              <li>Wakes report <code>costMicros: 0</code> + a shadow API cost so operators can compare</li>
+            </ul>
+          </div>
+
+          <div class="col">
+            <h3>API <em>providers</em></h3>
+            <div class="price">Pay-per-token · ADR-0020</div>
+            <ul>
+              <li><strong>Google Gemini</strong> — <code>gemini-2.5-flash</code>, <code>gemini-2.5-pro</code></li>
+              <li><strong>Anthropic</strong> — <code>claude-sonnet-4-6</code>, <code>claude-opus-4-7</code></li>
+              <li><strong>OpenAI</strong> — <code>gpt-5</code>, <code>gpt-5.5</code>, <code>gpt-4o</code></li>
+              <li><strong>Ollama</strong> — anything local via the OpenAI-compatible endpoint</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="rule" />
+
+    <!-- =========================== SHIPPED =========================== -->
+    <section class="shipped">
+      <div class="wrap">
+        <div class="label">
+          <span class="num">05</span><span>Recently shipped</span><span class="line"></span><span>May 2026</span>
+        </div>
+
+        <h2 class="section-head" style="margin-bottom: 2.5rem">
+          Built in the open. <em>Iterated</em> against real murmurations.
+        </h2>
+
+        <div class="log">
+          <div class="entry">
+            <div class="when">v0.8.0 · May 19</div>
+            <div class="what">
+              <strong>Execution contracts.</strong> Agents declare <code style="font-family:var(--mono);font-size:0.86em">done_when</code>,
+              <code style="font-family:var(--mono);font-size:0.86em">committed_artifacts</code>, and
+              <code style="font-family:var(--mono);font-size:0.86em">verification_required_for</code> in <code style="font-family:var(--mono);font-size:0.86em">role.md</code>;
+              the validator scores wakes against the obligation; the dashboard surfaces
+              <code style="font-family:var(--mono);font-size:0.86em">[obl-unmet:N]</code>.
+              <span class="meta">ADR-0047 · ADR-0048 · 9 packages, 1240 tests at release</span>
+            </div>
+          </div>
+
+          <div class="entry">
+            <div class="when">#394 · May 24</div>
+            <div class="what">
+              <strong>Signal-bundle hygiene tooling.</strong> Every open GitHub issue lands in every
+              watching agent's bundle on every wake. <code style="font-family:var(--mono);font-size:0.86em">murmuration doctor --live</code>
+              now flags stale issues; <code style="font-family:var(--mono);font-size:0.86em">list-stale-issues</code> inventories them;
+              the dashboard shows a <code style="font-family:var(--mono);font-size:0.86em">[b:N]</code> badge that yellows above
+              <code style="font-family:var(--mono);font-size:0.86em">signals.spikeThreshold</code>.
+              <span class="meta">5 PRs · doctor hygiene · TUI badge · CLI · dedupe · review hardening</span>
+            </div>
+          </div>
+
+          <div class="entry">
+            <div class="when">#380 · May 25</div>
+            <div class="what">
+              <strong>Daemon orphan-schedule warning.</strong> When an agent's <code style="font-family:var(--mono);font-size:0.86em">role.md</code>
+              is missing entirely, the daemon now refuses to schedule a cron entry — silent waking
+              via the default-agent template was the silent-drift class EP#874 surfaced.
+              <span class="meta">Predicate <code style="font-family:var(--mono);font-size:0.86em">isOrphanedSchedule</code> exported from core as a type guard</span>
+            </div>
+          </div>
+
+          <div class="entry">
+            <div class="when">Hardening · May 25</div>
+            <div class="what">
+              <strong>Trojan Source mitigation.</strong> The terminal sanitizer now strips Unicode bidi
+              overrides (CVE-2021-42574), C1 controls including 8-bit CSI, zero-width chars, and line
+              separators — so a maliciously-named directory can't spoof operator-facing logs.
+              <span class="meta">Multi-agent review pass · architecture, TS quality, simplicity, security</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== CTA =========================== -->
+    <section class="cta">
+      <div class="wrap">
+        <h2>Fly the <em>flock</em>.</h2>
+        <p>
+          Open-source. MIT. Self-contained. The harness installs in one line and a murmuration
+          scaffolds in two.
+        </p>
+        <div class="pair">
+          <a class="btn primary" href="https://github.com/murmurations-ai/murmurations-harness" target="_blank" rel="noopener">
+            Read the source <span class="arrow">↗</span>
+          </a>
+          <a class="btn" href="https://github.com/murmurations-ai/murmurations-harness/blob/main/docs/GETTING-STARTED.md" target="_blank" rel="noopener">
+            Full walkthrough <span class="arrow">→</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================== FOOTER =========================== -->
+    <footer class="foot">
+      <div class="wrap">
+        <div class="colophon">
+          The Murmuration Harness coordinates AI agents under a single human's direction.
+          It is a tool that amplifies human agency, not an autonomous framework. Built by the
+          murmurations-ai community.
+        </div>
+        <div class="links">
+          <a href="https://github.com/murmurations-ai/murmurations-harness" target="_blank" rel="noopener">github</a>
+          <a href="https://github.com/murmurations-ai/murmurations-harness/blob/main/CHANGELOG.md" target="_blank" rel="noopener">changelog</a>
+          <a href="https://github.com/murmurations-ai/murmurations-harness/blob/main/docs/ARCHITECTURE.md" target="_blank" rel="noopener">architecture</a>
+          <a href="https://github.com/murmurations-ai/murmurations-harness/tree/main/docs/adr" target="_blank" rel="noopener">adrs</a>
+        </div>
+      </div>
+    </footer>
+
+    <!-- =========================== SCRIPTS =========================== -->
+    <script>
+      // ----- Tab toggle for quickstart -----
+      (function () {
+        const buttons = document.querySelectorAll(".tabs button");
+        const panes = document.querySelectorAll(".terminal-pane");
+        buttons.forEach((btn) => {
+          btn.addEventListener("click", () => {
+            buttons.forEach((b) => b.classList.remove("active"));
+            panes.forEach((p) => p.classList.remove("active"));
+            btn.classList.add("active");
+            const target = btn.dataset.target;
+            const pane = document.getElementById(target);
+            if (pane) pane.classList.add("active");
+          });
+        });
+      })();
+
+      // ----- Murmuration animation -----
+      // A flock of ~70 dots drifting in coherent wave patterns. Each dot has a
+      // slow-shifting position influenced by a perlin-ish curl plus a small
+      // ember offset, so the cluster swirls without ever leaving the frame.
+      (function () {
+        const svg = document.getElementById("murmuration");
+        if (!svg) return;
+        const W = 400, H = 400;
+        const N = 72;
+        const dots = [];
+
+        // seed dots distributed in a soft cluster
+        for (let i = 0; i < N; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const radius = 50 + Math.random() * 110;
+          const cx = W / 2 + Math.cos(angle) * radius;
+          const cy = H / 2 + Math.sin(angle) * radius * 0.85;
+          const r = 1 + Math.random() * 1.6;
+          const opacity = 0.35 + Math.random() * 0.55;
+
+          const el = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          el.setAttribute("cx", cx.toFixed(2));
+          el.setAttribute("cy", cy.toFixed(2));
+          el.setAttribute("r", r.toFixed(2));
+          // one dot in twelve glows ember — the lead birds
+          const isLead = i % 12 === 0;
+          el.setAttribute("fill", isLead ? "#f25c2c" : "#ebe5d6");
+          el.setAttribute("opacity", opacity);
+          svg.appendChild(el);
+
+          dots.push({
+            el,
+            x: cx, y: cy,
+            vx: (Math.random() - 0.5) * 0.4,
+            vy: (Math.random() - 0.5) * 0.3,
+            phase: Math.random() * Math.PI * 2,
+            speed: 0.004 + Math.random() * 0.006,
+            r,
+            isLead,
+          });
+        }
+
+        // simple flow-field: each dot is pushed by a sin/cos field plus a
+        // gentle attraction toward the cluster center. The flock drifts as
+        // a body without ever breaking apart.
+        let t = 0;
+        const cx = W / 2, cy = H / 2;
+        function step() {
+          t += 1;
+          for (const d of dots) {
+            const fx = Math.sin((d.y + t * 0.4) * 0.012) * 0.18 + Math.cos((d.x - t * 0.3) * 0.009) * 0.12;
+            const fy = Math.cos((d.x + t * 0.5) * 0.011) * 0.16 + Math.sin((d.y - t * 0.4) * 0.010) * 0.10;
+            // attraction toward center keeps the flock cohesive
+            const ax = (cx - d.x) * 0.0006;
+            const ay = (cy - d.y) * 0.0007;
+            d.vx = d.vx * 0.96 + fx * 0.18 + ax;
+            d.vy = d.vy * 0.96 + fy * 0.18 + ay;
+            // cap speed
+            const sp = Math.hypot(d.vx, d.vy);
+            const max = 0.85;
+            if (sp > max) { d.vx = (d.vx / sp) * max; d.vy = (d.vy / sp) * max; }
+            d.x += d.vx;
+            d.y += d.vy;
+            d.el.setAttribute("cx", d.x.toFixed(2));
+            d.el.setAttribute("cy", d.y.toFixed(2));
+          }
+          requestAnimationFrame(step);
+        }
+
+        // Respect reduced motion
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (!reduceMotion) requestAnimationFrame(step);
+      })();
+    </script>
+  </body>
+</html>
