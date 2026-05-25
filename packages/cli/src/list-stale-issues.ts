@@ -21,164 +21,25 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { loadHarnessConfig } from "./harness-config.js";
+import {
+  classifyStaleIssues,
+  fetchOpenIssues,
+  DEFAULT_AGE_DAYS,
+  DEFAULT_SILENCE_DAYS,
+  type StaleIssue,
+  type StaleReason,
+  type StaleScanOptions,
+} from "./stale-issues.js";
 
-// ---------------------------------------------------------------------------
-// Heuristics (duplicates doctor.ts scope-1 classifier; intentional —
-// the two PRs ship independently and can be deduped in a follow-up.)
-// ---------------------------------------------------------------------------
-
-const DIGEST_TITLE_PATTERNS: readonly RegExp[] = [
-  /^\s*\[?\s*DIGEST\s*\]?/i,
-  /^\s*\[?\s*FINANCE\s*\]?/i,
-  /^\s*\[?\s*STATUS\s*\]?/i,
-  /^\s*\[?\s*REPORT\s*\]?/i,
-  /^\s*\[?\s*KICKOFF\s*\]?/i,
-];
-
-const DEFAULT_AGE_DAYS = 14;
-const DEFAULT_SILENCE_DAYS = 7;
-
-export type StaleReason = "by-age" | "digest-pattern" | "both";
-
-export interface StaleIssue {
-  readonly number: number;
-  readonly title: string;
-  readonly htmlUrl: string;
-  readonly createdAt: Date;
-  readonly updatedAt: Date;
-  readonly ageDays: number;
-  readonly silenceDays: number;
-  readonly reason: StaleReason;
-}
-
-export interface StaleScanOptions {
-  /** Age threshold in days (default 14). */
-  readonly ageDays?: number;
-  /** Comment-silence threshold in days (default 7). */
-  readonly silenceDays?: number;
-  /** When true, return only digest-pattern matches (skip by-age-only). */
-  readonly digestOnly?: boolean;
-  /** Clock override for tests. */
-  readonly now?: Date;
-}
-
-/** Pure classifier — given a list of open issues, partition into the
- *  stale set. Exported so tests don't need an HTTP fixture. */
-export const classifyStaleIssues = (
-  issues: readonly StaleScanCandidate[],
-  options: StaleScanOptions = {},
-): readonly StaleIssue[] => {
-  const ageDays = options.ageDays ?? DEFAULT_AGE_DAYS;
-  const silenceDays = options.silenceDays ?? DEFAULT_SILENCE_DAYS;
-  const now = options.now ?? new Date();
-  const nowMs = now.getTime();
-  const ageThresholdMs = ageDays * 24 * 60 * 60 * 1000;
-  const silenceThresholdMs = silenceDays * 24 * 60 * 60 * 1000;
-
-  const out: StaleIssue[] = [];
-  for (const issue of issues) {
-    const ageMs = nowMs - issue.createdAt.getTime();
-    const silenceMs = nowMs - issue.updatedAt.getTime();
-    const stalledByAge = ageMs > ageThresholdMs && silenceMs > silenceThresholdMs;
-    const matchesDigest = DIGEST_TITLE_PATTERNS.some((p) => p.test(issue.title));
-    if (!stalledByAge && !matchesDigest) continue;
-    if (options.digestOnly && !matchesDigest) continue;
-    const reason: StaleReason =
-      stalledByAge && matchesDigest ? "both" : stalledByAge ? "by-age" : "digest-pattern";
-    out.push({
-      number: issue.number,
-      title: issue.title,
-      htmlUrl: issue.htmlUrl,
-      createdAt: issue.createdAt,
-      updatedAt: issue.updatedAt,
-      ageDays: Math.floor(ageMs / (24 * 60 * 60 * 1000)),
-      silenceDays: Math.floor(silenceMs / (24 * 60 * 60 * 1000)),
-      reason,
-    });
-  }
-  // Sort: oldest activity first (most urgent to review).
-  return out.sort((a, b) => b.silenceDays - a.silenceDays);
-};
-
-// ---------------------------------------------------------------------------
-// GitHub fetch (same shape as doctor.ts; capped pagination)
-// ---------------------------------------------------------------------------
-
-export interface StaleScanCandidate {
-  readonly number: number;
-  readonly title: string;
-  readonly htmlUrl: string;
-  readonly createdAt: Date;
-  readonly updatedAt: Date;
-}
-
-interface RestIssueResponse {
-  readonly number: number;
-  readonly title: string;
-  readonly html_url: string;
-  readonly created_at: string;
-  readonly updated_at: string;
-  readonly pull_request?: unknown;
-}
-
-const withTimeout = async <T>(promise: Promise<T>, ms: number, what: string): Promise<T> => {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => {
-        reject(new Error(`timed out (${String(ms)}ms): ${what}`));
-      }, ms),
-    ),
-  ]);
-};
-
-const splitRepo = (repo: string): { owner: string; name: string } | null => {
-  const slash = repo.indexOf("/");
-  if (slash <= 0 || slash === repo.length - 1) return null;
-  return { owner: repo.slice(0, slash), name: repo.slice(slash + 1) };
-};
-
-const fetchOpenIssues = async (
-  repo: string,
-  token: string,
-): Promise<readonly StaleScanCandidate[]> => {
-  const parts = splitRepo(repo);
-  if (!parts) throw new Error(`invalid collaboration.repo: "${repo}" (expected "owner/name")`);
-  const collected: StaleScanCandidate[] = [];
-  const maxPages = 5;
-  for (let page = 1; page <= maxPages; page++) {
-    const url = `https://api.github.com/repos/${parts.owner}/${parts.name}/issues?state=open&per_page=100&page=${String(page)}`;
-    const res = await withTimeout(
-      fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-          "User-Agent": "murmuration-list-stale-issues",
-        },
-      }),
-      10_000,
-      `GitHub GET /issues page ${String(page)}`,
-    );
-    if (!res.ok) {
-      throw new Error(`${String(res.status)} ${res.statusText}`);
-    }
-    const body: unknown = await res.json();
-    if (!Array.isArray(body)) break;
-    const items = body as RestIssueResponse[];
-    for (const it of items) {
-      if (it.pull_request !== undefined) continue;
-      collected.push({
-        number: it.number,
-        title: it.title,
-        htmlUrl: it.html_url,
-        createdAt: new Date(it.created_at),
-        updatedAt: new Date(it.updated_at),
-      });
-    }
-    if (items.length < 100) break;
-  }
-  return collected;
-};
+// Re-export the shared types so callers (including the existing test
+// file) can keep importing them from this module unchanged.
+export {
+  classifyStaleIssues,
+  type StaleIssue,
+  type StaleReason,
+  type StaleScanCandidate,
+  type StaleScanOptions,
+} from "./stale-issues.js";
 
 // ---------------------------------------------------------------------------
 // .env reader (same shape as doctor.ts; small enough to inline)
@@ -247,7 +108,7 @@ export const runListStaleIssues = async (
   if (!token || token.length === 0 || token === "ghp_your-token-here") {
     throw new Error(`GITHUB_TOKEN is not set in .env. Cannot authenticate.`);
   }
-  const issues = await fetchOpenIssues(repo, token);
+  const issues = await fetchOpenIssues(repo, token, "murmuration-list-stale-issues");
   const stale = classifyStaleIssues(issues, options);
   return {
     repo,

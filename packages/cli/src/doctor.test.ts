@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { applyFixes, classifyStaleIssues, runDoctor } from "./doctor.js";
+import { applyFixes, runDoctor } from "./doctor.js";
 
 describe("runDoctor (v0.5.0 Milestone 3)", () => {
   let rootDir = "";
@@ -173,91 +173,5 @@ describe("runDoctor (v0.5.0 Milestone 3)", () => {
   });
 });
 
-describe("classifyStaleIssues (harness#394 scope 1)", () => {
-  const NOW = new Date("2026-05-25T12:00:00Z");
-  const daysAgo = (days: number): Date => new Date(NOW.getTime() - days * 24 * 60 * 60 * 1000);
-
-  it("flags issues older than 14d with no comment activity in 7d", () => {
-    const result = classifyStaleIssues(
-      [
-        {
-          number: 1,
-          title: "Ancient stale issue",
-          htmlUrl: "https://example/1",
-          createdAt: daysAgo(30),
-          updatedAt: daysAgo(10),
-        },
-        {
-          number: 2,
-          title: "Old but recently commented",
-          htmlUrl: "https://example/2",
-          createdAt: daysAgo(30),
-          updatedAt: daysAgo(2),
-        },
-        {
-          number: 3,
-          title: "Brand new",
-          htmlUrl: "https://example/3",
-          createdAt: daysAgo(1),
-          updatedAt: daysAgo(1),
-        },
-      ],
-      NOW,
-    );
-    expect(result.byAge.map((i) => i.number)).toEqual([1]);
-  });
-
-  it("flags digest-pattern titles regardless of age", () => {
-    const result = classifyStaleIssues(
-      [
-        {
-          number: 10,
-          title: "[FINANCE] Weekly burn 2026-05-25",
-          htmlUrl: "https://example/10",
-          createdAt: daysAgo(1),
-          updatedAt: daysAgo(1),
-        },
-        {
-          number: 11,
-          title: "DIGEST: catch-up",
-          htmlUrl: "https://example/11",
-          createdAt: daysAgo(1),
-          updatedAt: daysAgo(1),
-        },
-        {
-          number: 12,
-          title: "Implement feature X",
-          htmlUrl: "https://example/12",
-          createdAt: daysAgo(1),
-          updatedAt: daysAgo(1),
-        },
-        {
-          number: 13,
-          title: "[Status] Sprint update",
-          htmlUrl: "https://example/13",
-          createdAt: daysAgo(1),
-          updatedAt: daysAgo(1),
-        },
-      ],
-      NOW,
-    );
-    expect(result.byDigestPattern.map((i) => i.number).sort((a, b) => a - b)).toEqual([10, 11, 13]);
-  });
-
-  it("issue can appear in both buckets when stale AND digest-patterned", () => {
-    const result = classifyStaleIssues(
-      [
-        {
-          number: 20,
-          title: "[DIGEST] 2026-02 monthly",
-          htmlUrl: "https://example/20",
-          createdAt: daysAgo(90),
-          updatedAt: daysAgo(45),
-        },
-      ],
-      NOW,
-    );
-    expect(result.byAge.map((i) => i.number)).toEqual([20]);
-    expect(result.byDigestPattern.map((i) => i.number)).toEqual([20]);
-  });
-});
+// Classifier unit tests live in `stale-issues.test.ts` — the partition
+// logic is shared between doctor and list-stale-issues since this refactor.

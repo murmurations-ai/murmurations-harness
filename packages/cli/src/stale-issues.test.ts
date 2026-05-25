@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyStaleIssues, type StaleScanCandidate } from "./list-stale-issues.js";
+import { classifyStaleIssues, partitionByReason, type StaleScanCandidate } from "./stale-issues.js";
 
-describe("classifyStaleIssues (harness#394 scope 3)", () => {
+describe("classifyStaleIssues (harness#394)", () => {
   const NOW = new Date("2026-05-25T12:00:00Z");
   const daysAgo = (days: number): Date => new Date(NOW.getTime() - days * 24 * 60 * 60 * 1000);
   const issue = (
@@ -130,5 +130,62 @@ describe("classifyStaleIssues (harness#394 scope 3)", () => {
       { now: NOW },
     );
     expect(stale.map((s) => s.number)).toEqual([51, 50, 52]);
+  });
+});
+
+describe("partitionByReason (harness#394 — doctor hygiene view)", () => {
+  const NOW = new Date("2026-05-25T12:00:00Z");
+  const daysAgo = (days: number): Date => new Date(NOW.getTime() - days * 24 * 60 * 60 * 1000);
+  const issue = (
+    overrides: Partial<StaleScanCandidate> & { number: number; title: string },
+  ): StaleScanCandidate => ({
+    number: overrides.number,
+    title: overrides.title,
+    htmlUrl: overrides.htmlUrl ?? `https://example/${String(overrides.number)}`,
+    createdAt: overrides.createdAt ?? daysAgo(1),
+    updatedAt: overrides.updatedAt ?? daysAgo(1),
+  });
+
+  it("places by-age-only issues only in byAge", () => {
+    const stale = classifyStaleIssues(
+      [
+        issue({
+          number: 1,
+          title: "Plain title",
+          createdAt: daysAgo(30),
+          updatedAt: daysAgo(10),
+        }),
+      ],
+      { now: NOW },
+    );
+    const { byAge, byDigestPattern } = partitionByReason(stale);
+    expect(byAge.map((i) => i.number)).toEqual([1]);
+    expect(byDigestPattern).toEqual([]);
+  });
+
+  it("places digest-only issues only in byDigestPattern", () => {
+    const stale = classifyStaleIssues([issue({ number: 2, title: "[DIGEST] recent" })], {
+      now: NOW,
+    });
+    const { byAge, byDigestPattern } = partitionByReason(stale);
+    expect(byAge).toEqual([]);
+    expect(byDigestPattern.map((i) => i.number)).toEqual([2]);
+  });
+
+  it("places `both` issues in both buckets", () => {
+    const stale = classifyStaleIssues(
+      [
+        issue({
+          number: 3,
+          title: "[DIGEST] 2026-02 monthly",
+          createdAt: daysAgo(90),
+          updatedAt: daysAgo(45),
+        }),
+      ],
+      { now: NOW },
+    );
+    const { byAge, byDigestPattern } = partitionByReason(stale);
+    expect(byAge.map((i) => i.number)).toEqual([3]);
+    expect(byDigestPattern.map((i) => i.number)).toEqual([3]);
   });
 });
