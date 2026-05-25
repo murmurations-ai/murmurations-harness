@@ -595,7 +595,11 @@ describe("DefaultSignalAggregator", () => {
     }
   });
 
-  it("comment enrichment: cap at 20 comments per issue", async () => {
+  it("comment enrichment: caps comments at default commentsPerIssue (5)", async () => {
+    // harness#394: default cap lowered 20 → 5. Only the first 5 comments
+    // surface in the excerpt; the remainder are omitted (with a "+N more"
+    // tail tested separately). The cap is configurable via
+    // `AggregatorCaps.commentsPerIssue` for operators with larger token budgets.
     const issue = fakeIssue({ n: 7, body: "base", commentCount: 30, labels: ["assigned:alpha"] });
     const thirtyComments = Array.from({ length: 30 }, (_, i) =>
       fakeComment({ id: i + 1, body: `comment ${String(i + 1)}`, authorLogin: "source" }),
@@ -612,8 +616,8 @@ describe("DefaultSignalAggregator", () => {
         (s) => s.kind === "github-issue" && (s as unknown as { number: number }).number === 7,
       );
       if (signal?.kind === "github-issue") {
-        expect(signal.excerpt).toContain("comment 20");
-        expect(signal.excerpt).not.toContain("comment 21");
+        expect(signal.excerpt).toContain("comment 5");
+        expect(signal.excerpt).not.toContain("comment 6");
       }
     }
   });
@@ -673,9 +677,10 @@ describe("DefaultSignalAggregator", () => {
     }
   });
 
-  it("comment enrichment: count header reflects shown count with truncation note when total > 20", async () => {
-    // When commentCount exceeds MAX_COMMENTS_PER_ISSUE, the header must say
-    // "showing first N of M" so agents know the thread is truncated.
+  it("comment enrichment: default cap is 5 and truncation note names omitted count", async () => {
+    // harness#394: default `commentsPerIssue` lowered 20 → 5 to cut per-issue
+    // token cost on chatty threads. The truncation note must name the
+    // omitted count so agents know to open the issue for the full thread.
     const issue = fakeIssue({ n: 11, body: "base", commentCount: 25, labels: ["assigned:alpha"] });
     const twentyFiveComments = Array.from({ length: 25 }, (_, i) =>
       fakeComment({ id: i + 1, body: `comment ${String(i + 1)}`, authorLogin: "source" }),
@@ -692,10 +697,107 @@ describe("DefaultSignalAggregator", () => {
         (s) => s.kind === "github-issue" && (s as unknown as { number: number }).number === 11,
       );
       if (signal?.kind === "github-issue") {
-        // Header must show shown count and total, not just issue.commentCount
-        expect(signal.excerpt).toContain("showing first 20 of 25");
+        expect(signal.excerpt).toContain("showing first 5 of 25 (+20 more");
       }
     }
+  });
+
+  it("comment enrichment: commentsPerIssue cap is configurable via AggregatorCaps", async () => {
+    // Operators with larger token budgets can raise commentsPerIssue.
+    // Verifies both the perPage request and the post-fetch slice honour the cap.
+    const issue = fakeIssue({ n: 12, body: "base", commentCount: 25, labels: ["assigned:alpha"] });
+    const twentyFiveComments = Array.from({ length: 25 }, (_, i) =>
+      fakeComment({ id: i + 1, body: `comment ${String(i + 1)}`, authorLogin: "source" }),
+    );
+    const perPageCalls: number[] = [];
+    const recordingClient: GithubClient = {
+      ...makeFakeGithubWithComments([issue], new Map([[12, twentyFiveComments]])),
+      // eslint-disable-next-line @typescript-eslint/require-await
+      async listIssueComments(_repo, _num, opts) {
+        perPageCalls.push(opts?.perPage ?? -1);
+        return { ok: true, value: twentyFiveComments };
+      },
+    };
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: recordingClient,
+      githubScopes: [{ repo: REPO }],
+      caps: { commentsPerIssue: 10 },
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    expect(perPageCalls).toEqual([10]);
+    if (result.ok) {
+      const signal = result.bundle.signals.find(
+        (s) => s.kind === "github-issue" && (s as unknown as { number: number }).number === 12,
+      );
+      if (signal?.kind === "github-issue") {
+        expect(signal.excerpt).toContain("showing first 10 of 25 (+15 more");
+      }
+    }
+  });
+
+  it("onBundleMetrics: fires when github-issue count crosses threshold", async () => {
+    // harness#394: signal-bundle observability. The aggregator must surface
+    // bundle-size telemetry so the daemon can emit daemon.signal-bundle.large
+    // structured-log lines for operators watching context-burn trends.
+    const issues = Array.from({ length: 6 }, (_, i) =>
+      fakeIssue({ n: 200 + i, body: "x", labels: ["assigned:alpha"] }),
+    );
+    const calls: { issueCount: number; totalBytes: number }[] = [];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO }],
+      caps: { largeBundleIssueThreshold: 5, largeBundleByteThreshold: 1_000_000 },
+      onBundleMetrics: (m) => {
+        calls.push({ issueCount: m.issueCount, totalBytes: m.totalBytes });
+      },
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.issueCount).toBe(6);
+  });
+
+  it("onBundleMetrics: fires when total excerpt bytes cross threshold", async () => {
+    const big = "x".repeat(400);
+    const issues = Array.from({ length: 3 }, (_, i) =>
+      fakeIssue({ n: 300 + i, body: big, labels: ["assigned:alpha"] }),
+    );
+    const calls: { issueCount: number; totalBytes: number }[] = [];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO }],
+      caps: { largeBundleIssueThreshold: 100, largeBundleByteThreshold: 1_000 },
+      onBundleMetrics: (m) => {
+        calls.push({ issueCount: m.issueCount, totalBytes: m.totalBytes });
+      },
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.totalBytes).toBeGreaterThanOrEqual(1_000);
+  });
+
+  it("onBundleMetrics: does NOT fire when bundle is under both thresholds", async () => {
+    const issues = Array.from({ length: 2 }, (_, i) =>
+      fakeIssue({ n: 400 + i, body: "tiny", labels: ["assigned:alpha"] }),
+    );
+    const calls: number[] = [];
+    const agg = new DefaultSignalAggregator({
+      rootDir,
+      github: makeFakeGithub(issues),
+      githubScopes: [{ repo: REPO }],
+      caps: { largeBundleIssueThreshold: 10, largeBundleByteThreshold: 150_000 },
+      onBundleMetrics: () => {
+        calls.push(1);
+      },
+    });
+    const result = await agg.aggregate(mkContext("alpha"));
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(0);
   });
 
   it("routing filter: filter runs before cap — agent's own issues survive even when cross-agent pool is large", async () => {

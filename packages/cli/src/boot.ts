@@ -1177,6 +1177,19 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     // aggregator too — non-github signals still benefit from the
     // tiered ordering.
     priorityBundle: true,
+    // harness#394: structured-log line when a wake's signal bundle exceeds
+    // count or byte thresholds — gives operators a way to see context-burn
+    // trends without parsing per-wake bundles by hand.
+    onBundleMetrics: (m) => {
+      logger.info("daemon.signal-bundle.large", {
+        agentId: m.agentId,
+        wakeId: m.wakeId,
+        issueCount: m.issueCount,
+        totalBytes: m.totalBytes,
+        issueThreshold: m.thresholds.issues,
+        byteThreshold: m.thresholds.bytes,
+      });
+    },
   });
 
   const firstPassDaemon = new Daemon({
@@ -1877,6 +1890,17 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
               // owns the integration; agent role.md doesn't need to
               // know.
               priorityBundle: true,
+              // harness#394: see comment on filesystemOnlyAggregator above.
+              onBundleMetrics: (m) => {
+                logger.info("daemon.signal-bundle.large", {
+                  agentId: m.agentId,
+                  wakeId: m.wakeId,
+                  issueCount: m.issueCount,
+                  totalBytes: m.totalBytes,
+                  issueThreshold: m.thresholds.issues,
+                  byteThreshold: m.thresholds.bytes,
+                });
+              },
             })
           : filesystemOnlyAggregator,
         runArtifactWriter,
