@@ -1007,11 +1007,19 @@ export class Daemon {
         // Pass the validation result so the index entry can record
         // validationStatus, obligationStatus, and the unmet-required-output
         // count for dashboard surfacing.
+        // Compute bundle metrics from the assembled context (harness#394
+        // scope 2). Records per-wake signal-bundle load so the dashboard
+        // can flag agents whose context is bloating.
+        const bundleMetrics = {
+          issueCount: context.signals.signals.filter((s) => s.kind === "github-issue").length,
+          totalSignals: context.signals.signals.length,
+        };
         await this.#runArtifactWriter.record(
           recordedResult,
           result.costRecord,
           this.#logger,
           isCompleted(result) ? validation : undefined,
+          bundleMetrics,
         );
       }
 

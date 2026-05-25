@@ -10,6 +10,36 @@ import { join } from "node:path";
 import { computeMetricsFromDisk, type DiskMetricsSnapshot } from "@murmurations-ai/core";
 import cronParser from "cron-parser";
 
+/**
+ * Per-agent signal-bundle issue count threshold above which the dashboard
+ * highlights the agent's bundle as "spiked". Defaults to 10 when no
+ * murmuration/harness.yaml is present or `signals.spikeThreshold` is
+ * unset (matches the CLI HarnessConfig default).
+ */
+export const DEFAULT_SIGNAL_BUNDLE_SPIKE_THRESHOLD = 10;
+
+/** Best-effort read of `signals.spikeThreshold` from harness.yaml. Uses a
+ *  scoped regex (matches the convention used elsewhere in this file for
+ *  role.md frontmatter) so dashboard-tui does not take a YAML dep. The
+ *  CLI's full Zod-validated loader is the source of truth at runtime;
+ *  this reader exists only so the dashboard can highlight spikes. */
+export const readSignalBundleSpikeThreshold = async (rootDir: string): Promise<number> => {
+  try {
+    const content = await readFile(join(rootDir, "murmuration", "harness.yaml"), "utf8");
+    // Anchor to the `signals:` block so we don't accidentally pick up a
+    // `spikeThreshold:` written under some other top-level key.
+    const signalsBlock = /^signals:\s*\n((?:[ \t]+.*\n?)+)/m.exec(content);
+    if (!signalsBlock) return DEFAULT_SIGNAL_BUNDLE_SPIKE_THRESHOLD;
+    const match = /^[ \t]+spikeThreshold:\s*(\d+)/m.exec(signalsBlock[1] ?? "");
+    if (!match) return DEFAULT_SIGNAL_BUNDLE_SPIKE_THRESHOLD;
+    const n = Number(match[1]);
+    if (Number.isFinite(n) && n >= 1) return Math.floor(n);
+  } catch {
+    /* fall through to default */
+  }
+  return DEFAULT_SIGNAL_BUNDLE_SPIKE_THRESHOLD;
+};
+
 // ---------------------------------------------------------------------------
 // Panel 1: Pipeline State — last wake per agent
 // ---------------------------------------------------------------------------
@@ -61,6 +91,12 @@ export interface AgentStatus {
    * a yellow `[beh:N]` badge for operator review.
    */
   readonly behaviorWarningCount: number | null;
+  /**
+   * Count of `github-issue` signals in the agent's last wake bundle
+   * (harness#394 scope 2). Null when no wake has been recorded or the
+   * entry pre-dates the field.
+   */
+  readonly signalBundleIssueCount: number | null;
   readonly stale: boolean; // stalled or no wake in > 48h
   readonly consecutiveFailures: number;
   readonly totalWakes: number;
@@ -153,6 +189,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         obligationStatus: null,
         unmetRequiredOutputsCount: null,
         behaviorWarningCount: null,
+        signalBundleIssueCount: null,
         stale: false,
         consecutiveFailures: a.consecutiveFailures,
         totalWakes: a.totalWakes,
@@ -240,6 +277,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
       let obligationStatus: AgentStatus["obligationStatus"] = null;
       let unmetRequiredOutputsCount: AgentStatus["unmetRequiredOutputsCount"] = null;
       let behaviorWarningCount: AgentStatus["behaviorWarningCount"] = null;
+      let signalBundleIssueCount: AgentStatus["signalBundleIssueCount"] = null;
       try {
         const indexContent = await readFile(join(runsDir, agentId, "index.jsonl"), "utf8");
         const lines = indexContent
@@ -262,6 +300,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
             obligationStatus?: string;
             unmetRequiredOutputsCount?: number;
             behaviorWarningCount?: number;
+            signalBundle?: { issueCount?: number; totalSignals?: number };
           };
           costMicros = entry.llm?.costMicros ?? 0;
           costFormatted = `$${entry.llm?.costUsdFormatted ?? "0.0000"}`;
@@ -294,6 +333,9 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           if (typeof entry.behaviorWarningCount === "number") {
             behaviorWarningCount = entry.behaviorWarningCount;
           }
+          if (typeof entry.signalBundle?.issueCount === "number") {
+            signalBundleIssueCount = entry.signalBundle.issueCount;
+          }
         }
       } catch {
         /* no cost data */
@@ -313,6 +355,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         obligationStatus,
         unmetRequiredOutputsCount,
         behaviorWarningCount,
+        signalBundleIssueCount,
         stale,
         consecutiveFailures: agentState.consecutiveFailures,
         totalWakes: agentState.totalWakes,
@@ -346,6 +389,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           obligationStatus: null,
           unmetRequiredOutputsCount: null,
           behaviorWarningCount: null,
+          signalBundleIssueCount: null,
           stale: true,
           consecutiveFailures: 0,
           totalWakes: 0,
@@ -364,6 +408,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           shadowCostUsdFormatted?: string | null;
         };
         subscriptionCli?: { permissionMode?: string };
+        signalBundle?: { issueCount?: number; totalSignals?: number };
       };
       const lastWake = entry.finishedAt ? new Date(entry.finishedAt) : null;
       const stale = lastWake ? Date.now() - lastWake.getTime() > 48 * 3600 * 1000 : true;
@@ -389,6 +434,8 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         obligationStatus: null,
         unmetRequiredOutputsCount: null,
         behaviorWarningCount: null,
+        signalBundleIssueCount:
+          typeof entry.signalBundle?.issueCount === "number" ? entry.signalBundle.issueCount : null,
         stale,
         consecutiveFailures: 0,
         totalWakes: 0,
@@ -410,6 +457,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
         obligationStatus: null,
         unmetRequiredOutputsCount: null,
         behaviorWarningCount: null,
+        signalBundleIssueCount: null,
         stale: true,
         consecutiveFailures: 0,
         totalWakes: 0,

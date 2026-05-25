@@ -72,6 +72,15 @@ export interface HarnessConfig {
      */
     readonly maxSteps: number;
   };
+  /** Signal-aggregation hygiene knobs (harness#394). */
+  readonly signals: {
+    /**
+     * Per-agent github-issue-count threshold above which the dashboard
+     * flags the agent's signal bundle as "spiked" (yellow highlight).
+     * Default 10. Operators with chattier repos can raise this.
+     */
+    readonly spikeThreshold: number;
+  };
 }
 
 const DEFAULTS: HarnessConfig = {
@@ -82,6 +91,7 @@ const DEFAULTS: HarnessConfig = {
   logging: { level: "info" },
   spirit: { maxSteps: 256 },
   agent: { maxSteps: 256 },
+  signals: { spikeThreshold: 10 },
 };
 
 const isLLMProvider = (v: unknown): v is LLMProvider =>
@@ -152,6 +162,12 @@ const harnessConfigSchema = z
     agent: z
       .object({
         maxSteps: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
+    signals: z
+      .object({
+        spikeThreshold: z.number().int().positive().optional(),
       })
       .strict()
       .optional(),
@@ -241,6 +257,7 @@ export async function loadHarnessConfig(rootDir: string): Promise<HarnessConfig>
   const logging = raw.logging as Record<string, unknown> | undefined;
   const spirit = raw.spirit as Record<string, unknown> | undefined;
   const agent = raw.agent as Record<string, unknown> | undefined;
+  const signals = raw.signals as Record<string, unknown> | undefined;
 
   const collabProvider = collab?.provider;
   const logLevel = logging?.level;
@@ -258,6 +275,13 @@ export async function loadHarnessConfig(rootDir: string): Promise<HarnessConfig>
     rawAgentMaxSteps >= 1
       ? Math.floor(rawAgentMaxSteps)
       : DEFAULTS.agent.maxSteps;
+  const rawSpikeThreshold = signals?.spikeThreshold;
+  const spikeThreshold =
+    typeof rawSpikeThreshold === "number" &&
+    Number.isFinite(rawSpikeThreshold) &&
+    rawSpikeThreshold >= 1
+      ? Math.floor(rawSpikeThreshold)
+      : DEFAULTS.signals.spikeThreshold;
 
   return {
     llm: {
@@ -296,6 +320,7 @@ export async function loadHarnessConfig(rootDir: string): Promise<HarnessConfig>
     },
     spirit: { maxSteps: spiritMaxSteps },
     agent: { maxSteps: agentMaxSteps },
+    signals: { spikeThreshold },
   };
 }
 
@@ -326,5 +351,6 @@ export function mergeWithCliFlags(
     },
     spirit: config.spirit,
     agent: config.agent,
+    signals: config.signals,
   };
 }

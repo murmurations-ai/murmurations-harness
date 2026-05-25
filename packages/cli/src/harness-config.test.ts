@@ -244,6 +244,7 @@ describe("mergeWithCliFlags", () => {
       logging: { level: "info" as const },
       spirit: { maxSteps: 256 },
       agent: { maxSteps: 256 },
+      signals: { spikeThreshold: 10 },
     };
 
     const merged = mergeWithCliFlags(config, {
@@ -266,6 +267,7 @@ describe("mergeWithCliFlags", () => {
       logging: { level: "warn" as const },
       spirit: { maxSteps: 256 },
       agent: { maxSteps: 256 },
+      signals: { spikeThreshold: 10 },
     };
 
     const merged = mergeWithCliFlags(config, {});
@@ -284,6 +286,7 @@ describe("mergeWithCliFlags", () => {
       logging: { level: "info" as const },
       spirit: { maxSteps: 256 },
       agent: { maxSteps: 256 },
+      signals: { spikeThreshold: 10 },
     };
 
     const merged = mergeWithCliFlags(config, { logLevel: "debug" });

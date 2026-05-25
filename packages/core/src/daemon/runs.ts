@@ -71,6 +71,24 @@ export interface SubscriptionCliAuditContext {
   readonly envAllowlistApplied: true;
 }
 
+/**
+ * Per-wake signal-bundle observability metrics (harness#394 scope 2).
+ *
+ * Captured at wake fire time from the assembled SignalBundle so dashboards
+ * can show which agents are reading the most context per wake. Naturally
+ * complements `daemon.signal-bundle.large` event observability — that fires
+ * on threshold; this records every wake's actual numbers.
+ */
+export interface SignalBundleMetrics {
+  /** Count of `github-issue` signals in the bundle. The primary
+   *  "signal-bundle load" metric — every open issue lands in every
+   *  watching agent's bundle on every wake. */
+  readonly issueCount: number;
+  /** Total signals across all sources (issues, private notes, governance
+   *  inbox, action items, etc.). */
+  readonly totalSignals: number;
+}
+
 /** Configuration for a {@link RunArtifactWriter}. */
 export interface RunArtifactWriterConfig {
   /**
@@ -202,6 +220,11 @@ export interface RunArtifactIndexEntry {
    * wakes; absent for API-provider wakes.
    */
   readonly subscriptionCli?: SubscriptionCliAuditContext;
+  /**
+   * Per-wake signal-bundle metrics (harness#394 scope 2). Optional so
+   * legacy entries written before the metric was added stay readable.
+   */
+  readonly signalBundle?: SignalBundleMetrics;
 }
 
 export class RunArtifactWriter {
@@ -228,6 +251,7 @@ export class RunArtifactWriter {
     costRecord: WakeCostRecord | undefined,
     logger?: RunArtifactLogger,
     validation?: WakeValidationResult,
+    bundleMetrics?: SignalBundleMetrics,
   ): Promise<void> {
     try {
       const now = this.#now();
@@ -255,6 +279,7 @@ export class RunArtifactWriter {
         digestRelativePath,
         this.#subscriptionCli,
         validation,
+        bundleMetrics,
       );
       // Newline-terminated so readers can stream line-by-line.
       await appendFile(indexAbsolutePath, `${JSON.stringify(entry)}\n`, "utf8");
@@ -308,6 +333,7 @@ const buildIndexEntry = (
   digestRelativePath: string,
   subscriptionCli?: SubscriptionCliAuditContext,
   validation?: WakeValidationResult,
+  bundleMetrics?: SignalBundleMetrics,
 ): RunArtifactIndexEntry => {
   const outcome = outcomeKindOf(result);
   const durationMs = result.finishedAt.getTime() - result.startedAt.getTime();
@@ -347,6 +373,7 @@ const buildIndexEntry = (
     },
     digestPath: digestRelativePath,
     ...(subscriptionCli !== undefined ? { subscriptionCli } : {}),
+    ...(bundleMetrics !== undefined ? { signalBundle: bundleMetrics } : {}),
     ...(validation !== undefined
       ? {
           productive: validation.productive,
@@ -422,6 +449,7 @@ export class DispatchRunArtifactWriter {
     costRecord: WakeCostRecord | undefined,
     logger?: RunArtifactLogger,
     validation?: WakeValidationResult,
+    bundleMetrics?: SignalBundleMetrics,
   ): Promise<void> {
     const writer = this.#writers.get(result.agentId.value);
     if (!writer) {
@@ -432,6 +460,6 @@ export class DispatchRunArtifactWriter {
       });
       return;
     }
-    await writer.record(result, costRecord, logger, validation);
+    await writer.record(result, costRecord, logger, validation, bundleMetrics);
   }
 }
