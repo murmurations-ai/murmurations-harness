@@ -26,6 +26,7 @@ import {
   IdentityLoader,
 } from "@murmurations-ai/core";
 
+import { parseDotEnv } from "./dotenv.js";
 import { listBundledPluginAliases, probeGovernancePlugin } from "./governance-plugin-resolver.js";
 import { loadHarnessConfig, validateHarnessYaml, type HarnessConfig } from "./harness-config.js";
 import {
@@ -551,26 +552,6 @@ const runSchemaChecks = async (ctx: CheckContext): Promise<void> => {
 // ---------------------------------------------------------------------------
 // Category 3: Secrets
 // ---------------------------------------------------------------------------
-
-const parseDotEnv = (content: string): Map<string, string> => {
-  const map = new Map<string, string>();
-  for (const raw of content.split("\n")) {
-    const line = raw.trim();
-    if (line.length === 0 || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq < 0) continue;
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    map.set(key, value);
-  }
-  return map;
-};
 
 const providerKeyName = (provider: string): string | null => {
   switch (provider) {

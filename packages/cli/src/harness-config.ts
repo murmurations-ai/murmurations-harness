@@ -91,6 +91,8 @@ const DEFAULTS: HarnessConfig = {
   logging: { level: "info" },
   spirit: { maxSteps: 256 },
   agent: { maxSteps: 256 },
+  // Kept in sync with DEFAULT_SIGNAL_BUNDLE_SPIKE_THRESHOLD in
+  // packages/dashboard-tui/src/data.ts. Change both.
   signals: { spikeThreshold: 10 },
 };
 

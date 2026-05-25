@@ -14,7 +14,8 @@ import cronParser from "cron-parser";
  * Per-agent signal-bundle issue count threshold above which the dashboard
  * highlights the agent's bundle as "spiked". Defaults to 10 when no
  * murmuration/harness.yaml is present or `signals.spikeThreshold` is
- * unset (matches the CLI HarnessConfig default).
+ * unset. Kept in sync with `DEFAULTS.signals.spikeThreshold` in
+ * `packages/cli/src/harness-config.ts` — if you change one, change both.
  */
 export const DEFAULT_SIGNAL_BUNDLE_SPIKE_THRESHOLD = 10;
 
@@ -22,7 +23,13 @@ export const DEFAULT_SIGNAL_BUNDLE_SPIKE_THRESHOLD = 10;
  *  scoped regex (matches the convention used elsewhere in this file for
  *  role.md frontmatter) so dashboard-tui does not take a YAML dep. The
  *  CLI's full Zod-validated loader is the source of truth at runtime;
- *  this reader exists only so the dashboard can highlight spikes. */
+ *  this reader exists only so the dashboard can highlight spikes.
+ *
+ *  Known limitation: only block-style YAML is recognised. A flow-style
+ *  declaration like `signals: { spikeThreshold: 20 }` silently falls
+ *  back to the default. The CLI loader accepts both shapes; if an
+ *  operator ever reports "my threshold isn't taking effect," that's
+ *  the first thing to check. */
 export const readSignalBundleSpikeThreshold = async (rootDir: string): Promise<number> => {
   try {
     const content = await readFile(join(rootDir, "murmuration", "harness.yaml"), "utf8");
@@ -30,7 +37,9 @@ export const readSignalBundleSpikeThreshold = async (rootDir: string): Promise<n
     // `spikeThreshold:` written under some other top-level key.
     const signalsBlock = /^signals:\s*\n((?:[ \t]+.*\n?)+)/m.exec(content);
     if (!signalsBlock) return DEFAULT_SIGNAL_BUNDLE_SPIKE_THRESHOLD;
-    const match = /^[ \t]+spikeThreshold:\s*(\d+)/m.exec(signalsBlock[1] ?? "");
+    const blockBody = signalsBlock[1];
+    if (blockBody === undefined) return DEFAULT_SIGNAL_BUNDLE_SPIKE_THRESHOLD;
+    const match = /^[ \t]+spikeThreshold:\s*(\d+)/m.exec(blockBody);
     if (!match) return DEFAULT_SIGNAL_BUNDLE_SPIKE_THRESHOLD;
     const n = Number(match[1]);
     if (Number.isFinite(n) && n >= 1) return Math.floor(n);
@@ -300,7 +309,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
             obligationStatus?: string;
             unmetRequiredOutputsCount?: number;
             behaviorWarningCount?: number;
-            signalBundle?: { issueCount?: number; totalSignals?: number };
+            signalBundle?: { issueCount?: number };
           };
           costMicros = entry.llm?.costMicros ?? 0;
           costFormatted = `$${entry.llm?.costUsdFormatted ?? "0.0000"}`;
@@ -408,7 +417,7 @@ export const readPipelineState = async (rootDir: string): Promise<readonly Agent
           shadowCostUsdFormatted?: string | null;
         };
         subscriptionCli?: { permissionMode?: string };
-        signalBundle?: { issueCount?: number; totalSignals?: number };
+        signalBundle?: { issueCount?: number };
       };
       const lastWake = entry.finishedAt ? new Date(entry.finishedAt) : null;
       const stale = lastWake ? Date.now() - lastWake.getTime() > 48 * 3600 * 1000 : true;
