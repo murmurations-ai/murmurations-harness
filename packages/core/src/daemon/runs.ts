@@ -75,18 +75,13 @@ export interface SubscriptionCliAuditContext {
  * Per-wake signal-bundle observability metrics (harness#394 scope 2).
  *
  * Captured at wake fire time from the assembled SignalBundle so dashboards
- * can show which agents are reading the most context per wake. Naturally
- * complements `daemon.signal-bundle.large` event observability — that fires
- * on threshold; this records every wake's actual numbers.
+ * can show which agents are reading the most context per wake.
  */
 export interface SignalBundleMetrics {
   /** Count of `github-issue` signals in the bundle. The primary
    *  "signal-bundle load" metric — every open issue lands in every
    *  watching agent's bundle on every wake. */
   readonly issueCount: number;
-  /** Total signals across all sources (issues, private notes, governance
-   *  inbox, action items, etc.). */
-  readonly totalSignals: number;
 }
 
 /** Configuration for a {@link RunArtifactWriter}. */

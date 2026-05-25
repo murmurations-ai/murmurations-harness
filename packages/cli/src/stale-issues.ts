@@ -144,6 +144,22 @@ interface RestIssueResponse {
   readonly pull_request?: unknown;
 }
 
+/** Per-item runtime guard. The `Array.isArray(body)` check alone is not
+ *  enough: a transferred issue or future REST quirk could yield items
+ *  missing `created_at`, which would silently produce `new Date(undefined)`
+ *  → `Invalid Date` → NaN ageDays and broken sort. */
+const isRestIssueResponse = (v: unknown): v is RestIssueResponse => {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o.number === "number" &&
+    typeof o.title === "string" &&
+    typeof o.html_url === "string" &&
+    typeof o.created_at === "string" &&
+    typeof o.updated_at === "string"
+  );
+};
+
 const withTimeout = async <T>(promise: Promise<T>, ms: number, what: string): Promise<T> => {
   return Promise.race([
     promise,
@@ -155,11 +171,28 @@ const withTimeout = async <T>(promise: Promise<T>, ms: number, what: string): Pr
   ]);
 };
 
+/** GitHub owner / repo slug grammar: alphanumerics, hyphen, underscore,
+ *  period; cannot start with `.` or `-` (and `..` is rejected outright
+ *  to defang any path-traversal attempt). Validating both halves prevents
+ *  a malicious `harness.yaml` from redirecting our Bearer-token-bearing
+ *  request to a non-GitHub host via embedded `?`, `#`, `/`, or `@`. */
+const VALID_SLUG = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
+
 const splitRepo = (repo: string): { owner: string; name: string } | null => {
   const slash = repo.indexOf("/");
   if (slash <= 0 || slash === repo.length - 1) return null;
-  return { owner: repo.slice(0, slash), name: repo.slice(slash + 1) };
+  const owner = repo.slice(0, slash);
+  const name = repo.slice(slash + 1);
+  if (!VALID_SLUG.test(owner) || !VALID_SLUG.test(name)) return null;
+  if (owner.includes("..") || name.includes("..")) return null;
+  return { owner, name };
 };
+
+/** Bound `statusText` length when surfacing GitHub errors so a hostile
+ *  upstream cannot dump arbitrarily long content into operator-facing
+ *  logs. 200 chars is well past GitHub's normal reason phrases. */
+const truncateStatusText = (text: string): string =>
+  text.length > 200 ? `${text.slice(0, 200)}…` : text;
 
 /** Page through open issues for `owner/name`. Caps at 5 pages (500
  *  issues) so rate-limit cost is bounded. `userAgent` distinguishes
@@ -170,7 +203,7 @@ export const fetchOpenIssues = async (
   userAgent: string,
 ): Promise<readonly StaleScanCandidate[]> => {
   const parts = splitRepo(repo);
-  if (!parts) throw new Error(`invalid repo: "${repo}" (expected "owner/name")`);
+  if (!parts) throw new Error(`invalid repo: "${repo}" (expected "owner/name" slug)`);
   const collected: StaleScanCandidate[] = [];
   const maxPages = 5;
   for (let page = 1; page <= maxPages; page++) {
@@ -187,12 +220,14 @@ export const fetchOpenIssues = async (
       `GitHub GET /issues page ${String(page)}`,
     );
     if (!res.ok) {
-      throw new Error(`${String(res.status)} ${res.statusText}`);
+      throw new Error(`${String(res.status)} ${truncateStatusText(res.statusText)}`);
     }
     const body: unknown = await res.json();
     if (!Array.isArray(body)) break;
-    const items = body as RestIssueResponse[];
-    for (const it of items) {
+    let pageItemCount = 0;
+    for (const it of body) {
+      pageItemCount++;
+      if (!isRestIssueResponse(it)) continue;
       // REST /issues returns PRs alongside issues; skip them.
       if (it.pull_request !== undefined) continue;
       collected.push({
@@ -203,7 +238,7 @@ export const fetchOpenIssues = async (
         updatedAt: new Date(it.updated_at),
       });
     }
-    if (items.length < 100) break;
+    if (pageItemCount < 100) break;
   }
   return collected;
 };

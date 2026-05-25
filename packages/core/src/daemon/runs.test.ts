@@ -237,11 +237,10 @@ describe("RunArtifactWriter", () => {
       });
       await writer.record(makeResult(), makeCostRecord(), undefined, undefined, {
         issueCount: 23,
-        totalSignals: 47,
       });
       const indexContents = await readFile(join(rootDir, "index.jsonl"), "utf8");
       const entry = JSON.parse(indexContents.trim()) as RunArtifactIndexEntry;
-      expect(entry.signalBundle).toEqual({ issueCount: 23, totalSignals: 47 });
+      expect(entry.signalBundle).toEqual({ issueCount: 23 });
     });
 
     it("omits signalBundle block when not supplied (legacy / no signal aggregator)", async () => {

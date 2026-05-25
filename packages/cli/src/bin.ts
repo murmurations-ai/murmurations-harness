@@ -505,16 +505,23 @@ const main = async (): Promise<void> => {
     case "list-stale-issues": {
       const { runListStaleIssuesCli } = await import("./list-stale-issues.js");
       const rest = argv.slice(1);
+      // Bound integer parser: rejects NaN, Infinity, fractions, negatives,
+      // and absurdly large values (which would otherwise multiply into
+      // Infinity-thresholds and silently classify zero issues).
+      const parseDayCount = (raw: string | undefined): number | undefined => {
+        if (raw === undefined) return undefined;
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n < 1 || n > 3650) return undefined;
+        return n;
+      };
       const daysIdx = rest.indexOf("--days");
       const silenceIdx = rest.indexOf("--silence-days");
-      const ageDays = daysIdx >= 0 ? Number(rest[daysIdx + 1]) : undefined;
-      const silenceDays = silenceIdx >= 0 ? Number(rest[silenceIdx + 1]) : undefined;
+      const ageDays = daysIdx >= 0 ? parseDayCount(rest[daysIdx + 1]) : undefined;
+      const silenceDays = silenceIdx >= 0 ? parseDayCount(rest[silenceIdx + 1]) : undefined;
       const exitCode = await runListStaleIssuesCli({
         rootDir: resolveRoot(rest),
-        ...(Number.isFinite(ageDays) && ageDays !== undefined && ageDays >= 1 ? { ageDays } : {}),
-        ...(Number.isFinite(silenceDays) && silenceDays !== undefined && silenceDays >= 1
-          ? { silenceDays }
-          : {}),
+        ...(ageDays !== undefined ? { ageDays } : {}),
+        ...(silenceDays !== undefined ? { silenceDays } : {}),
         digestOnly: rest.includes("--digest-only"),
         json: rest.includes("--json"),
       });

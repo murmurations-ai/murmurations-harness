@@ -15,7 +15,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { resolve, dirname } from "node:path";
 import cronParser from "cron-parser";
 import { formatUSDMicros } from "../cost/usd.js";
-import { RunArtifactWriter, DispatchRunArtifactWriter } from "./runs.js";
+import { RunArtifactWriter, DispatchRunArtifactWriter, type SignalBundleMetrics } from "./runs.js";
 import { AgentStateStore } from "../agents/index.js";
 // DirectiveStore removed — directives are now GitHub issues.
 // The signal aggregator surfaces them via listIssues with the
@@ -1009,10 +1009,12 @@ export class Daemon {
         // count for dashboard surfacing.
         // Compute bundle metrics from the assembled context (harness#394
         // scope 2). Records per-wake signal-bundle load so the dashboard
-        // can flag agents whose context is bloating.
-        const bundleMetrics = {
+        // can flag agents whose context is bloating. Annotated explicitly
+        // so adding a required field to SignalBundleMetrics surfaces here
+        // rather than silently inserting `undefined` through structural
+        // compatibility at the record() call.
+        const bundleMetrics: SignalBundleMetrics = {
           issueCount: context.signals.signals.filter((s) => s.kind === "github-issue").length,
-          totalSignals: context.signals.signals.length,
         };
         await this.#runArtifactWriter.record(
           recordedResult,

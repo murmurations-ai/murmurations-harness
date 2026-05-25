@@ -20,6 +20,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { parseDotEnv } from "./dotenv.js";
 import { loadHarnessConfig } from "./harness-config.js";
 import {
   classifyStaleIssues,
@@ -40,30 +41,6 @@ export {
   type StaleScanCandidate,
   type StaleScanOptions,
 } from "./stale-issues.js";
-
-// ---------------------------------------------------------------------------
-// .env reader (same shape as doctor.ts; small enough to inline)
-// ---------------------------------------------------------------------------
-
-const parseDotEnv = (content: string): Map<string, string> => {
-  const map = new Map<string, string>();
-  for (const raw of content.split("\n")) {
-    const line = raw.trim();
-    if (line.length === 0 || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq < 0) continue;
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    map.set(key, value);
-  }
-  return map;
-};
 
 // ---------------------------------------------------------------------------
 // CLI entry point
