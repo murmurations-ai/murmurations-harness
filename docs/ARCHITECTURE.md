@@ -26,6 +26,25 @@ The LLM layer (`@murmurations-ai/llm`) wraps Vercel AI SDK's `generateText()` be
 
 ---
 
+## Recurring pattern: declaration vs. runtime
+
+The harness's mental model separates two things across every major subsystem:
+
+- **Declaration** — durable, in the repo, human-authored or governance-ratified. Reviewable in PRs. The artifact a future operator reads to understand what an agent _is_ or _may do_.
+- **Runtime** — computed at boot or per-wake by the daemon from declaration plus current state. Never edited by hand. The shape the agent actually executes against.
+
+| Domain                                  | Declaration (durable, in repo)              | Runtime (computed by daemon)                                               |
+| --------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------- |
+| **Obligations** (v0.8.0)                | `role.md` `contract:` block                 | per-wake `ExecutionContract` assembled from declaration + signals + budget |
+| **Action effects**                      | `WakeAction` returned by the agent (intent) | `WakeActionReceipt` recording what actually landed against GitHub          |
+| **Capabilities** (v0.9 candidate, #396) | `governance/capabilities.md` table rows     | per-agent effective `write_scopes` computed at boot from active rows       |
+
+When proposing a new feature, the first design question is: _what does declaration look like, and what does the daemon compute from it?_ If the same artifact serves both roles (declaration AND runtime), expect drift — that's the failure mode this separation exists to prevent.
+
+The pattern emerged organically across three separate features before being named. Naming it now means we apply it deliberately in subsequent design work rather than rediscovering it each time.
+
+---
+
 ## Core Belief
 
 A murmuration's value is measured by what it **ships**, not what it **discusses**. Every agent wake, circle meeting, governance round, and Source directive must produce **artifacts that change the state of the world**:
