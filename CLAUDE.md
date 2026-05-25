@@ -140,6 +140,10 @@ murmuration groups [--root|--name] [--json]
 murmuration events [--root|--name] [--json]
 murmuration cost   [--root|--name] [--json]
 
+# Diagnostics
+murmuration doctor [--live] [--fix] [--json]                            # Validate setup + (with --live) GitHub signal-bundle hygiene
+murmuration list-stale-issues [--days N] [--silence-days N] [--digest-only] [--json]  # Inventory open issues bloating per-wake context
+
 # Actions
 murmuration directive --root <path> --agent <id> "message"
 murmuration convene --root <path> --group <id> [--governance] [--directive "msg"]

@@ -35,6 +35,9 @@ logging:
 
 spirit:
   maxSteps: 32 # Spirit tool-loop budget per turn
+
+signals:
+  spikeThreshold: 10 # dashboard flags `[b:N]` yellow when an agent's bundle exceeds this
 ```
 
 ## Fields
@@ -98,6 +101,27 @@ When the budget is exhausted the REPL shows:
 ```
 (Spirit ran out of tool-use budget before producing an answer. Try narrowing the question, or ask for a shorter summary.)
 ```
+
+### `signals`
+
+Signal-aggregation hygiene knobs. Added in [harness#394](https://github.com/murmurations-ai/murmurations-harness/issues/394) — every open GitHub issue lands in every watching agent's `SignalBundle` on every wake, so operators need visibility when that load grows.
+
+```yaml
+signals:
+  spikeThreshold: 10
+```
+
+| Field            | Type   | Default | Notes                                                                                                                                                                                                                                                                                                      |
+| ---------------- | ------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spikeThreshold` | number | `10`    | Per-agent `github-issue` count above which the dashboard renders the `[b:N]` badge in yellow (instead of dim) and the daemon emits `daemon.signal-bundle.large`. Persisted on every wake in `runs/<agent>/index.jsonl` as `signalBundle.issueCount`. Raise for operators with chattier repos. Must be ≥ 1. |
+
+### `agent`
+
+Agent-runtime knobs applied to every agent's wake unless overridden per-agent in `role.md`.
+
+| Field      | Type   | Default | Notes                                                                                                                                |
+| ---------- | ------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxSteps` | number | `256`   | Tool-use budget per agent wake. Wall-clock and cost budgets are the real circuit-breakers; this is belt-and-suspenders. Must be ≥ 1. |
 
 ## Precedence
 

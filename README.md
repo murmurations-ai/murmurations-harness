@@ -4,7 +4,9 @@
 
 The Murmuration Harness is an open-source TypeScript runtime that lets a single human — the **Source** — coordinate a murmuration of AI agents to do real work. It is not an autonomous agent framework. It is a tool that amplifies human agency.
 
-> **v0.8.0** (current) — Execution contracts: agents declare `done_when` / `committed_artifacts` / `verification_required_for` in `role.md`, the validator scores wakes against the obligation, and the dashboard surfaces `[obl-unmet:N]` when output paths go unmet. `validateBehavior` ships warning-only — calibration before hard-fail in v0.8.1. 9 packages, 1240 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
+> **v0.8.0** (current) — Execution contracts: agents declare `done_when` / `committed_artifacts` / `verification_required_for` in `role.md`, the validator scores wakes against the obligation, and the dashboard surfaces `[obl-unmet:N]` when output paths go unmet. `validateBehavior` ships warning-only — calibration before hard-fail in v0.8.1. 9 packages, 1298 tests, 5 governance models. [CHANGELOG](./CHANGELOG.md)
+>
+> **Shipped post-v0.8.0 (May 2026):** Signal-bundle hygiene tooling — `murmuration doctor --live` flags stale issues bloating per-wake context, `murmuration list-stale-issues` inventories them, dashboard `[b:N]` badge spikes when an agent's last bundle exceeded `signals.spikeThreshold` (harness#394). Daemon `daemon.signal-bundle.large` event + per-wake `signalBundle.issueCount` persisted in `index.jsonl`. Orphan-schedule warning when `role.md` is missing (harness#380). Trojan Source / Unicode bidi hardening on operator-facing log paths.
 >
 > **In flight (v0.8.1+):** Promote `validateBehavior` to hard-fail after 14d composite-permission soak; per-segment glob matcher; `verifiedActions` field on `AgentResult` for the long-term subscription-CLI evidence fix.
 
@@ -183,13 +185,14 @@ contract:
 
 **Dashboard surfacing.** The TUI agents panel shows the validation result of the last wake as a colored badge after the wake count:
 
-| Badge           | Meaning                                                                                                               |
-| --------------- | --------------------------------------------------------------------------------------------------------------------- |
-| _(none)_        | Wake productive — all obligations met, no warnings.                                                                   |
-| `[obl-unmet:N]` | **N** `requiredOutputs` had no matching successful evidence (red — load-bearing).                                     |
-| `[dir-unaddr]`  | One or more source directives in the signal bundle were not addressed (yellow).                                       |
-| `[idle-val]`    | Wake produced no artifacts and had no directives (dim).                                                               |
-| `[beh:N]`       | **N** behavior warnings from the narrative-vs-tool-call cross-check (yellow). Warning-only in v0.8.0 — see CHANGELOG. |
+| Badge           | Meaning                                                                                                                                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| _(none)_        | Wake productive — all obligations met, no warnings.                                                                                                                                                               |
+| `[obl-unmet:N]` | **N** `requiredOutputs` had no matching successful evidence (red — load-bearing).                                                                                                                                 |
+| `[dir-unaddr]`  | One or more source directives in the signal bundle were not addressed (yellow).                                                                                                                                   |
+| `[idle-val]`    | Wake produced no artifacts and had no directives (dim).                                                                                                                                                           |
+| `[beh:N]`       | **N** behavior warnings from the narrative-vs-tool-call cross-check (yellow). Warning-only in v0.8.0 — see CHANGELOG.                                                                                             |
+| `[b:N]`         | **N** `github-issue` signals in the agent's last bundle. Dim by default; yellow when over `signals.spikeThreshold` (default 10) — see [#394](https://github.com/murmurations-ai/murmurations-harness/issues/394). |
 
 **No `contract:` block?** Agents continue to work with the legacy heuristic: a wake is productive when it produces ≥1 artifact and addresses any source directives in its bundle. The `contract:` block is opt-in.
 
@@ -315,6 +318,11 @@ murmuration agents [--json] [--filter running|idle|failed]
 murmuration groups [--json]
 murmuration events [--json]
 murmuration cost   [--json]
+
+# Diagnostics
+murmuration doctor [--live] [--fix] [--json]    # Validate setup + (with --live) GitHub signal-bundle hygiene
+murmuration list-stale-issues [--days N] [--silence-days N] [--digest-only] [--json]
+                                                # Inventory open GitHub issues bloating per-wake context
 
 # Actions
 murmuration directive [flags] "message"     # Send a Source directive

@@ -1,6 +1,6 @@
 # Murmuration Harness Architecture
 
-**Status:** Living document — updated 2026-04-15 (v0.3.0)
+**Status:** Living document — updated 2026-05-25 (post-v0.8.0; harness#394 + harness#380 shipped)
 **Principle:** The harness exists to help agents do real work, not to facilitate governance theater.
 
 ---

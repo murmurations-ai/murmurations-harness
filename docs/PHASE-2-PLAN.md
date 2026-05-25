@@ -1,6 +1,6 @@
 # Phase 2 Implementation Plan — Murmuration Harness
 
-**Status:** Active
+**Status:** COMPLETED — shipped through v0.8.0 (2026-05-19). Retained for historical reference. See [CHANGELOG.md](../CHANGELOG.md) for shipment notes; for the post-v0.8.0 hygiene + diagnostics work see [docs/ARCHITECTURE.md](./ARCHITECTURE.md) and the issue history (#394, #380).
 **Authored:** 2026-04-09 (Engineering Lead #22, Engineering Circle Phase 0 mode)
 **Spec reference:** [`MURMURATION-HARNESS-SPEC.md`](https://github.com/xeeban/emergent-praxis/blob/main/docs/MURMURATION-HARNESS-SPEC.md) §15 Phase 2
 **Sibling doc:** [`PHASE-1-PLAN.md`](./PHASE-1-PLAN.md)
