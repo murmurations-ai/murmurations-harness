@@ -80,6 +80,23 @@ export interface AggregatorCaps {
   readonly githubIssue: number;
   readonly privateNote: number;
   readonly inboxMessage: number;
+  /**
+   * Comments fetched per issue (harness#394, #350). Lowered from 20 → 5
+   * in v0.8.1 after field data showed comment pages dominate per-issue
+   * token cost on chatty threads. Operators with larger token budgets
+   * can raise this; the "+N more" tail names the omitted count so agents
+   * know to open the issue when they need the rest.
+   */
+  readonly commentsPerIssue: number;
+  /**
+   * Bundle observability (harness#394). The aggregator fires
+   * `onBundleMetrics` when issue count ≥ this threshold OR total github-issue
+   * excerpt bytes ≥ `largeBundleByteThreshold`. The daemon turns the metrics
+   * into a `daemon.signal-bundle.large` structured-log line so operators can
+   * spot context-burn growth before it dominates wake input.
+   */
+  readonly largeBundleIssueThreshold: number;
+  readonly largeBundleByteThreshold: number;
 }
 
 export const DEFAULT_AGGREGATOR_CAPS: AggregatorCaps = {
@@ -87,7 +104,26 @@ export const DEFAULT_AGGREGATOR_CAPS: AggregatorCaps = {
   githubIssue: 15,
   privateNote: 10,
   inboxMessage: 10,
+  commentsPerIssue: 5,
+  largeBundleIssueThreshold: 10,
+  largeBundleByteThreshold: 150_000,
 };
+
+/**
+ * Bundle-size telemetry for the `onBundleMetrics` hook. Emitted by
+ * {@link DefaultSignalAggregator} after bundle assembly when either
+ * threshold in {@link AggregatorCaps} is crossed.
+ */
+export interface BundleMetrics {
+  readonly agentId: string;
+  readonly wakeId: string;
+  readonly issueCount: number;
+  readonly totalBytes: number;
+  readonly thresholds: {
+    readonly issues: number;
+    readonly bytes: number;
+  };
+}
 
 /** Minimal CollaborationProvider interface for signal collection (ADR-0021). */
 export interface SignalCollaborationProvider {
@@ -136,6 +172,15 @@ export interface DefaultSignalAggregatorConfig {
    * remains sequential — this cap is only for the inner label fan-out.
    */
   readonly fanOutParallelism?: number;
+  /**
+   * Fires once per `aggregate()` call when the assembled bundle exceeds
+   * `largeBundleIssueThreshold` issues OR `largeBundleByteThreshold` bytes
+   * of github-issue excerpt content. The daemon wires this to a structured
+   * `daemon.signal-bundle.large` log line so operators can observe
+   * context-burn trends without parsing per-wake bundles by hand.
+   * No-op when undefined.
+   */
+  readonly onBundleMetrics?: (metrics: BundleMetrics) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +338,31 @@ export class DefaultSignalAggregator implements SignalAggregator {
       const labels = (s as unknown as { labels: readonly string[] }).labels;
       return labels.includes(ACTION_ITEM_LABEL) && labels.includes(assignedLabel(agentIdValue));
     });
+
+    // harness#394: bundle-size observability. Sum github-issue excerpt bytes
+    // (the dominant per-wake input cost) and fire onBundleMetrics when either
+    // the issue count or byte threshold is crossed. The daemon turns this
+    // into a `daemon.signal-bundle.large` structured-log line.
+    if (this.#config.onBundleMetrics) {
+      let issueCount = 0;
+      let totalBytes = 0;
+      for (const s of finalSignals) {
+        if (s.kind !== "github-issue") continue;
+        issueCount++;
+        totalBytes += s.excerpt.length;
+      }
+      const issueThreshold = this.#caps.largeBundleIssueThreshold;
+      const byteThreshold = this.#caps.largeBundleByteThreshold;
+      if (issueCount >= issueThreshold || totalBytes >= byteThreshold) {
+        this.#config.onBundleMetrics({
+          agentId: context.agentId.value,
+          wakeId: context.wakeId.value,
+          issueCount,
+          totalBytes,
+          thresholds: { issues: issueThreshold, bytes: byteThreshold },
+        });
+      }
+    }
 
     return {
       ok: true,
@@ -461,9 +531,14 @@ export class DefaultSignalAggregator implements SignalAggregator {
     // Source answers posted as comments, not just the original body.
     // Comments are wrapped in <untrusted-comment> tags so agents can distinguish
     // user-contributed content from harness-structured signals (prompt injection
-    // boundary). Each comment fetch requests exactly MAX_COMMENTS_PER_ISSUE
+    // boundary). Each comment fetch requests exactly `caps.commentsPerIssue`
     // entries so we never pay for more than we use.
-    const MAX_COMMENTS_PER_ISSUE = 20;
+    //
+    // harness#394: default lowered from 20 → 5 after CW field data showed
+    // comment pages dominate per-issue token cost on chatty threads. Configurable
+    // via `AggregatorCaps.commentsPerIssue` so operators with larger token
+    // budgets can raise it.
+    const commentsPerIssue = this.#caps.commentsPerIssue;
     const enrichedBodies = new Map<string, string>();
     const issuesWithComments = kept.filter(({ issue }) => issue.commentCount > 0);
     if (issuesWithComments.length > 0) {
@@ -471,7 +546,7 @@ export class DefaultSignalAggregator implements SignalAggregator {
         issuesWithComments.map(async ({ issue }) => {
           const key = `${issue.repo.owner.value}/${issue.repo.name.value}#${String(issue.number.value)}`;
           const result = await client.listIssueComments(issue.repo, issue.number, {
-            perPage: MAX_COMMENTS_PER_ISSUE,
+            perPage: commentsPerIssue,
           });
           if (!result.ok) {
             warnings.push(
@@ -479,12 +554,13 @@ export class DefaultSignalAggregator implements SignalAggregator {
             );
             return;
           }
-          const comments = result.value.slice(0, MAX_COMMENTS_PER_ISSUE);
+          const comments = result.value.slice(0, commentsPerIssue);
           if (comments.length === 0) return;
           const shown = comments.length;
+          const omitted = issue.commentCount - shown;
           const truncationNote =
-            issue.commentCount > shown
-              ? ` — showing first ${String(shown)} of ${String(issue.commentCount)}`
+            omitted > 0
+              ? ` — showing first ${String(shown)} of ${String(issue.commentCount)} (+${String(omitted)} more, open issue for full thread)`
               : "";
           const commentSection = comments
             .map((c) => {
