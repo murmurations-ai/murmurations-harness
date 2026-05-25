@@ -576,6 +576,31 @@ export interface LoadedAgentIdentity {
 }
 
 /**
+ * Type guard for the "orphaned schedule" condition (harness#380): the
+ * agent's `role.md` file was missing entirely and the loader synthesized
+ * a fallback identity from `default-agent/`. The narrowed return type
+ * lets callers access `loaded.fallback` without optional-chain noise.
+ *
+ * `role.md` is load-bearing for scheduling — it declares the cron,
+ * scopes, budgets, and write surface. The other fallback reasons
+ * (`missing-frontmatter`, `invalid-frontmatter`) mean the file exists
+ * and the operator is mid-edit; those should NOT be treated as
+ * orphans, since iterative editing is the documented ADR-0027 flow.
+ * Likewise a missing `soul.md` alone doesn't qualify — the synthesized
+ * soul is a benign character file, not the operator-authored agent
+ * contract.
+ *
+ * Lives in core (next to `LoadedAgentIdentity`) so any consumer of
+ * `IdentityLoader.load()` can apply the same check — today only `boot.ts`
+ * enables `fallbackOnMissing`, but a future `runGroupWake` or
+ * `convene` path that opts in will need the same predicate.
+ */
+export const isOrphanedSchedule = (
+  loaded: LoadedAgentIdentity,
+): loaded is LoadedAgentIdentity & { fallback: IdentityFallbackReason } =>
+  loaded.fallback?.missingFiles.includes("role.md") ?? false;
+
+/**
  * Phase 1B identity loader. Reads the four layer files from disk,
  * parses and validates the role frontmatter, and returns an
  * {@link IdentityChain} ready to hand to {@link AgentExecutor.spawn}.

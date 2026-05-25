@@ -27,6 +27,32 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 /**
+ * Replace bytes that can spoof terminal output (or pretend a filename
+ * is something it isn't) with `?` before writing operator-visible
+ * text to stderr or daemon logs. Used for filesystem entries
+ * (directory names from `readdir`) and CLI argv values that an
+ * attacker could plant.
+ *
+ * Strips:
+ *   - C0 controls + DEL (`\x00`-`\x1f`, `\x7f`) — ANSI escape building blocks
+ *   - C1 controls (`\x80`-`\x9f`) — includes 8-bit CSI `\x9b` which xterm
+ *     and Terminal.app render as ESC `[`
+ *   - Unicode bidi overrides + isolates (U+202A-U+202E, U+2066-U+2069) —
+ *     the "Trojan Source" attack class (CVE-2021-42574): a directory
+ *     named `agent-‮drm.elor` renders as `agent-role.md`
+ *   - Zero-width / format chars (U+200B-U+200F, U+FEFF) — invisible
+ *     padding that hides the real filename
+ *   - Line/paragraph separators (U+2028-U+2029) — break terminal line
+ *     accounting
+ */
+export const sanitizeForTerminal = (s: string): string =>
+  s.replace(
+    // eslint-disable-next-line no-control-regex
+    /[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g,
+    "?",
+  );
+
+/**
  * Typed boot-time error. Thrown instead of `process.exit` so the
  * composition root stays library-like — `bin.ts` is the only place
  * that turns errors into exit codes (Engineering Standard #6).
@@ -35,16 +61,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
  * `exitCode` is the conventional sysexits value the bin entrypoint
  * should propagate (78 = configuration error per `sysexits.h`).
  */
-/**
- * Replace ANSI/control bytes with `?` before writing operator-visible
- * text to stderr. Used for filesystem entries (directory names from
- * `readdir`) and CLI argv values that an attacker could plant with
- * escape sequences to spoof terminal output.
- */
-export const sanitizeForTerminal = (s: string): string =>
-  // eslint-disable-next-line no-control-regex
-  s.replace(/[\x00-\x1f\x7f]/g, "?");
-
 export class BootError extends Error {
   public readonly kind:
     | "incomplete-agent-single"
@@ -74,6 +90,7 @@ import {
   DispatchRunArtifactWriter,
   IdentityLoader,
   InProcessExecutor,
+  isOrphanedSchedule,
   PluginInitError,
   RunArtifactWriter,
   SubprocessExecutor,
@@ -86,7 +103,6 @@ import {
   type BudgetCeiling,
   type CollaborationProvider,
   type DaemonConfig,
-  type LoadedAgentIdentity,
   type RegisteredAgent,
   type SecretDeclaration,
   type SecretKey,
@@ -224,21 +240,6 @@ const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
  * first time each pair is seen, with dedupe state held on the hook
  * instance so test wakes don't bleed into each other.
  */
-/**
- * Predicate (harness#380): the agent's `role.md` was missing entirely
- * and the loader synthesised a fallback identity from default-agent/.
- *
- * Distinguished from other fallback reasons (`missing-frontmatter`,
- * `invalid-frontmatter`) which usually mean the operator is iterating
- * on a partially-edited role.md — those keep the agent scheduled.
- * A missing role.md, by contrast, means either the operator removed
- * it deliberately or the directory was never finished; either way the
- * cron entry should be suppressed so the agent doesn't quietly wake
- * with template behaviour.
- */
-export const isOrphanedSchedule = (loaded: LoadedAgentIdentity): boolean =>
-  loaded.fallback?.missingFiles.includes("role.md") ?? false;
-
 export const makeDaemonHook = (
   builder: WakeCostBuilder,
   logger?: { warn: (event: string, fields?: Record<string, unknown>) => void },
@@ -963,6 +964,12 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     rootDir: exampleRoot,
     fallbackOnMissing: true,
     onFallback: (agentDir, reason) => {
+      // harness#380: when role.md is missing, the call site will emit
+      // a strictly more informative `daemon.warn.orphaned-schedule` event
+      // (with the schedule-skip / hard-fail outcome). Suppress the
+      // lower-level `daemon.agent.fallback` here so operators don't see
+      // two warnings for the same condition.
+      if (reason.missingFiles.includes("role.md")) return;
       logger.warn("daemon.agent.fallback", {
         agentDir,
         reason: reason.reason,
@@ -1061,10 +1068,18 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   // the default-agent template — that's intentional for fresh scaffolding,
   // but a daemon-startup *schedule* derived from a synthesized identity
   // means the agent would wake on cron with template behaviour (drift).
-  // Skip the cron registration in that case and emit a visible warning
-  // so the operator notices the missing file. In single-agent mode
-  // (`--agent <id>`) the operator named this agent explicitly — fail
-  // hard instead of silently dropping the only requested agent.
+  //
+  // The orphan check is intentionally defensive. In multi-agent mode,
+  // `loader.discover()` (line 1018) already filters out dirs lacking
+  // `role.md`, so the check here is belt-and-suspenders against future
+  // call sites that build agentDirs differently (e.g. an operator-supplied
+  // list, a state-store-driven re-registration, etc.). In single-agent
+  // mode (`--agent <id>`) the check IS reachable: `findIncompleteAgents`
+  // (line 1000) only flags dirs with EXACTLY ONE of role.md/soul.md, so a
+  // dir with NEITHER file slips past that gate and lands here. We throw
+  // rather than warn-and-skip because the operator named the agent
+  // explicitly; silently dropping the only requested agent is worse than
+  // failing fast.
   const allRegistered: RegisteredAgent[] = [];
   for (const agentDir of agentDirs) {
     const loaded = await loader.load(agentDir);
@@ -1075,10 +1090,12 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
           `murmuration: agent "${sanitizeForTerminal(agentDir)}" has no role.md — refusing to wake via the default-agent template. Add a role.md or remove the agent directory.`,
         );
       }
+      // `isOrphanedSchedule` is a type guard — `loaded.fallback` is
+      // narrowed to defined here, no optional-chain noise needed.
       logger.warn("daemon.warn.orphaned-schedule", {
         agentDir,
-        missingFiles: loaded.fallback?.missingFiles ?? [],
-        reason: loaded.fallback?.reason ?? "missing-files",
+        missingFiles: loaded.fallback.missingFiles,
+        reason: loaded.fallback.reason,
       });
       continue;
     }
