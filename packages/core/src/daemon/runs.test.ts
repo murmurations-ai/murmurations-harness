@@ -229,6 +229,33 @@ describe("RunArtifactWriter", () => {
     expect(warnings[0]?.data.wakeId).toBe(WAKE_ID);
   });
 
+  describe("signalBundle metrics (harness#394 scope 2)", () => {
+    it("includes signalBundle block when bundleMetrics is passed", async () => {
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+      });
+      await writer.record(makeResult(), makeCostRecord(), undefined, undefined, {
+        issueCount: 23,
+        totalSignals: 47,
+      });
+      const indexContents = await readFile(join(rootDir, "index.jsonl"), "utf8");
+      const entry = JSON.parse(indexContents.trim()) as RunArtifactIndexEntry;
+      expect(entry.signalBundle).toEqual({ issueCount: 23, totalSignals: 47 });
+    });
+
+    it("omits signalBundle block when not supplied (legacy / no signal aggregator)", async () => {
+      const writer = new RunArtifactWriter({
+        rootDir,
+        now: () => new Date("2026-04-12T18:00:04.000Z"),
+      });
+      await writer.record(makeResult(), makeCostRecord());
+      const indexContents = await readFile(join(rootDir, "index.jsonl"), "utf8");
+      const entry = JSON.parse(indexContents.trim()) as RunArtifactIndexEntry;
+      expect(entry.signalBundle).toBeUndefined();
+    });
+  });
+
   describe("subscriptionCli audit context (T-CLI-9 / harness#301)", () => {
     const auditContext: SubscriptionCliAuditContext = {
       cliName: "claude",

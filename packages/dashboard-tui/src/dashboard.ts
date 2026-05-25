@@ -15,6 +15,7 @@ import {
   readGovernanceState,
   readCostSummary,
   readMetricsSnapshot,
+  readSignalBundleSpikeThreshold,
   type AgentStatus,
   type ActivityEntry,
   type GovernanceEntry,
@@ -86,7 +87,11 @@ const renderOverview = (
 // Agents panel — combined pipeline + cost, inactive agents collapsed
 // ---------------------------------------------------------------------------
 
-const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string => {
+const renderAgents = (
+  agents: readonly AgentStatus[],
+  cost: CostSummary,
+  signalBundleSpikeThreshold: number,
+): string => {
   const lines = [` ${bold("Agents")}`, ` ${HR}`];
   if (agents.length === 0) {
     lines.push(`  ${dim("No agents discovered. Run: murmuration start --root <dir>")}`);
@@ -145,6 +150,14 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
       a.behaviorWarningCount !== null && a.behaviorWarningCount > 0
         ? yellow(` [beh:${String(a.behaviorWarningCount)}]`)
         : "";
+    // harness#394 scope 2: surface signal-bundle issue count. Yellow when
+    // the agent's last wake exceeded the configured spike threshold.
+    const bundleStr =
+      a.signalBundleIssueCount !== null
+        ? a.signalBundleIssueCount > signalBundleSpikeThreshold
+          ? yellow(` [b:${String(a.signalBundleIssueCount)}]`)
+          : dim(` [b:${String(a.signalBundleIssueCount)}]`)
+        : "";
 
     const time = a.lastWake!.toISOString().slice(11, 16);
     const next = a.nextWakeCountdown !== "--" ? a.nextWakeCountdown.padEnd(8) : dim("--".padEnd(8));
@@ -161,7 +174,7 @@ const renderAgents = (agents: readonly AgentStatus[], cost: CostSummary): string
         : dim("░".repeat(BAR_WIDTH));
 
     lines.push(
-      `  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w${failStr}${permStr}${validStr}${behStr}`,
+      `  ${marker.padEnd(6)} ${a.agentId.padEnd(24)} ${time}  ${dim("next")} ${next} ${totalCost} ${bar} ${wakes}w${failStr}${permStr}${validStr}${behStr}${bundleStr}`,
     );
   }
 
@@ -408,18 +421,20 @@ export const startDashboard = async (rootDir: string): Promise<void> => {
       return;
     }
 
-    const [pipeline, activity, governance, cost, metrics] = await Promise.all([
-      readPipelineState(root),
-      readRecentActivity(root),
-      readGovernanceState(root),
-      readCostSummary(root),
-      readMetricsSnapshot(root),
-    ]);
+    const [pipeline, activity, governance, cost, metrics, signalBundleSpikeThreshold] =
+      await Promise.all([
+        readPipelineState(root),
+        readRecentActivity(root),
+        readGovernanceState(root),
+        readCostSummary(root),
+        readMetricsSnapshot(root),
+        readSignalBundleSpikeThreshold(root),
+      ]);
 
     const header = `  ${bold("Murmuration Dashboard")} ${dim("—")} ${dim(root)}  ${dim("[q] quit  [r] refresh")}\n`;
     const overview = renderOverview(pipeline, governance, cost);
     const panels = [
-      renderAgents(pipeline, cost),
+      renderAgents(pipeline, cost, signalBundleSpikeThreshold),
       renderCostSummary(cost),
       renderGovernance(governance),
       renderMetrics(metrics),
