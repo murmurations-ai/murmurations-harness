@@ -267,6 +267,8 @@ Usage:
   murmuration init [dir]                Create a new murmuration (interactive)
   murmuration init --example <name> [dir]  Scaffold a bundled example (e.g. hello)
   murmuration doctor [--live] [--fix] [--json]  Diagnose a murmuration's setup
+  murmuration list-stale-issues [--days N] [--silence-days N] [--digest-only] [--json]
+                                        List open GitHub issues bloating the signal bundle
   murmuration directive [options] "msg" Send a directive to agents/groups
   murmuration directive --list          Show all directives and responses
   murmuration convene [options]        Convene a group meeting (on demand)
@@ -496,6 +498,25 @@ const main = async (): Promise<void> => {
         live: liveFlag,
         fix: fixFlag,
         json: jsonFlag,
+      });
+      process.exit(exitCode);
+      break;
+    }
+    case "list-stale-issues": {
+      const { runListStaleIssuesCli } = await import("./list-stale-issues.js");
+      const rest = argv.slice(1);
+      const daysIdx = rest.indexOf("--days");
+      const silenceIdx = rest.indexOf("--silence-days");
+      const ageDays = daysIdx >= 0 ? Number(rest[daysIdx + 1]) : undefined;
+      const silenceDays = silenceIdx >= 0 ? Number(rest[silenceIdx + 1]) : undefined;
+      const exitCode = await runListStaleIssuesCli({
+        rootDir: resolveRoot(rest),
+        ...(Number.isFinite(ageDays) && ageDays !== undefined && ageDays >= 1 ? { ageDays } : {}),
+        ...(Number.isFinite(silenceDays) && silenceDays !== undefined && silenceDays >= 1
+          ? { silenceDays }
+          : {}),
+        digestOnly: rest.includes("--digest-only"),
+        json: rest.includes("--json"),
       });
       process.exit(exitCode);
       break;
