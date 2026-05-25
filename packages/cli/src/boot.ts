@@ -48,6 +48,7 @@ export const sanitizeForTerminal = (s: string): string =>
 export class BootError extends Error {
   public readonly kind:
     | "incomplete-agent-single"
+    | "agent-missing-role"
     | "no-agents-found"
     | "governance-plugin-invalid"
     | "secrets-load-failed";
@@ -85,6 +86,7 @@ import {
   type BudgetCeiling,
   type CollaborationProvider,
   type DaemonConfig,
+  type LoadedAgentIdentity,
   type RegisteredAgent,
   type SecretDeclaration,
   type SecretKey,
@@ -222,6 +224,21 @@ const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
  * first time each pair is seen, with dedupe state held on the hook
  * instance so test wakes don't bleed into each other.
  */
+/**
+ * Predicate (harness#380): the agent's `role.md` was missing entirely
+ * and the loader synthesised a fallback identity from default-agent/.
+ *
+ * Distinguished from other fallback reasons (`missing-frontmatter`,
+ * `invalid-frontmatter`) which usually mean the operator is iterating
+ * on a partially-edited role.md — those keep the agent scheduled.
+ * A missing role.md, by contrast, means either the operator removed
+ * it deliberately or the directory was never finished; either way the
+ * cron entry should be suppressed so the agent doesn't quietly wake
+ * with template behaviour.
+ */
+export const isOrphanedSchedule = (loaded: LoadedAgentIdentity): boolean =>
+  loaded.fallback?.missingFiles.includes("role.md") ?? false;
+
 export const makeDaemonHook = (
   builder: WakeCostBuilder,
   logger?: { warn: (event: string, fields?: Record<string, unknown>) => void },
@@ -1039,10 +1056,32 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     })}\n`,
   );
 
-  // Load identities + build triggers for every agent.
+  // Load identities + build triggers for every agent. harness#380:
+  // when `role.md` is missing entirely, IdentityLoader falls back to
+  // the default-agent template — that's intentional for fresh scaffolding,
+  // but a daemon-startup *schedule* derived from a synthesized identity
+  // means the agent would wake on cron with template behaviour (drift).
+  // Skip the cron registration in that case and emit a visible warning
+  // so the operator notices the missing file. In single-agent mode
+  // (`--agent <id>`) the operator named this agent explicitly — fail
+  // hard instead of silently dropping the only requested agent.
   const allRegistered: RegisteredAgent[] = [];
   for (const agentDir of agentDirs) {
     const loaded = await loader.load(agentDir);
+    if (isOrphanedSchedule(loaded)) {
+      if (options.agentDir !== undefined) {
+        throw new BootError(
+          "agent-missing-role",
+          `murmuration: agent "${sanitizeForTerminal(agentDir)}" has no role.md — refusing to wake via the default-agent template. Add a role.md or remove the agent directory.`,
+        );
+      }
+      logger.warn("daemon.warn.orphaned-schedule", {
+        agentDir,
+        missingFiles: loaded.fallback?.missingFiles ?? [],
+        reason: loaded.fallback?.reason ?? "missing-files",
+      });
+      continue;
+    }
     const wakeSchedule = loaded.frontmatter.wake_schedule ?? { delayMs: EVENT_FALLBACK_DELAY_MS };
     const trigger: WakeTrigger = options.now
       ? { kind: "delay-once", delayMs: 100 }
