@@ -20,7 +20,7 @@ import {
   type LoadedAgentIdentity,
 } from "@murmurations-ai/core";
 
-import { makeDaemonHook } from "./boot.js";
+import { isOrphanedSchedule, makeDaemonHook } from "./boot.js";
 
 describe("makeDaemonHook", () => {
   const builder = (): WakeCostBuilder =>
@@ -215,5 +215,80 @@ describe("registeredAgentFromLoadedIdentity — routing label wiring (QA #2, har
     // derived labels should NOT be present when operator overrides
     expect(anyLabel).not.toContain("scope:group:engineering");
     expect(anyLabel).not.toContain("assigned:agent-c");
+  });
+});
+
+describe("isOrphanedSchedule (harness#380)", () => {
+  const baseLoaded = (fallback?: LoadedAgentIdentity["fallback"]): LoadedAgentIdentity => ({
+    agentId: makeAgentId("test"),
+    chain: makeMinimalChain("test"),
+    frontmatter: roleFrontmatterSchema.parse({
+      agent_id: "test",
+      name: "test",
+      model_tier: "balanced",
+      group_memberships: [],
+      signals: { sources: ["github-issue"], github_scopes: [] },
+    }),
+    ...(fallback !== undefined ? { fallback } : {}),
+  });
+
+  it("returns false for a fully-loaded agent (no fallback)", () => {
+    expect(isOrphanedSchedule(baseLoaded())).toBe(false);
+  });
+
+  it("returns true when role.md is in the missing-files list", () => {
+    expect(
+      isOrphanedSchedule(
+        baseLoaded({
+          reason: "missing-files",
+          missingFiles: ["role.md"],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("returns true when both role.md and soul.md are missing", () => {
+    expect(
+      isOrphanedSchedule(
+        baseLoaded({
+          reason: "missing-files",
+          missingFiles: ["soul.md", "role.md"],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("returns false when only soul.md is missing (operator iterating)", () => {
+    expect(
+      isOrphanedSchedule(
+        baseLoaded({
+          reason: "missing-files",
+          missingFiles: ["soul.md"],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false for missing-frontmatter fallback (role.md exists)", () => {
+    expect(
+      isOrphanedSchedule(
+        baseLoaded({
+          reason: "missing-frontmatter",
+          missingFiles: [],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false for invalid-frontmatter fallback (role.md exists)", () => {
+    expect(
+      isOrphanedSchedule(
+        baseLoaded({
+          reason: "invalid-frontmatter",
+          missingFiles: [],
+          detail: "YAML parse failed",
+        }),
+      ),
+    ).toBe(false);
   });
 });
