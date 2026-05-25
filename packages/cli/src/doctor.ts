@@ -5,8 +5,9 @@
  * Runs a battery of checks against a root directory and tells the
  * operator what will (or won't) work. `--fix` attempts safe
  * auto-remediations (backing up originals to `.bak`). `--live` opts
- * into provider API calls to verify secrets actually authenticate.
- * `--json` emits machine-readable results for CI or monitoring.
+ * into network-dependent checks: provider API key validation AND the
+ * GitHub signal-bundle hygiene scan (harness#394). `--json` emits
+ * machine-readable results for CI or monitoring.
  *
  * Designed to be the one-stop setup validator: after `init`, run
  * `doctor`; before filing a bug, run `doctor`; after migrating a
@@ -41,7 +42,14 @@ const which = (bin: string): boolean => {
 // Types
 // ---------------------------------------------------------------------------
 
-export type DoctorCategory = "layout" | "schema" | "secrets" | "governance" | "live" | "drift";
+export type DoctorCategory =
+  | "layout"
+  | "schema"
+  | "secrets"
+  | "governance"
+  | "live"
+  | "drift"
+  | "hygiene";
 
 export type DoctorSeverity = "error" | "warning" | "info";
 
@@ -846,6 +854,197 @@ const validateLLMKey = async (provider: string, token: string): Promise<void> =>
 };
 
 // ---------------------------------------------------------------------------
+// Category 7: Hygiene — stale signal-bundle inputs (harness#394 scope 1)
+// ---------------------------------------------------------------------------
+//
+// Every open GitHub issue lands in every watching agent's SignalBundle on
+// every wake. Operator repos accumulate digest issues, status pings, and
+// "report" issues that never get closed; each one is re-fetched and re-read
+// by every agent daily. Cleanup sweeps that close ~15 stale issues reduce
+// per-wake input tokens by 20–40% on 6–10 agent murmurations.
+//
+// This check surfaces those candidates so operators don't have to discover
+// the cleanup pattern manually. It does not auto-close (operator judgement);
+// see also `murmuration sweep` (harness#394 scope 3) for the interactive tool.
+
+/** Subset of a GitHub issue this check needs. Kept narrow so the function
+ *  is testable without an HTTP fixture for the whole REST shape. */
+export interface StaleIssueCandidate {
+  readonly number: number;
+  readonly title: string;
+  readonly htmlUrl: string;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+export interface StaleIssueClassification {
+  readonly byAge: readonly StaleIssueCandidate[];
+  readonly byDigestPattern: readonly StaleIssueCandidate[];
+}
+
+const DIGEST_TITLE_PATTERNS: readonly RegExp[] = [
+  /^\s*\[?\s*DIGEST\s*\]?/i,
+  /^\s*\[?\s*FINANCE\s*\]?/i,
+  /^\s*\[?\s*STATUS\s*\]?/i,
+  /^\s*\[?\s*REPORT\s*\]?/i,
+  /^\s*\[?\s*KICKOFF\s*\]?/i,
+];
+
+const AGE_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000;
+const SILENCE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Pure classifier — given a list of open issues, partition into the two
+ *  buckets that the doctor check emits. Exported for direct unit testing. */
+export const classifyStaleIssues = (
+  issues: readonly StaleIssueCandidate[],
+  now: Date = new Date(),
+): StaleIssueClassification => {
+  const byAge: StaleIssueCandidate[] = [];
+  const byDigestPattern: StaleIssueCandidate[] = [];
+  const nowMs = now.getTime();
+  for (const issue of issues) {
+    const ageMs = nowMs - issue.createdAt.getTime();
+    const silenceMs = nowMs - issue.updatedAt.getTime();
+    if (ageMs > AGE_THRESHOLD_MS && silenceMs > SILENCE_THRESHOLD_MS) {
+      byAge.push(issue);
+    }
+    if (DIGEST_TITLE_PATTERNS.some((p) => p.test(issue.title))) {
+      byDigestPattern.push(issue);
+    }
+  }
+  return { byAge, byDigestPattern };
+};
+
+/** Parse `owner/repo` into separate parts. Returns null on malformed input. */
+const splitRepo = (repo: string): { owner: string; name: string } | null => {
+  const slash = repo.indexOf("/");
+  if (slash <= 0 || slash === repo.length - 1) return null;
+  return { owner: repo.slice(0, slash), name: repo.slice(slash + 1) };
+};
+
+interface RestIssueResponse {
+  readonly number: number;
+  readonly title: string;
+  readonly html_url: string;
+  readonly created_at: string;
+  readonly updated_at: string;
+  readonly pull_request?: unknown;
+}
+
+/** Page through `GET /repos/{owner}/{name}/issues?state=open` and return
+ *  issues (excluding PRs, which the REST API mixes in). Capped at 5 pages
+ *  (500 issues) to bound rate-limit cost. */
+const fetchOpenIssues = async (
+  repo: string,
+  token: string,
+): Promise<readonly StaleIssueCandidate[]> => {
+  const parts = splitRepo(repo);
+  if (!parts) return [];
+  const collected: StaleIssueCandidate[] = [];
+  const maxPages = 5;
+  for (let page = 1; page <= maxPages; page++) {
+    const url = `https://api.github.com/repos/${parts.owner}/${parts.name}/issues?state=open&per_page=100&page=${String(page)}`;
+    const res = await withTimeout(
+      fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "User-Agent": "murmuration-doctor",
+        },
+      }),
+      10_000,
+      `GitHub GET /issues page ${String(page)}`,
+    );
+    if (!res.ok) {
+      throw new Error(`${String(res.status)} ${res.statusText}`);
+    }
+    const body: unknown = await res.json();
+    if (!Array.isArray(body)) break;
+    const items = body as RestIssueResponse[];
+    for (const it of items) {
+      // REST /issues returns PRs alongside issues; skip them.
+      if (it.pull_request !== undefined) continue;
+      collected.push({
+        number: it.number,
+        title: it.title,
+        htmlUrl: it.html_url,
+        createdAt: new Date(it.created_at),
+        updatedAt: new Date(it.updated_at),
+      });
+    }
+    if (items.length < 100) break;
+  }
+  return collected;
+};
+
+const formatStaleDetail = (issues: readonly StaleIssueCandidate[], limit = 10): string => {
+  const shown = issues.slice(0, limit).map((i) => `#${String(i.number)} ${i.title}`);
+  const overflow = issues.length - shown.length;
+  return overflow > 0 ? `${shown.join("; ")}; +${String(overflow)} more` : shown.join("; ");
+};
+
+const runHygieneChecks = async (ctx: CheckContext): Promise<void> => {
+  const { rootDir, findings, harness } = ctx;
+  if (harness.collaboration.provider !== "github") return;
+
+  const envPath = join(rootDir, ".env");
+  if (!existsSync(envPath)) return;
+  const env = parseDotEnv(await readFile(envPath, "utf8"));
+  const token = env.get("GITHUB_TOKEN");
+  if (!token || token.length === 0 || token === "ghp_your-token-here") return;
+
+  const repo = harness.collaboration.repo;
+  if (!repo) {
+    findings.push({
+      checkId: "hygiene.no-repo",
+      category: "hygiene",
+      severity: "info",
+      title: "hygiene checks skipped: collaboration.repo not configured",
+      detail:
+        'Stale-issue scan needs a target repo. Set collaboration.repo in murmuration/harness.yaml (e.g. "owner/name").',
+    });
+    return;
+  }
+
+  let issues: readonly StaleIssueCandidate[];
+  try {
+    issues = await fetchOpenIssues(repo, token);
+  } catch (err) {
+    findings.push({
+      checkId: "hygiene.fetch-failed",
+      category: "hygiene",
+      severity: "warning",
+      title: `Could not list open issues for ${repo}`,
+      detail: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+
+  const { byAge, byDigestPattern } = classifyStaleIssues(issues);
+
+  if (byAge.length > 0) {
+    findings.push({
+      checkId: "hygiene.stale-issues.by-age",
+      category: "hygiene",
+      severity: "info",
+      title: `${String(byAge.length)} open issue(s) >14d old with no activity in 7d`,
+      detail: formatStaleDetail(byAge),
+      remediation: `Every open issue lands in every watching agent's signal bundle on every wake. Review and close stale issues, or move informational content to chronicles/ per docs/CONVENTIONS-GITHUB-VS-FILES.md.`,
+    });
+  }
+  if (byDigestPattern.length > 0) {
+    findings.push({
+      checkId: "hygiene.stale-issues.digest-pattern",
+      category: "hygiene",
+      severity: "info",
+      title: `${String(byDigestPattern.length)} open issue(s) match digest/report title pattern`,
+      detail: formatStaleDetail(byDigestPattern),
+      remediation: `Issues prefixed [DIGEST]/[FINANCE]/[STATUS]/[REPORT]/[KICKOFF] are typically informational. Close once consumed, or move to chronicles/ per docs/CONVENTIONS-GITHUB-VS-FILES.md.`,
+    });
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------------
 
@@ -864,8 +1063,10 @@ export const runDoctor = async (options: DoctorOptions): Promise<DoctorReport> =
 
   if (options.live) {
     await runLiveChecks(ctx);
+    await runHygieneChecks(ctx);
   } else {
     skipped.push("live");
+    skipped.push("hygiene");
   }
 
   return {
@@ -914,6 +1115,7 @@ const CATEGORY_LABEL: Record<DoctorCategory, string> = {
   governance: "Governance",
   live: "Live validation",
   drift: "Drift / best-practice",
+  hygiene: "Hygiene (signal bundle)",
 };
 
 export const formatReport = (report: DoctorReport): string => {
