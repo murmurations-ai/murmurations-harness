@@ -3,6 +3,34 @@
 All notable changes to the Murmuration Harness are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+**Signal-bundle hygiene + daemon orphan-schedule + Trojan Source hardening.** Operator-visible diagnostics for the silent failure mode that bites every long-running murmuration: stale GitHub issues that bloat every watching agent's per-wake context, and agent directories that quietly wake on the default-agent template after their `role.md` was removed.
+
+### Added
+
+- **`murmuration doctor --live` hygiene category** ([#394](https://github.com/murmurations-ai/murmurations-harness/issues/394) scope 1). New `hygiene` doctor category gated behind `--live` (it needs a GitHub round-trip). Scans `collaboration.repo` for open issues stale by age (>14d open + 7d silent) and digest-pattern titles (`[DIGEST]` / `[FINANCE]` / `[STATUS]` / `[REPORT]` / `[KICKOFF]`); emits info-severity findings with remediation pointing to `docs/CONVENTIONS-GITHUB-VS-FILES.md`. Capped at 5 pages (500 issues) to bound rate-limit cost. Graceful no-op for `collaboration: local` and when `GITHUB_TOKEN` is unset.
+- **Per-wake signal-bundle metric in `index.jsonl`** ([#394](https://github.com/murmurations-ai/murmurations-harness/issues/394) scope 2). New optional `signalBundle: { issueCount }` field on every `RunArtifactIndexEntry`, computed by the daemon from `context.signals` at wake fire time. Persists per-wake "what context did this agent read" so the dashboard can flag bloating.
+- **Dashboard `[b:N]` badge in the agents panel** ([#394](https://github.com/murmurations-ai/murmurations-harness/issues/394) scope 2). Shows the agent's last `github-issue` count. Dim by default; yellow when above the new `signals.spikeThreshold` config knob (default 10).
+- **`signals.spikeThreshold` in `harness.yaml`** ([#394](https://github.com/murmurations-ai/murmurations-harness/issues/394) scope 2). New `signals:` block with `spikeThreshold: number` (default 10). Operator-tunable for chattier repos. Wired through `HarnessConfig` + Zod schema + lenient loader.
+- **`murmuration list-stale-issues` CLI** ([#394](https://github.com/murmurations-ai/murmurations-harness/issues/394) scope 3). Read-only inventory of open issues bloating the signal bundle. Table + `--json` output, sorted oldest-silence-first. Flags: `--days N`, `--silence-days N`, `--digest-only`, `--json`. Closure is operator judgement — no auto-close.
+- **`daemon.signal-bundle.large` event** ([#398](https://github.com/murmurations-ai/murmurations-harness/pull/398)). Daemon emits a structured-log line when an assembled bundle exceeds the configured spike threshold. Mirrors the `daemon.validate.legacy-fallback` observability precedent.
+- **`AggregatorCaps.commentsPerIssue` knob** ([#398](https://github.com/murmurations-ai/murmurations-harness/pull/398)). Comment cap on the signal aggregator now defaults to 5 (was hardcoded 20). Cuts per-wake input tokens on chatty threads. Truncation note names the omitted count.
+- **Daemon orphan-schedule warning** ([#380](https://github.com/murmurations-ai/murmurations-harness/issues/380)). Boot now detects when an agent's `role.md` is missing entirely and refuses to register the cron entry — silent waking via the default-agent template was the silent-drift class EP#874 surfaced. Multi-agent boot warns + skips (`daemon.warn.orphaned-schedule`); single-agent boot (`--agent <id>`) hard-fails with `BootError(kind: "agent-missing-role")`. Predicate `isOrphanedSchedule(loaded)` exported from `@murmurations-ai/core` (type guard).
+- **Trojan Source / Unicode bidi hardening** (review followup to [#380](https://github.com/murmurations-ai/murmurations-harness/issues/380)). `sanitizeForTerminal` now strips C1 controls (incl. 8-bit CSI `\x9b`), Unicode bidi overrides + isolates (U+202A-U+202E, U+2066-U+2069 — CVE-2021-42574), zero-width chars (U+200B-U+200F, U+FEFF), and line separators (U+2028-U+2029). Closes a class of operator-log spoofing via maliciously-named agent directories. Pre-existing surface, but the recent work made the sanitizer flow operator-reachable through several new emission points.
+- **Shared `stale-issues.ts` module** in `@murmurations-ai/cli` ([#402](https://github.com/murmurations-ai/murmurations-harness/pull/402)). `classifyStaleIssues`, `partitionByReason`, `fetchOpenIssues` consolidated from the two original copies that #399 and #401 each shipped independently. `dotenv.ts` extracted the second time the dedupe was needed.
+
+### Internals
+
+- Issue `signalBundle?` field is **optional** — entries written before this batch remain readable. `schemaVersion` stays at 1 (additive).
+- The hygiene + list-stale-issues network paths share a single capped pagination helper and a per-item type guard (`isRestIssueResponse`) so a malformed REST response can't silently produce NaN ageDays.
+- `splitRepo()` validates owner/name against GitHub slug grammar (`^[A-Za-z0-9_][A-Za-z0-9._-]*$`, `..` rejected) so a malicious `collaboration.repo` cannot redirect the Bearer-token-bearing fetch to a non-GitHub host.
+
+### Filed for follow-up
+
+- [#405](https://github.com/murmurations-ai/murmurations-harness/issues/405) — `AgentStateStore` tombstone drift: orphaned agents' state.json records persist forever; needs reconciliation pass.
+- [#406](https://github.com/murmurations-ai/murmurations-harness/issues/406) — privilege amplification via operator-supplied permissive `default-agent/role.md` template.
+
 ## [0.8.0] - 2026-05-19
 
 **Execution contracts — agents declare what completion looks like in `role.md`, the validator scores wakes against the obligation, and the dashboard surfaces it.**

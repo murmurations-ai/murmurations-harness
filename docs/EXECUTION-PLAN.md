@@ -1,6 +1,6 @@
 # Consolidated Execution Plan
 
-**Status:** Active — updated 2026-05-11
+**Status:** Mostly executed — last refreshed 2026-05-25. v0.8.0 shipped 2026-05-19 with execution contracts, signal-bundle hygiene tooling (harness#394), and daemon orphan-schedule warnings (harness#380). The current short list is in [README.md](../README.md) "In flight" and [CHANGELOG.md](../CHANGELOG.md); this doc is retained for the longer-horizon roadmap.
 **Inputs:** Intelligence Circle architecture review (2026-04-12), MURMURATION-HARNESS-SPEC.md, PHASE-2-PLAN.md, CIRCLE-WAKE-SPEC.md, GITHUB-AS-SYSTEM-OF-RECORD.md, Proposal 07 ratified ADRs (0045/0046/0047)
 **For:** Coding agents implementing the next phases
 
