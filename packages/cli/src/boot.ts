@@ -146,7 +146,7 @@ import { validateHarnessYaml } from "./harness-config.js";
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 import { registerRunningSocket, unregisterRunningSocket } from "./running-sessions.js";
-import { writeAgentMcpConfig } from "./spirit/mcp-config.js";
+import { sweepOrphanedSpiritMcpConfigs, writeAgentMcpConfig } from "./spirit/mcp-config.js";
 
 // ---------------------------------------------------------------------------
 // CLI binary resolution — launchd / cron safe (harness#XXX)
@@ -1062,6 +1062,16 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
       dryRun,
     })}\n`,
   );
+
+  // harness#362: sweep orphaned Spirit MCP config files from prior
+  // crashed attach sessions. Previously this ran on every attach, which
+  // races when two attaches start within the same sub-second window —
+  // attach C's sweep could delete attach B's still-live ephemeral file.
+  // Moving the sweep to daemon-start makes it deterministic: the
+  // daemon owns the directory at boot time, no attach is in-flight, so
+  // any leftover file is genuinely orphaned. Per-attach code now only
+  // WRITES; cleanup is the daemon's job.
+  sweepOrphanedSpiritMcpConfigs(exampleRoot);
 
   // Load identities + build triggers for every agent. harness#380:
   // when `role.md` is missing entirely, IdentityLoader falls back to
