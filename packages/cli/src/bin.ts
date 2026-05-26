@@ -20,6 +20,7 @@ import { resolve } from "node:path";
 import { runAttach, runUnattachedRepl } from "./attach.js";
 import { runBacklog } from "./backlog.js";
 import { bootDaemon, BootError } from "./boot.js";
+import { formatFatalError } from "./format-error.js";
 import { runGroupWakeCommand } from "./group-wake.js";
 import { runDirective } from "./directive.js";
 import { runInit } from "./init.js";
@@ -657,7 +658,6 @@ main()
       process.stderr.write(`${error.message}\n`);
       process.exit(error.exitCode);
     }
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`murmuration: fatal: ${message}\n`);
+    process.stderr.write(`${formatFatalError(error)}\n`);
     process.exit(1);
   });
