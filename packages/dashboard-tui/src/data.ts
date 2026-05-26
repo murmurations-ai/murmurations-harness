@@ -498,6 +498,7 @@ export const readRecentActivity = async (
   try {
     const content = await readFile(stateFile, "utf8");
     const data = JSON.parse(content) as {
+      agents?: Record<string, { currentState?: string }>;
       wakes?: Record<
         string,
         {
@@ -510,9 +511,19 @@ export const readRecentActivity = async (
         }
       >;
     };
+    // harness#405: skip wakes belonging to orphaned agents — their
+    // role.md was removed but the wake history persists in state.json.
+    // Showing stale wakes in the activity feed misleads operators into
+    // thinking an agent they removed is still active.
+    const orphanedAgents = new Set<string>();
+    if (data.agents) {
+      for (const [id, rec] of Object.entries(data.agents)) {
+        if (rec.currentState === "orphaned") orphanedAgents.add(id);
+      }
+    }
     if (data.wakes) {
       const allWakes = Object.values(data.wakes)
-        .filter((w) => w.startedAt)
+        .filter((w) => w.startedAt && !orphanedAgents.has(w.agentId))
         .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""))
         .slice(-maxEntries);
 

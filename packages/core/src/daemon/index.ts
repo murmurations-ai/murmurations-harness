@@ -654,7 +654,13 @@ export class Daemon {
     // scheduler start happens in the .then() callback so stats from
     // the previous run are restored before register() creates fresh records.
     const doRegisterAndStart = (): void => {
+      // Register live agents first. For agents whose prior state was
+      // "orphaned" (operator removed and then restored the role.md),
+      // `register()` now resets failure counters automatically while
+      // keeping historical totals — see harness#405.
+      const liveAgentIds = new Set<string>();
       for (const agent of this.#agents) {
+        liveAgentIds.add(agent.agentId);
         this.#agentStateStore?.register(agent.agentId, agent.maxWallClockMs);
         this.#agentStateStore?.transition(agent.agentId, "idle");
         this.#scheduler.schedule(makeAgentId(agent.agentId), agent.trigger);
@@ -662,6 +668,26 @@ export class Daemon {
           agentId: agent.agentId,
           trigger: agent.trigger,
         });
+      }
+      // harness#405: reconcile tombstones. Any record in state.json that
+      // ISN'T in the live agent set — and isn't already orphaned — gets
+      // marked orphaned now. Without this, removed agents persist forever
+      // in dashboards, accumulate over months of iteration, and re-add
+      // would inherit stale circuit-breaker failure counts.
+      const store = this.#agentStateStore;
+      if (store) {
+        for (const record of store.getAllAgents()) {
+          if (liveAgentIds.has(record.agentId)) continue;
+          if (record.currentState === "orphaned") continue;
+          store.markOrphaned(record.agentId);
+          this.#logger.warn("daemon.agent.stale-record", {
+            agentId: record.agentId,
+            previousState: record.currentState,
+            registeredAt: record.registeredAt,
+            lastWokenAt: record.lastWokenAt,
+            totalWakes: record.totalWakes,
+          });
+        }
       }
       this.#scheduleGovernanceCrons();
       this.#scheduler.start();

@@ -29,7 +29,17 @@ export type AgentLifecycleState =
   | "completed"
   | "failed"
   | "timed-out"
-  | "spawn-failed";
+  | "spawn-failed"
+  /**
+   * The agent has a record in `state.json` from a prior session but is
+   * no longer present in the daemon's live `agents/<id>/role.md` set —
+   * the operator removed the agent directory or its role.md (harness#405).
+   * The daemon does not schedule wakes for orphaned agents, and dashboard
+   * surfaces should filter them out of the active set. If the operator
+   * later restores the role.md, `register()` will resurrect the agent
+   * by resetting failure counters while keeping historical totals.
+   */
+  | "orphaned";
 
 export type WakeOutcome = "success" | "failure" | "timeout" | "killed" | "spawn-failed";
 
@@ -102,6 +112,14 @@ export interface IAgentStateStore {
    * outcome was successful. Increments `idleSkipStreak`.
    */
   recordIdleSkip(agentId: string): void;
+  /**
+   * Mark an agent as orphaned (harness#405) — its record persists in
+   * state.json from a prior session, but no live role.md backs it.
+   * Idempotent: a no-op if the agent is already "orphaned" or unknown.
+   * Used by the boot reconciliation pass to flag agents the operator
+   * removed without crashing the daemon.
+   */
+  markOrphaned(agentId: string): void;
   getAgent(agentId: string): AgentRecord | undefined;
   getAllAgents(): readonly AgentRecord[];
   getRecentWakes(agentId: string, limit?: number): readonly AgentWakeInstance[];
@@ -190,6 +208,29 @@ export class AgentStateStore implements IAgentStateStore {
     this.#guardWrite("register");
     const existing = this.#agents.get(agentId);
     if (existing) {
+      if (existing.currentState === "orphaned") {
+        // Resurrection (harness#405): the operator removed this agent's
+        // role.md, the daemon marked it orphaned, and now the role.md is
+        // back. The new role.md may have completely different scopes,
+        // schedule, write surface — so the OLD failure history doesn't
+        // necessarily apply. Reset current-state counters (consecutive
+        // failures could trip the circuit breaker on the new agent's
+        // first wake for reasons that have nothing to do with it) but
+        // KEEP historical totals (totalWakes, totalArtifacts, idleWakes,
+        // registeredAt) as audit signal that this slot has prior lives.
+        this.#agents.set(agentId, {
+          ...existing,
+          currentState: "registered",
+          maxWallClockMs,
+          consecutiveFailures: 0,
+          idleSkipStreak: 0,
+          currentWakeId: null,
+          currentWakeStartedAt: null,
+          lastFiredContextHash: null,
+        });
+        void this.#persist();
+        return;
+      }
       // Update maxWallClockMs but preserve history
       this.#agents.set(agentId, { ...existing, maxWallClockMs });
       return;
@@ -359,6 +400,30 @@ export class AgentStateStore implements IAgentStateStore {
     this.#agents.set(agentId, {
       ...agent,
       idleSkipStreak: agent.idleSkipStreak + 1,
+    });
+    void this.#persist();
+  }
+
+  /**
+   * Mark an agent as orphaned (harness#405). Idempotent.
+   *
+   * The record is preserved (historical totals + last known state) so
+   * downstream readers can distinguish "this slot used to exist" from
+   * "this slot has no history." But the daemon will not schedule wakes
+   * against it, and dashboard surfaces should filter it out of the
+   * active set. If the operator later restores the role.md, the next
+   * `register()` call resurrects the agent with reset failure counters.
+   */
+  public markOrphaned(agentId: string): void {
+    this.#guardWrite("markOrphaned");
+    const agent = this.#agents.get(agentId);
+    if (!agent) return;
+    if (agent.currentState === "orphaned") return;
+    this.#agents.set(agentId, {
+      ...agent,
+      currentState: "orphaned",
+      currentWakeId: null,
+      currentWakeStartedAt: null,
     });
     void this.#persist();
   }
