@@ -240,6 +240,37 @@ const GITHUB_TOKEN = makeSecretKey("GITHUB_TOKEN");
  * first time each pair is seen, with dedupe state held on the hook
  * instance so test wakes don't bleed into each other.
  */
+/**
+ * Resolve the effective subscription-CLI permission mode for an agent
+ * (harness#392). The operator's explicit setting wins; otherwise, when
+ * the agent declares non-empty `branch_commits` paths, auto-elevate to
+ * `"trusted"` so headless `-p` wakes can actually write the files the
+ * operator declared intent to commit to. Returning `undefined` lets the
+ * subscription-cli adapter fall back to its own default (`"restricted"`).
+ *
+ * The original silent failure (EP#896): agents declared `branch_commits`
+ * for `drafts/**` and `pipeline/**` but never set `permissionMode`,
+ * so file writes silently no-op'd in headless mode. Six+ consecutive
+ * wakes filed TENSION issues before the cause surfaced. This helper
+ * makes the declaration surface itself enough to grant the permission.
+ *
+ * Why a small exported helper instead of inlining the logic in
+ * `buildAgentClients`: pure predicate over the two inputs — testable in
+ * isolation without scaffolding a full agent + client harness.
+ */
+export const deriveSubscriptionCliPermissionMode = (
+  agent: RegisteredAgent,
+  declaredMode: "restricted" | "operator-approved" | "trusted" | undefined,
+): "restricted" | "operator-approved" | "trusted" | undefined => {
+  // Operator's explicit setting always wins — never silently override a
+  // decision the operator made, even when it might be tighter than the
+  // auto-derivation would have chosen.
+  if (declaredMode !== undefined) return declaredMode;
+  // Auto-elevate when the agent declares write intent via branch_commits.
+  const hasBranchCommits = agent.githubWriteScopes.branchCommits.some((b) => b.paths.length > 0);
+  return hasBranchCommits ? "trusted" : undefined;
+};
+
 export const makeDaemonHook = (
   builder: WakeCostBuilder,
   logger?: { warn: (event: string, fields?: Record<string, unknown>) => void },
@@ -590,12 +621,36 @@ const buildAgentClients = ({
         // `--allowedTools mcp__<name>__*` flag on the claude CLI call.
         const allowedMcpServerNames =
           mcpConfigPath !== undefined ? agent.tools.mcp.map((s) => s.name) : undefined;
+        // harness#392: auto-derive permissionMode from branch_commits
+        // declarations. Operator's explicit role.md setting still wins;
+        // when it's unset and the agent declares branch_commits paths,
+        // elevate to "trusted" so headless writes actually land.
+        const resolvedPermissionMode = deriveSubscriptionCliPermissionMode(
+          agent,
+          effectiveLlm.permissionMode,
+        );
+        if (effectiveLlm.permissionMode === undefined && resolvedPermissionMode === "trusted") {
+          // Surface the auto-elevation so an operator scanning daemon
+          // logs can see when their declared write intent triggered a
+          // permission change they didn't explicitly configure.
+          logger?.warn("daemon.agent.permission-mode.auto-elevated", {
+            agentId: agent.agentId,
+            from: "restricted",
+            to: "trusted",
+            reason: "branch_commits-declared",
+            branchCommitsRepoCount: agent.githubWriteScopes.branchCommits.length,
+            branchCommitsPathCount: agent.githubWriteScopes.branchCommits.reduce(
+              (sum, b) => sum + b.paths.length,
+              0,
+            ),
+          });
+        }
         result.llm = createSubscriptionCliClient({
           cli,
           model,
           ...(effectiveLlm.timeoutMs !== undefined ? { timeoutMs: effectiveLlm.timeoutMs } : {}),
-          ...(effectiveLlm.permissionMode !== undefined
-            ? { permissionMode: effectiveLlm.permissionMode }
+          ...(resolvedPermissionMode !== undefined
+            ? { permissionMode: resolvedPermissionMode }
             : {}),
           ...(mcpConfigPath !== undefined ? { mcpConfigPath } : {}),
           ...(allowedMcpServerNames !== undefined ? { allowedMcpServerNames } : {}),
