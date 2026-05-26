@@ -401,7 +401,12 @@
         color: var(--ink);
         position: relative;
       }
-      .terminal-pane { display: none; padding: 1.6rem 1.5rem 1.8rem; overflow-x: auto; }
+      .terminal-pane {
+        display: none;
+        padding: 1.6rem 1.5rem 1.8rem;
+        overflow-x: auto;
+        white-space: pre;
+      }
       .terminal-pane.active { display: block; }
       .terminal .comment { color: var(--ink-faint); }
       .terminal .prompt { color: var(--ember); user-select: none; margin-right: 0.4em; }
