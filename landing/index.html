@@ -208,6 +208,7 @@
       .flock svg {
         position: absolute; inset: 0;
         width: 100%; height: 100%;
+        cursor: crosshair;
       }
       .flock .corner {
         position: absolute;
@@ -1001,76 +1002,215 @@
         });
       })();
 
-      // ----- Murmuration animation -----
-      // A flock of ~70 dots drifting in coherent wave patterns. Each dot has a
-      // slow-shifting position influenced by a perlin-ish curl plus a small
-      // ember offset, so the cluster swirls without ever leaving the frame.
+      // ----- Murmuration animation (Reynolds boids, Shiffman port) -----
+      // Direct port of Daniel Shiffman's canonical flocking implementation
+      // (Coding Train challenge #124). Three local rules — alignment,
+      // cohesion, separation — applied uniformly to every boid; flock
+      // structure emerges. Edges wrap (toroidal world) so boids that
+      // fly off one side reappear on the other. One boid is coloured
+      // ember for visual interest but behaves identically.
       (function () {
         const svg = document.getElementById("murmuration");
         if (!svg) return;
         const W = 400, H = 400;
-        const N = 72;
-        const dots = [];
+        const N = 80;
 
-        // seed dots distributed in a soft cluster
+        // Shiffman defaults, tuned slightly for a 400×400 SVG vs his
+        // 600×400 canvas: smaller perception so the flock has structure,
+        // moderate speed so motion reads without blurring.
+        const MAX_SPEED = 1.4;
+        const MAX_FORCE = 0.03;
+        const ALIGN_R = 40;
+        const COHESION_R = 50;
+        const SEP_R = 22;
+        const ALIGN_W = 1.2;
+        const COHESION_W = 0.9;
+        const SEP_W = 1.6;
+        // Mouse evade — fourth steering force. Stronger than the other
+        // three so the flock visibly splits and reforms around the cursor.
+        const EVADE_R = 70;
+        const EVADE_W = 3.5;
+        const EVADE_MAX_FORCE = 0.13;
+
+        // --- Mouse tracking ---
+        // mouse position in SVG-viewBox coordinates; off-screen when
+        // the pointer isn't over the pane.
+        let mouseX = -1000, mouseY = -1000;
+        let mouseActive = false;
+        function updateMouse(clientX, clientY) {
+          const rect = svg.getBoundingClientRect();
+          if (rect.width === 0) return;
+          mouseX = ((clientX - rect.left) / rect.width) * W;
+          mouseY = ((clientY - rect.top) / rect.height) * H;
+          mouseActive = true;
+        }
+        svg.addEventListener("mousemove", (e) => updateMouse(e.clientX, e.clientY));
+        svg.addEventListener("mouseleave", () => { mouseActive = false; });
+        svg.addEventListener(
+          "touchmove",
+          (e) => {
+            if (e.touches.length > 0) {
+              updateMouse(e.touches[0].clientX, e.touches[0].clientY);
+            }
+          },
+          { passive: true },
+        );
+        svg.addEventListener("touchend", () => { mouseActive = false; });
+
+        // --- Vector helpers (avoid p5 dependency) ---
+        const v = (x, y) => ({ x, y });
+        const vAdd = (a, b) => { a.x += b.x; a.y += b.y; return a; };
+        const vSub = (a, b) => v(a.x - b.x, a.y - b.y);
+        const vMult = (a, s) => { a.x *= s; a.y *= s; return a; };
+        const vDiv = (a, s) => { a.x /= s; a.y /= s; return a; };
+        const vMag = (a) => Math.hypot(a.x, a.y);
+        const vSetMag = (a, m) => { const mag = vMag(a); if (mag > 0) { a.x = (a.x / mag) * m; a.y = (a.y / mag) * m; } return a; };
+        const vLimit = (a, m) => { const mag = vMag(a); if (mag > m) { a.x = (a.x / mag) * m; a.y = (a.y / mag) * m; } return a; };
+
+        // --- Seed boids ---
+        // All boids are identical — pure Reynolds flocking, no leader.
+        const boids = [];
         for (let i = 0; i < N; i++) {
+          const pos = v(Math.random() * W, Math.random() * H);
           const angle = Math.random() * Math.PI * 2;
-          const radius = 50 + Math.random() * 110;
-          const cx = W / 2 + Math.cos(angle) * radius;
-          const cy = H / 2 + Math.sin(angle) * radius * 0.85;
-          const r = 1 + Math.random() * 1.6;
-          const opacity = 0.35 + Math.random() * 0.55;
+          const speed = 1 + Math.random() * 0.4;
+          const vel = v(Math.cos(angle) * speed, Math.sin(angle) * speed);
+          const r = 1.0 + Math.random() * 1.2;
+          const opacity = 0.55 + Math.random() * 0.35;
 
           const el = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-          el.setAttribute("cx", cx.toFixed(2));
-          el.setAttribute("cy", cy.toFixed(2));
+          el.setAttribute("cx", pos.x.toFixed(2));
+          el.setAttribute("cy", pos.y.toFixed(2));
           el.setAttribute("r", r.toFixed(2));
-          // one dot in twelve glows ember — the lead birds
-          const isLead = i % 12 === 0;
-          el.setAttribute("fill", isLead ? "#f25c2c" : "#ebe5d6");
-          el.setAttribute("opacity", opacity);
+          el.setAttribute("fill", "#ebe5d6");
+          el.setAttribute("opacity", opacity.toFixed(2));
           svg.appendChild(el);
 
-          dots.push({
-            el,
-            x: cx, y: cy,
-            vx: (Math.random() - 0.5) * 0.4,
-            vy: (Math.random() - 0.5) * 0.3,
-            phase: Math.random() * Math.PI * 2,
-            speed: 0.004 + Math.random() * 0.006,
-            r,
-            isLead,
-          });
+          boids.push({ el, pos, vel, acc: v(0, 0) });
         }
 
-        // simple flow-field: each dot is pushed by a sin/cos field plus a
-        // gentle attraction toward the cluster center. The flock drifts as
-        // a body without ever breaking apart.
-        let t = 0;
-        const cx = W / 2, cy = H / 2;
+        function alignSteer(b) {
+          const steer = v(0, 0);
+          let total = 0;
+          for (const o of boids) {
+            if (o === b) continue;
+            const d = Math.hypot(b.pos.x - o.pos.x, b.pos.y - o.pos.y);
+            if (d < ALIGN_R) {
+              steer.x += o.vel.x;
+              steer.y += o.vel.y;
+              total++;
+            }
+          }
+          if (total > 0) {
+            vDiv(steer, total);
+            vSetMag(steer, MAX_SPEED);
+            steer.x -= b.vel.x;
+            steer.y -= b.vel.y;
+            vLimit(steer, MAX_FORCE);
+          }
+          return steer;
+        }
+
+        function cohesionSteer(b) {
+          const steer = v(0, 0);
+          let total = 0;
+          for (const o of boids) {
+            if (o === b) continue;
+            const d = Math.hypot(b.pos.x - o.pos.x, b.pos.y - o.pos.y);
+            if (d < COHESION_R) {
+              steer.x += o.pos.x;
+              steer.y += o.pos.y;
+              total++;
+            }
+          }
+          if (total > 0) {
+            vDiv(steer, total);
+            steer.x -= b.pos.x;
+            steer.y -= b.pos.y;
+            vSetMag(steer, MAX_SPEED);
+            steer.x -= b.vel.x;
+            steer.y -= b.vel.y;
+            vLimit(steer, MAX_FORCE);
+          }
+          return steer;
+        }
+
+        function separationSteer(b) {
+          const steer = v(0, 0);
+          let total = 0;
+          for (const o of boids) {
+            if (o === b) continue;
+            const dx = b.pos.x - o.pos.x;
+            const dy = b.pos.y - o.pos.y;
+            const d = Math.hypot(dx, dy);
+            if (d > 0 && d < SEP_R) {
+              // diff / (d*d): repulsion falls off with square of distance
+              steer.x += dx / (d * d);
+              steer.y += dy / (d * d);
+              total++;
+            }
+          }
+          if (total > 0) {
+            vDiv(steer, total);
+            vSetMag(steer, MAX_SPEED);
+            steer.x -= b.vel.x;
+            steer.y -= b.vel.y;
+            vLimit(steer, MAX_FORCE);
+          }
+          return steer;
+        }
+
+        function evadeMouse(b) {
+          if (!mouseActive) return v(0, 0);
+          const dx = b.pos.x - mouseX;
+          const dy = b.pos.y - mouseY;
+          const d = Math.hypot(dx, dy);
+          if (d <= 0 || d >= EVADE_R) return v(0, 0);
+          // 1/d² repulsion so close approaches kick hard. Then steer
+          // by Shiffman's pattern: setMag to maxSpeed, subtract current
+          // velocity, limit to a (larger) maxForce.
+          const steer = v(dx / (d * d), dy / (d * d));
+          vSetMag(steer, MAX_SPEED);
+          steer.x -= b.vel.x;
+          steer.y -= b.vel.y;
+          vLimit(steer, EVADE_MAX_FORCE);
+          return steer;
+        }
+
+        function edges(b) {
+          // Toroidal wrap — fly off one side, come back on the other.
+          if (b.pos.x > W) b.pos.x = 0;
+          else if (b.pos.x < 0) b.pos.x = W;
+          if (b.pos.y > H) b.pos.y = 0;
+          else if (b.pos.y < 0) b.pos.y = H;
+        }
+
         function step() {
-          t += 1;
-          for (const d of dots) {
-            const fx = Math.sin((d.y + t * 0.4) * 0.012) * 0.18 + Math.cos((d.x - t * 0.3) * 0.009) * 0.12;
-            const fy = Math.cos((d.x + t * 0.5) * 0.011) * 0.16 + Math.sin((d.y - t * 0.4) * 0.010) * 0.10;
-            // attraction toward center keeps the flock cohesive
-            const ax = (cx - d.x) * 0.0006;
-            const ay = (cy - d.y) * 0.0007;
-            d.vx = d.vx * 0.96 + fx * 0.18 + ax;
-            d.vy = d.vy * 0.96 + fy * 0.18 + ay;
-            // cap speed
-            const sp = Math.hypot(d.vx, d.vy);
-            const max = 0.85;
-            if (sp > max) { d.vx = (d.vx / sp) * max; d.vy = (d.vy / sp) * max; }
-            d.x += d.vx;
-            d.y += d.vy;
-            d.el.setAttribute("cx", d.x.toFixed(2));
-            d.el.setAttribute("cy", d.y.toFixed(2));
+          for (const b of boids) {
+            const a = alignSteer(b);
+            const c = cohesionSteer(b);
+            const s = separationSteer(b);
+            const e = evadeMouse(b);
+            vMult(a, ALIGN_W);
+            vMult(c, COHESION_W);
+            vMult(s, SEP_W);
+            vMult(e, EVADE_W);
+            b.acc.x = a.x + c.x + s.x + e.x;
+            b.acc.y = a.y + c.y + s.y + e.y;
+          }
+          for (const b of boids) {
+            b.pos.x += b.vel.x;
+            b.pos.y += b.vel.y;
+            b.vel.x += b.acc.x;
+            b.vel.y += b.acc.y;
+            vLimit(b.vel, MAX_SPEED);
+            edges(b);
+            b.el.setAttribute("cx", b.pos.x.toFixed(2));
+            b.el.setAttribute("cy", b.pos.y.toFixed(2));
           }
           requestAnimationFrame(step);
         }
 
-        // Respect reduced motion
         const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         if (!reduceMotion) requestAnimationFrame(step);
       })();
