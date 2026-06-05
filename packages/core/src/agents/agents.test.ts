@@ -305,6 +305,8 @@ describe("AgentStateStore orphan reconciliation (harness#405)", () => {
     expect(after?.idleSkipStreak).toBe(0);
     expect(after?.currentWakeId).toBeNull();
     expect(after?.lastFiredContextHash).toBeNull();
+    expect(after?.lastOutcome).toBeNull(); // CLEARED — old life's failure doesn't carry forward
+    expect(after?.lastWokenAt).toBeNull(); // CLEARED — not "last woken weeks ago"
     // Historical totals preserved so the audit trail isn't lost.
     expect(after?.totalWakes).toBe(4);
     expect(after?.maxWallClockMs).toBe(12_000); // updated to new

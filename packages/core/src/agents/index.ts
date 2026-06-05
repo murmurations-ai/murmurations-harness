@@ -218,6 +218,10 @@ export class AgentStateStore implements IAgentStateStore {
         // first wake for reasons that have nothing to do with it) but
         // KEEP historical totals (totalWakes, totalArtifacts, idleWakes,
         // registeredAt) as audit signal that this slot has prior lives.
+        // Also clear last-life status fields (lastOutcome, lastWokenAt) so
+        // the restored agent doesn't surface as "failed, last woken weeks
+        // ago" in the dashboard before its first new wake — the same
+        // phantom-state confusion this reconciliation exists to remove.
         this.#agents.set(agentId, {
           ...existing,
           currentState: "registered",
@@ -227,6 +231,8 @@ export class AgentStateStore implements IAgentStateStore {
           currentWakeId: null,
           currentWakeStartedAt: null,
           lastFiredContextHash: null,
+          lastOutcome: null,
+          lastWokenAt: null,
         });
         void this.#persist();
         return;
