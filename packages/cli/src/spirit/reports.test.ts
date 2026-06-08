@@ -34,6 +34,14 @@ const fakeSend = (
   };
 };
 
+/**
+ * ISO timestamp N days before now. `fetchMetrics` windows wakes and
+ * accountability observations to `[now - sinceDays, now]`, so fixtures must
+ * be anchored relative to the wall clock — hardcoded calendar dates rot out
+ * of the window once enough real time passes and fail on no code change.
+ */
+const daysAgo = (n: number): string => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
 describe("fetchMetrics + renderMetricsMarkdown (Workstream Q)", () => {
   let root = "";
 
@@ -133,9 +141,9 @@ describe("buildAttentionQueue (Workstream Q)", () => {
   it("flags low-met-rate accountabilities", async () => {
     mkdirSync(join(root, ".murmuration"), { recursive: true });
     const obs = [
-      { accountabilityId: "weekly", agentId: "x", observedAt: "2026-04-30T10:00:00Z", met: false },
-      { accountabilityId: "weekly", agentId: "x", observedAt: "2026-05-01T10:00:00Z", met: false },
-      { accountabilityId: "weekly", agentId: "x", observedAt: "2026-05-02T10:00:00Z", met: true },
+      { accountabilityId: "weekly", agentId: "x", observedAt: daysAgo(3), met: false },
+      { accountabilityId: "weekly", agentId: "x", observedAt: daysAgo(2), met: false },
+      { accountabilityId: "weekly", agentId: "x", observedAt: daysAgo(1), met: true },
     ]
       .map((o) => JSON.stringify(o))
       .join("\n");
@@ -175,9 +183,9 @@ describe("buildAttentionQueue (Workstream Q)", () => {
     writeFileSync(
       join(root, ".murmuration", "accountability-observations.jsonl"),
       [
-        { accountabilityId: "x", agentId: "a", observedAt: "2026-05-01T10:00:00Z", met: false },
-        { accountabilityId: "x", agentId: "a", observedAt: "2026-05-02T10:00:00Z", met: true },
-        { accountabilityId: "x", agentId: "a", observedAt: "2026-05-03T10:00:00Z", met: false },
+        { accountabilityId: "x", agentId: "a", observedAt: daysAgo(3), met: false },
+        { accountabilityId: "x", agentId: "a", observedAt: daysAgo(2), met: true },
+        { accountabilityId: "x", agentId: "a", observedAt: daysAgo(1), met: false },
       ]
         .map((o) => JSON.stringify(o))
         .join("\n") + "\n",
