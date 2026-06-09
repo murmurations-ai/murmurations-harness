@@ -236,3 +236,93 @@ describe("AgentStateStore persistence", () => {
     expect(wakes[0]?.costMicros).toBe(5000);
   });
 });
+
+describe("AgentStateStore orphan reconciliation (harness#405)", () => {
+  it("markOrphaned transitions a known agent to 'orphaned'", () => {
+    const store = new AgentStateStore();
+    store.register("test-agent", 10_000);
+    store.transition("test-agent", "idle");
+    expect(store.getAgent("test-agent")?.currentState).toBe("idle");
+
+    store.markOrphaned("test-agent");
+    expect(store.getAgent("test-agent")?.currentState).toBe("orphaned");
+  });
+
+  it("markOrphaned is idempotent (re-calling on orphaned is a no-op)", () => {
+    const store = new AgentStateStore();
+    store.register("test-agent", 10_000);
+    store.markOrphaned("test-agent");
+    const first = store.getAgent("test-agent");
+    store.markOrphaned("test-agent");
+    const second = store.getAgent("test-agent");
+    expect(second).toEqual(first);
+  });
+
+  it("markOrphaned is a no-op on unknown agentId", () => {
+    const store = new AgentStateStore();
+    expect(() => store.markOrphaned("ghost")).not.toThrow();
+    expect(store.getAgent("ghost")).toBeUndefined();
+  });
+
+  it("markOrphaned clears currentWakeId and currentWakeStartedAt", () => {
+    const store = new AgentStateStore();
+    store.register("test-agent", 10_000);
+    store.transition("test-agent", "waking", "w-1");
+    expect(store.getAgent("test-agent")?.currentWakeId).toBe("w-1");
+
+    store.markOrphaned("test-agent");
+    expect(store.getAgent("test-agent")?.currentWakeId).toBeNull();
+    expect(store.getAgent("test-agent")?.currentWakeStartedAt).toBeNull();
+  });
+
+  it("register resurrects orphaned agents and resets failure counters", () => {
+    const store = new AgentStateStore();
+    store.register("test-agent", 10_000);
+    // Simulate a history: 5 wakes, then 3 consecutive failures
+    store.transition("test-agent", "waking", "w1");
+    store.recordWakeOutcome("w1", "success");
+    store.transition("test-agent", "waking", "w2");
+    store.recordWakeOutcome("w2", "failure", { errorMessage: "boom" });
+    store.transition("test-agent", "waking", "w3");
+    store.recordWakeOutcome("w3", "failure", { errorMessage: "boom" });
+    store.transition("test-agent", "waking", "w4");
+    store.recordWakeOutcome("w4", "failure", { errorMessage: "boom" });
+
+    const beforeOrphan = store.getAgent("test-agent");
+    expect(beforeOrphan?.consecutiveFailures).toBe(3);
+    expect(beforeOrphan?.totalWakes).toBe(4);
+
+    // Operator removes role.md, daemon reconciles
+    store.markOrphaned("test-agent");
+    expect(store.getAgent("test-agent")?.currentState).toBe("orphaned");
+
+    // Operator restores role.md (possibly a new, different agent at the
+    // same slug). Next boot calls register() again.
+    store.register("test-agent", 12_000);
+    const after = store.getAgent("test-agent");
+    expect(after?.currentState).toBe("registered");
+    expect(after?.consecutiveFailures).toBe(0); // RESET — old failures don't apply to new role.md
+    expect(after?.idleSkipStreak).toBe(0);
+    expect(after?.currentWakeId).toBeNull();
+    expect(after?.lastFiredContextHash).toBeNull();
+    expect(after?.lastOutcome).toBeNull(); // CLEARED — old life's failure doesn't carry forward
+    expect(after?.lastWokenAt).toBeNull(); // CLEARED — not "last woken weeks ago"
+    // Historical totals preserved so the audit trail isn't lost.
+    expect(after?.totalWakes).toBe(4);
+    expect(after?.maxWallClockMs).toBe(12_000); // updated to new
+  });
+
+  it("normal re-registration (non-orphaned) only updates maxWallClockMs (existing behaviour preserved)", () => {
+    const store = new AgentStateStore();
+    store.register("test-agent", 10_000);
+    store.transition("test-agent", "waking", "w1");
+    store.recordWakeOutcome("w1", "failure", { errorMessage: "boom" });
+    expect(store.getAgent("test-agent")?.consecutiveFailures).toBe(1);
+
+    // Daemon restart — agent is still live, register() called again
+    store.register("test-agent", 15_000);
+    const after = store.getAgent("test-agent");
+    expect(after?.consecutiveFailures).toBe(1); // PRESERVED — not orphaned
+    expect(after?.maxWallClockMs).toBe(15_000);
+  });
+});
