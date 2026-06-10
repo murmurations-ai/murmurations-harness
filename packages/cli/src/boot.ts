@@ -622,14 +622,22 @@ const buildAgentClients = ({
         const allowedMcpServerNames =
           mcpConfigPath !== undefined ? agent.tools.mcp.map((s) => s.name) : undefined;
         // harness#392: auto-derive permissionMode from branch_commits
-        // declarations. Operator's explicit role.md setting still wins;
-        // when it's unset and the agent declares branch_commits paths,
-        // elevate to "trusted" so headless writes actually land.
+        // declarations. Operator's explicit setting still wins; we honour
+        // it at BOTH levels of precedence: the agent's role.md, then the
+        // harness.yaml `llm.permissionMode`. The role-defaults cascade is
+        // all-or-nothing (identity/index.ts only merges roleDefaults.llm
+        // when the agent has NO llm block at all), so an agent that pins
+        // its own llm block to set e.g. a model would otherwise never see
+        // the operator's harness-wide permissionMode — and auto-elevation
+        // would silently override a murmuration-level `restricted` policy.
+        // Consulting harnessLlm here keeps "operator's explicit setting
+        // always wins" true at harness.yaml granularity, not just role.md.
+        const declaredPermissionMode = effectiveLlm.permissionMode ?? harnessLlm.permissionMode;
         const resolvedPermissionMode = deriveSubscriptionCliPermissionMode(
           agent,
-          effectiveLlm.permissionMode,
+          declaredPermissionMode,
         );
-        if (effectiveLlm.permissionMode === undefined && resolvedPermissionMode === "trusted") {
+        if (declaredPermissionMode === undefined && resolvedPermissionMode === "trusted") {
           // Surface the auto-elevation so an operator scanning daemon
           // logs can see when their declared write intent triggered a
           // permission change they didn't explicitly configure.
@@ -1239,7 +1247,19 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         ? {
             cliName: agentCli,
             resolvedPath: resolvedCliPath ?? agentCli,
-            permissionMode: agent.llm?.permissionMode ?? "restricted",
+            // harness#392: record the EFFECTIVE permission mode, not the
+            // raw declaration. When branch_commits auto-elevates an agent
+            // to "trusted", the subprocess runs with --dangerously-skip-
+            // permissions, so the audit record under runs/<agentId>/ must
+            // say "trusted" too — otherwise a security review of the run
+            // artifacts concludes the wake ran sandboxed when it had full
+            // write access. Mirrors the buildAgentClients derivation
+            // (role.md → harness.yaml → branch_commits auto-elevation).
+            permissionMode:
+              deriveSubscriptionCliPermissionMode(
+                agent,
+                agent.llm?.permissionMode ?? config.llm.permissionMode,
+              ) ?? "restricted",
             allowedTools:
               agentCli === "claude" ? agent.tools.mcp.map((s) => `mcp__${s.name}__*`) : [],
             envAllowlistApplied: true,

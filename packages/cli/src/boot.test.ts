@@ -405,4 +405,20 @@ describe("deriveSubscriptionCliPermissionMode (harness#392)", () => {
     ]);
     expect(deriveSubscriptionCliPermissionMode(agent, undefined)).toBe("trusted");
   });
+
+  it("an explicit restricted suppresses branch_commits auto-elevation (harness-level policy)", () => {
+    // The caller (buildAgentClients) resolves precedence
+    // `effectiveLlm.permissionMode ?? harnessLlm.permissionMode` before
+    // calling this helper, so a murmuration-wide `llm.permissionMode:
+    // restricted` in harness.yaml reaches the helper as declaredMode even
+    // when the agent pins its own llm block (the role-defaults cascade is
+    // all-or-nothing). The security-critical direction: a declared
+    // restricted must NEVER be silently broadened to trusted by a
+    // branch_commits declaration. (Mirrors the caller's `?? harnessLlm`
+    // fallback added with this PR — guards against a refactor dropping it.)
+    const agent = makeAgent([{ repo: "org/repo", paths: ["drafts/**"] }]);
+    // Resolved declaredMode the caller passes when role.md is unset but
+    // harness.yaml declares `restricted` (`undefined ?? "restricted"`).
+    expect(deriveSubscriptionCliPermissionMode(agent, "restricted")).toBe("restricted");
+  });
 });
