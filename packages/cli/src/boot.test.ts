@@ -21,7 +21,11 @@ import {
   type LoadedAgentIdentity,
 } from "@murmurations-ai/core";
 
-import { makeDaemonHook, sanitizeForTerminal } from "./boot.js";
+import {
+  deriveSubscriptionCliPermissionMode,
+  makeDaemonHook,
+  sanitizeForTerminal,
+} from "./boot.js";
 
 describe("makeDaemonHook", () => {
   const builder = (): WakeCostBuilder =>
@@ -333,5 +337,88 @@ describe("sanitizeForTerminal (harness#380 review hardening)", () => {
   it("passes through ordinary Unicode unchanged", () => {
     // CJK + accented letters are not security-relevant — keep them.
     expect(sanitizeForTerminal("agent-名前-é")).toBe("agent-名前-é");
+  });
+});
+
+describe("deriveSubscriptionCliPermissionMode (harness#392)", () => {
+  // Minimal RegisteredAgent factory — only `githubWriteScopes` is read by
+  // the helper, so we synthesise a fixture that fills exactly that shape.
+  const makeAgent = (
+    branchCommits: readonly { readonly repo: string; readonly paths: readonly string[] }[],
+  ): Parameters<typeof deriveSubscriptionCliPermissionMode>[0] => {
+    return {
+      agentId: "test-agent",
+      displayName: "Test",
+      modelTier: "balanced",
+      maxWallClockMs: 10_000,
+      identity: {
+        agentId: makeAgentId("test-agent"),
+        layers: [],
+        frontmatter: {
+          agentId: makeAgentId("test-agent"),
+          name: "test",
+          modelTier: "balanced",
+          groupMemberships: [],
+        },
+      },
+      githubWriteScopes: {
+        issueComments: [],
+        branchCommits,
+        labels: [],
+        issues: [],
+      },
+      trigger: { kind: "interval", intervalMs: 60_000 },
+      groupMemberships: [],
+    } as unknown as Parameters<typeof deriveSubscriptionCliPermissionMode>[0];
+  };
+
+  it("operator-set permissionMode wins, even when branch_commits is non-empty", () => {
+    const agent = makeAgent([{ repo: "org/repo", paths: ["drafts/**"] }]);
+    expect(deriveSubscriptionCliPermissionMode(agent, "restricted")).toBe("restricted");
+    expect(deriveSubscriptionCliPermissionMode(agent, "operator-approved")).toBe(
+      "operator-approved",
+    );
+    expect(deriveSubscriptionCliPermissionMode(agent, "trusted")).toBe("trusted");
+  });
+
+  it("auto-elevates to trusted when permissionMode is unset AND branch_commits has paths", () => {
+    const agent = makeAgent([{ repo: "org/repo", paths: ["drafts/**", "pipeline/**"] }]);
+    expect(deriveSubscriptionCliPermissionMode(agent, undefined)).toBe("trusted");
+  });
+
+  it("returns undefined when permissionMode is unset AND no branch_commits", () => {
+    const agent = makeAgent([]);
+    expect(deriveSubscriptionCliPermissionMode(agent, undefined)).toBeUndefined();
+  });
+
+  it("returns undefined when branch_commits entries exist but all have empty paths", () => {
+    // Edge case: operator declared the repo block but no paths. Treat as
+    // no write intent — don't auto-elevate.
+    const agent = makeAgent([{ repo: "org/repo", paths: [] }]);
+    expect(deriveSubscriptionCliPermissionMode(agent, undefined)).toBeUndefined();
+  });
+
+  it("auto-elevates when at least one branch_commits entry has paths (mixed case)", () => {
+    const agent = makeAgent([
+      { repo: "org/empty-repo", paths: [] },
+      { repo: "org/real-repo", paths: ["src/**"] },
+    ]);
+    expect(deriveSubscriptionCliPermissionMode(agent, undefined)).toBe("trusted");
+  });
+
+  it("an explicit restricted suppresses branch_commits auto-elevation (harness-level policy)", () => {
+    // The caller (buildAgentClients) resolves precedence
+    // `effectiveLlm.permissionMode ?? harnessLlm.permissionMode` before
+    // calling this helper, so a murmuration-wide `llm.permissionMode:
+    // restricted` in harness.yaml reaches the helper as declaredMode even
+    // when the agent pins its own llm block (the role-defaults cascade is
+    // all-or-nothing). The security-critical direction: a declared
+    // restricted must NEVER be silently broadened to trusted by a
+    // branch_commits declaration. (Mirrors the caller's `?? harnessLlm`
+    // fallback added with this PR — guards against a refactor dropping it.)
+    const agent = makeAgent([{ repo: "org/repo", paths: ["drafts/**"] }]);
+    // Resolved declaredMode the caller passes when role.md is unset but
+    // harness.yaml declares `restricted` (`undefined ?? "restricted"`).
+    expect(deriveSubscriptionCliPermissionMode(agent, "restricted")).toBe("restricted");
   });
 });
