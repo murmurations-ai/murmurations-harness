@@ -185,6 +185,14 @@ describe("Spirit meta-agent fixture — Workstream R (skill overlay)", () => {
 // Fixture builder
 // ---------------------------------------------------------------------------
 
+/**
+ * Base timestamp for synthetic runs + accountability observations: 3 days
+ * before now. fetchMetrics windows both to `[now - 30d, now]`, so the
+ * fixture must be anchored relative to the wall clock — a hardcoded calendar
+ * date silently rots out of the window and fails CI on no code change.
+ */
+const FIXTURE_BASE_MS = Date.now() - 3 * 24 * 60 * 60 * 1000;
+
 const buildFixture = (rootDir: string): void => {
   // murmuration/harness.yaml + soul.md
   const muDir = join(rootDir, "murmuration");
@@ -229,7 +237,10 @@ group_memberships: [${agentId === "facilitator-agent" ? "facilitation" : "resear
     mkdirSync(runsDir, { recursive: true });
     const lines: string[] = [];
     for (let i = 0; i < 4; i++) {
-      const startedAt = new Date("2026-04-30T10:00:00Z");
+      // Anchor a few days before now so the records stay inside the
+      // fetchMetrics 30-day window on whatever date the suite runs (a
+      // hardcoded calendar date rots out of the window — harness#405 CI).
+      const startedAt = new Date(FIXTURE_BASE_MS);
       startedAt.setUTCHours(startedAt.getUTCHours() + i);
       lines.push(
         JSON.stringify({
@@ -292,7 +303,7 @@ facilitator: research-agent
   mkdirSync(obsDir, { recursive: true });
   const obsLines: string[] = [];
   for (let i = 0; i < 4; i++) {
-    const t = new Date("2026-04-30T10:00:00Z");
+    const t = new Date(FIXTURE_BASE_MS);
     t.setUTCHours(t.getUTCHours() + i);
     obsLines.push(
       JSON.stringify({
