@@ -1387,6 +1387,8 @@ const formatTrigger = (trigger: WakeTrigger): string => {
       return `interval: ${String(trigger.intervalMs)}ms`;
     case "delay-once":
       return `delay-once: ${String(trigger.delayMs)}ms`;
+    case "multi":
+      return `multi: [${trigger.triggers.map(formatTrigger).join(", ")}]`;
     default:
       return "unknown";
   }

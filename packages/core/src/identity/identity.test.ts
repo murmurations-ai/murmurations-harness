@@ -12,6 +12,16 @@ import {
   splitFrontmatter,
 } from "./index.js";
 
+/**
+ * Extract a cron from a `wake_schedule`, which may be a single object or an
+ * array of them (harness#420). For the array form, returns the first entry's
+ * cron. Keeps the single-schedule assertions below concise + type-safe.
+ */
+const cronOf = (ws: unknown): string | undefined => {
+  const obj = (Array.isArray(ws) ? ws[0] : ws) as { cron?: unknown } | undefined;
+  return typeof obj?.cron === "string" ? obj.cron : undefined;
+};
+
 describe("splitFrontmatter", () => {
   it("extracts frontmatter and body from a well-formed file", () => {
     const source = `---
@@ -214,6 +224,78 @@ model_tier: galactic
     const loader = new IdentityLoader({ rootDir });
 
     await expect(loader.load("13-badtier")).rejects.toBeInstanceOf(FrontmatterInvalidError);
+  });
+
+  describe("multi wake_schedule (harness#420)", () => {
+    const writeMultiScheduleAgent = async (wakeScheduleYaml: string): Promise<void> => {
+      await writeFixture("murmuration/soul.md", "# Soul\n");
+      await writeFixture("agents/14-multi/soul.md", "# Agent Soul\n");
+      await writeFixture(
+        "agents/14-multi/role.md",
+        `---
+agent_id: "14-multi"
+name: "Multi"
+model_tier: balanced
+${wakeScheduleYaml}---
+
+# Multi
+`,
+      );
+    };
+
+    it("parses an array wake_schedule into a list of triggers (with labels)", async () => {
+      await writeMultiScheduleAgent(
+        `wake_schedule:
+  - cron: "40 22 * * 1"
+    tz: America/Vancouver
+    label: setup
+  - cron: "0 3 * * 2"
+    tz: America/Vancouver
+    label: summary
+`,
+      );
+      const loaded = await new IdentityLoader({ rootDir }).load("14-multi");
+      const ws = loaded.frontmatter.wake_schedule;
+      expect(Array.isArray(ws)).toBe(true);
+      const list = ws as readonly { cron?: string; tz?: string; label?: string }[];
+      expect(list).toHaveLength(2);
+      expect(list[0]).toMatchObject({
+        cron: "40 22 * * 1",
+        tz: "America/Vancouver",
+        label: "setup",
+      });
+      expect(list[1]).toMatchObject({ cron: "0 3 * * 2", label: "summary" });
+    });
+
+    it("still accepts the single-object form unchanged", async () => {
+      await writeMultiScheduleAgent(
+        `wake_schedule:
+  cron: "0 9 * * *"
+`,
+      );
+      const loaded = await new IdentityLoader({ rootDir }).load("14-multi");
+      expect(Array.isArray(loaded.frontmatter.wake_schedule)).toBe(false);
+      expect(cronOf(loaded.frontmatter.wake_schedule)).toBe("0 9 * * *");
+    });
+
+    it("rejects an empty array wake_schedule", async () => {
+      await writeMultiScheduleAgent(`wake_schedule: []\n`);
+      await expect(new IdentityLoader({ rootDir }).load("14-multi")).rejects.toBeInstanceOf(
+        FrontmatterInvalidError,
+      );
+    });
+
+    it("rejects an array with an invalid cron expression", async () => {
+      await writeMultiScheduleAgent(
+        `wake_schedule:
+  - cron: "40 22 * * 1"
+  - cron: "not a cron"
+`,
+      );
+      await expect(new IdentityLoader({ rootDir }).load("14-multi")).rejects.toBeInstanceOf(
+        FrontmatterInvalidError,
+      );
+    });
   });
 
   describe("Zod issue annotation (v0.5.0 Milestone 1)", () => {
@@ -553,7 +635,7 @@ describe("roleFrontmatterSchema (ADR-0016 extensions)", () => {
     const loaded = await loader.load("01-research");
     expect(loaded.frontmatter.llm?.provider).toBe("gemini");
     expect(loaded.frontmatter.llm?.model).toBe("gemini-2.5-pro");
-    expect(loaded.frontmatter.wake_schedule?.cron).toBe("0 18 * * 0");
+    expect(cronOf(loaded.frontmatter.wake_schedule)).toBe("0 18 * * 0");
     expect(loaded.frontmatter.signals.github_scopes).toHaveLength(1);
     expect(loaded.frontmatter.github.write_scopes.issue_comments).toEqual([
       "xeeban/emergent-praxis",
@@ -901,7 +983,7 @@ describe("examples/research-agent identity chain", () => {
     const loader = new IdentityLoader({ rootDir: exampleRoot });
     const loaded = await loader.load("01-research");
 
-    expect(loaded.frontmatter.wake_schedule?.cron).toBe("0 18 * * 0");
+    expect(cronOf(loaded.frontmatter.wake_schedule)).toBe("0 18 * * 0");
   });
 
   it("parses the ADR-0017 write scopes — notes/weekly/** on emergent-praxis", async () => {
@@ -990,7 +1072,7 @@ describe("examples/facilitator-agent identity chain", () => {
     const loader = new IdentityLoader({ rootDir: exampleRoot });
     const loaded = await loader.load("facilitator-agent");
 
-    expect(loaded.frontmatter.wake_schedule?.cron).toBe("0 7,18 * * *");
+    expect(cronOf(loaded.frontmatter.wake_schedule)).toBe("0 7,18 * * *");
   });
 
   it("parses the four ADR-0042 accountabilities with done_when blocks", async () => {

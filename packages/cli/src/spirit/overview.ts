@@ -187,9 +187,14 @@ const readAgentRole = async (rootDir: string, agentDir: string): Promise<AgentSu
     const parsed = parseYaml(yamlText) as RoleYamlShape | undefined;
     if (!parsed) return blankAgent(agentDir);
 
-    const cron =
-      typeof parsed.wake_schedule?.cron === "string" ? parsed.wake_schedule.cron : undefined;
-    const tz = typeof parsed.wake_schedule?.tz === "string" ? ` ${parsed.wake_schedule.tz}` : "";
+    // wake_schedule may be a single object or an array of them (harness#420);
+    // for the overview we surface the first schedule's cron/tz.
+    const wsRaw: unknown = parsed.wake_schedule;
+    const firstSchedule = (Array.isArray(wsRaw) ? wsRaw[0] : wsRaw) as
+      | { cron?: unknown; tz?: unknown }
+      | undefined;
+    const cron = typeof firstSchedule?.cron === "string" ? firstSchedule.cron : undefined;
+    const tz = typeof firstSchedule?.tz === "string" ? ` ${firstSchedule.tz}` : "";
 
     const groupsRaw = parsed.group_memberships;
     const groups = Array.isArray(groupsRaw)

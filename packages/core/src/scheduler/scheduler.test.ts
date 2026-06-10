@@ -344,4 +344,102 @@ describe("TimerScheduler", () => {
 
     await scheduler.stop();
   });
+
+  // -------------------------------------------------------------------
+  // Multi (harness#420) — multiple wake schedules per agent
+  // -------------------------------------------------------------------
+
+  it("multi — arms every sub-trigger independently, all under the real agentId", async () => {
+    vi.useFakeTimers();
+    const scheduler = new TimerScheduler();
+    const agentId = makeAgentId("facilitator-agent");
+
+    const fired: ScheduledWakeEvent[] = [];
+    scheduler.onWake((event) => {
+      fired.push(event);
+    });
+
+    scheduler.schedule(agentId, {
+      kind: "multi",
+      triggers: [
+        { kind: "interval", intervalMs: 100 },
+        { kind: "interval", intervalMs: 250 },
+      ],
+    });
+    scheduler.start();
+
+    // Advance to 520ms (off any boundary): 100ms fires at 100/200/300/400/500
+    // = 5; 250ms fires at 250/500 = 2; total 7.
+    await vi.advanceTimersByTimeAsync(520);
+    expect(fired).toHaveLength(7);
+    // Every wake carries the real agentId, not the internal `agentId#i` key.
+    expect(fired.every((e) => e.agentId.value === "facilitator-agent")).toBe(true);
+
+    await scheduler.stop();
+  });
+
+  it("multi — unschedule clears every sub-entry", async () => {
+    vi.useFakeTimers();
+    const scheduler = new TimerScheduler();
+    const agentId = makeAgentId("facilitator-agent");
+
+    const fired: ScheduledWakeEvent[] = [];
+    scheduler.onWake((event) => {
+      fired.push(event);
+    });
+
+    scheduler.schedule(agentId, {
+      kind: "multi",
+      triggers: [
+        { kind: "interval", intervalMs: 100 },
+        { kind: "interval", intervalMs: 250 },
+      ],
+    });
+    scheduler.start();
+
+    await vi.advanceTimersByTimeAsync(120); // only the 100ms sub-trigger has fired
+    expect(fired).toHaveLength(1);
+
+    expect(scheduler.unschedule(agentId)).toBe(true);
+
+    // Both sub-entries are cleared — nothing else fires.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fired).toHaveLength(1);
+
+    await scheduler.stop();
+  });
+
+  it("multi — each cron sub-trigger re-arms on its own key", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-09T12:00:00.000Z"));
+
+    const scheduler = new TimerScheduler();
+    const agentId = makeAgentId("facilitator-agent");
+
+    const fired: ScheduledWakeEvent[] = [];
+    scheduler.onWake((event) => {
+      fired.push(event);
+    });
+
+    // Two distinct crons: every minute, and every 2 minutes (at even minutes).
+    scheduler.schedule(agentId, {
+      kind: "multi",
+      triggers: [
+        { kind: "cron", expression: "* * * * *" },
+        { kind: "cron", expression: "*/2 * * * *" },
+      ],
+    });
+    scheduler.start();
+
+    // t+60s → 12:01: only the every-minute cron fires (1).
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fired).toHaveLength(1);
+
+    // t+120s → 12:02: every-minute (now 2) AND every-2-minute (1) both fire.
+    // Proves both crons re-armed independently via their own entry.key.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fired).toHaveLength(3);
+
+    await scheduler.stop();
+  });
 });

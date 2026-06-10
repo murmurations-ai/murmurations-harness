@@ -822,14 +822,42 @@ const discoverGroupConfigs = async (
   return configs;
 };
 
+interface SingleWakeSchedule {
+  readonly cron?: string | undefined;
+  readonly delayMs?: number | undefined;
+  readonly intervalMs?: number | undefined;
+  readonly events?: readonly string[] | undefined;
+  readonly tz?: string | undefined;
+  readonly label?: string | undefined;
+}
+
+/**
+ * Build a {@link WakeTrigger} from a role.md `wake_schedule`, which may be a
+ * single trigger object or — for agents that wake on multiple schedules
+ * (harness#420) — an array of them. An array yields a composite `multi`
+ * trigger (a single-element array collapses to its lone trigger).
+ */
 const triggerFromFrontmatter = (
-  wakeSchedule: {
-    readonly cron?: string | undefined;
-    readonly delayMs?: number | undefined;
-    readonly intervalMs?: number | undefined;
-    readonly events?: readonly string[] | undefined;
-    readonly tz?: string | undefined;
-  },
+  wakeSchedule: SingleWakeSchedule | readonly SingleWakeSchedule[],
+  agentId: string,
+): WakeTrigger => {
+  if (Array.isArray(wakeSchedule)) {
+    // Array.isArray narrows to `any[]`; re-type for a safe `.map`.
+    const list = wakeSchedule as readonly SingleWakeSchedule[];
+    const triggers = list.map((s) => triggerFromSingleSchedule(s, agentId));
+    if (triggers.length === 1) {
+      const [only] = triggers;
+      if (only) return only;
+    }
+    return { kind: "multi", triggers };
+  }
+  // Not an array → a single schedule object. (Array.isArray doesn't narrow
+  // the readonly-array union member, so assert the single shape explicitly.)
+  return triggerFromSingleSchedule(wakeSchedule as SingleWakeSchedule, agentId);
+};
+
+const triggerFromSingleSchedule = (
+  wakeSchedule: SingleWakeSchedule,
   agentId: string,
 ): WakeTrigger => {
   if (wakeSchedule.cron !== undefined) {
