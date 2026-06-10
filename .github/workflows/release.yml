@@ -31,7 +31,17 @@ jobs:
         with:
           node-version: "22.x"
           cache: pnpm
-          registry-url: "https://registry.npmjs.org"
+          # NOTE: deliberately NO `registry-url:` here. setup-node's
+          # registry-url writes an .npmrc line
+          # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` and exports
+          # an (empty, since we keep no NPM_TOKEN secret) NODE_AUTH_TOKEN.
+          # That empty token shadows OIDC Trusted Publishing: npm sends an
+          # empty bearer instead of performing the OIDC exchange, and the
+          # registry rejects the PUT with E404 (this broke the first OIDC
+          # release, v0.9.0). pnpm publishes to the default npmjs.org
+          # registry and performs the OIDC exchange itself when `id-token:
+          # write` is granted and no token is configured — so the registry
+          # must NOT be pre-wired with an auth token here.
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
