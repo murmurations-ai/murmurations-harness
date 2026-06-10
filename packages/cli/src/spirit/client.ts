@@ -38,7 +38,7 @@ import {
   type SubscriptionCliPermissionMode,
   type SubscriptionCli,
 } from "../harness-config.js";
-import { sweepOrphanedSpiritMcpConfigs, writeEphemeralSpiritMcpConfig } from "./mcp-config.js";
+import { writeEphemeralSpiritMcpConfig } from "./mcp-config.js";
 import { buildSpiritSystemPrompt } from "./system-prompt.js";
 import { buildSpiritTools } from "./tools.js";
 
@@ -205,11 +205,14 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     // Claude is the only CLI with `--mcp-config` support today (ADR-0038).
     // Codex/gemini fall through without an MCP bridge — they can converse
     // but cannot invoke harness-internal tools yet.
-    // CF-F (harness#278): sweep any orphaned per-attach configs from a
-    // prior crashed session, then write a fresh ephemeral one for this attach.
+    // CF-F (harness#278): write a fresh ephemeral config for this attach.
+    // The sweep of orphaned configs from prior crashed sessions runs once
+    // at daemon-start (harness#362) — moving it out of the per-attach path
+    // closes the race where two near-simultaneous attaches could delete
+    // each other's still-live config files. Per-attach code is now
+    // write-only; cleanup is the daemon's job.
     let mcpConfigPath: string | undefined;
     if (cli === "claude") {
-      sweepOrphanedSpiritMcpConfigs(rootDir);
       const ephemeral = writeEphemeralSpiritMcpConfig(rootDir);
       mcpConfigPath = ephemeral.configPath;
       mcpConfigCleanup = ephemeral.cleanup;

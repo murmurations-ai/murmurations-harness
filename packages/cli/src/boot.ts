@@ -146,7 +146,7 @@ import { validateHarnessYaml } from "./harness-config.js";
 import { resolveBundledGovernancePlugin } from "./governance-plugin-resolver.js";
 import { buildMemoryToolsForAgent } from "./memory/index.js";
 import { registerRunningSocket, unregisterRunningSocket } from "./running-sessions.js";
-import { writeAgentMcpConfig } from "./spirit/mcp-config.js";
+import { sweepOrphanedSpiritMcpConfigs, writeAgentMcpConfig } from "./spirit/mcp-config.js";
 
 // ---------------------------------------------------------------------------
 // CLI binary resolution — launchd / cron safe (harness#XXX)
@@ -2061,6 +2061,28 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
         }
       }
     }
+  }
+
+  // harness#362: sweep orphaned Spirit MCP config files from prior
+  // crashed attach sessions. This previously ran on every attach, which
+  // races when two attaches start within the same sub-second window —
+  // attach C's sweep could delete attach B's still-live ephemeral file.
+  //
+  // The sweep belongs HERE — after the pidfile guard above has confirmed
+  // this process owns the persistent daemon role, and only in `!once`
+  // mode. The sweep is not liveness-aware (it deletes by pattern, which
+  // is exactly why per-attach sweeping was racy), so it must never run in
+  // a context that coexists with a live attach. A `murmuration start
+  // --now/--once` immediate wake runs as a SEPARATE short-lived process
+  // alongside the real daemon and an operator's interactive attach; if
+  // the sweep ran before the `!once` guard it would delete that live
+  // attach's config out from under it. By gating on `!once` and placing
+  // it after pidfile acquisition, only the one process that legitimately
+  // owns the daemon — and at a moment no attach can be in-flight, since
+  // attach hard-exits without a bound socket — performs the cleanup.
+  // Per-attach code now only WRITES; cleanup is the daemon's job.
+  if (!once) {
+    sweepOrphanedSpiritMcpConfigs(exampleRoot);
   }
 
   // Start daemon control socket
