@@ -1,13 +1,15 @@
 /**
  * Scheduler — fires agent wakes on cron + event triggers.
  *
- * `TimerScheduler` supports four trigger kinds:
+ * `TimerScheduler` supports five trigger kinds:
  *
  *   - `delay-once`  — one-shot setTimeout after N ms
  *   - `interval`    — setInterval repeating every N ms
  *   - `cron`        — compute the next fire time via cron-parser,
  *                     setTimeout to that delta, and re-arm on fire
  *   - `event`       — still a stub (Phase 3 event bus)
+ *   - `multi`       — fire on ANY of several sub-triggers (harness#420);
+ *                     expanded by schedule() into independent sub-entries
  *
  * Cron support landed in Phase 2D step 2D4. Expressions are parsed
  * with `tz: "UTC"` always — `0 18 * * 0` means Sunday 18:00 UTC
@@ -44,7 +46,17 @@ export type WakeTrigger =
   | { readonly kind: "interval"; readonly intervalMs: number }
   | { readonly kind: "cron"; readonly expression: string; readonly tz?: string }
   // TODO(phase-3): event bus wiring
-  | { readonly kind: "event"; readonly eventType: string };
+  | { readonly kind: "event"; readonly eventType: string }
+  /**
+   * Composite trigger: fire on ANY of several sub-triggers (harness#420).
+   * For agents with multiple cron wake schedules — e.g. a facilitator that
+   * runs a setup pass before its circle's domain agents and a summary pass
+   * after. {@link TimerScheduler.schedule} expands a `multi` into one
+   * independently-armed sub-entry per sub-trigger (keyed `agentId#i`), all
+   * cleared together by `unschedule(agentId)`. Sub-triggers must be
+   * non-`multi` (single level only).
+   */
+  | { readonly kind: "multi"; readonly triggers: readonly WakeTrigger[] };
 
 // ---------------------------------------------------------------------------
 // Scheduled event payload
@@ -87,6 +99,12 @@ export interface Scheduler {
 // ---------------------------------------------------------------------------
 
 interface ScheduledEntry {
+  /**
+   * Key in {@link TimerScheduler.#entries}. `agentId.value` for a single
+   * trigger; `${agentId.value}#${i}` for the i-th sub-trigger of a `multi`.
+   * Agent IDs never contain `#`, so the prefix is unambiguous.
+   */
+  readonly key: string;
   readonly agentId: AgentId;
   readonly trigger: WakeTrigger;
   timerHandle: NodeJS.Timeout | undefined;
@@ -103,29 +121,44 @@ export class TimerScheduler implements Scheduler {
   #running = false;
 
   public schedule(agentId: AgentId, trigger: WakeTrigger): void {
-    // Replace any existing entry for this agent (idempotent per spec).
+    // Replace any existing entry/entries for this agent (idempotent per spec).
     this.unschedule(agentId);
-    const entry: ScheduledEntry = {
-      agentId,
-      trigger,
-      timerHandle: undefined,
-    };
-    this.#entries.set(agentId.value, entry);
+    // A `multi` trigger fans out into one independently-armed sub-entry per
+    // sub-trigger (harness#420). Each cron sub-entry keeps its own re-arm
+    // loop, so they fire independently and `unschedule` clears them all.
+    if (trigger.kind === "multi") {
+      trigger.triggers.forEach((sub, i) => {
+        this.#addEntry(`${agentId.value}#${String(i)}`, agentId, sub);
+      });
+      return;
+    }
+    this.#addEntry(agentId.value, agentId, trigger);
+  }
+
+  #addEntry(key: string, agentId: AgentId, trigger: WakeTrigger): void {
+    const entry: ScheduledEntry = { key, agentId, trigger, timerHandle: undefined };
+    this.#entries.set(key, entry);
     if (this.#running) {
       this.#arm(entry);
     }
   }
 
   public unschedule(agentId: AgentId): boolean {
-    const entry = this.#entries.get(agentId.value);
-    if (!entry) return false;
-    if (entry.timerHandle) {
-      clearTimeout(entry.timerHandle);
-      clearInterval(entry.timerHandle);
-      entry.timerHandle = undefined;
+    // Remove the single entry (`agentId.value`) plus any `multi` sub-entries
+    // (`agentId.value#<i>`). Deleting during Map iteration is safe in JS.
+    const prefix = `${agentId.value}#`;
+    let removed = false;
+    for (const [key, entry] of this.#entries) {
+      if (key !== agentId.value && !key.startsWith(prefix)) continue;
+      if (entry.timerHandle) {
+        clearTimeout(entry.timerHandle);
+        clearInterval(entry.timerHandle);
+        entry.timerHandle = undefined;
+      }
+      this.#entries.delete(key);
+      removed = true;
     }
-    this.#entries.delete(agentId.value);
-    return true;
+    return removed;
   }
 
   public onWake(listener: WakeListener): void {
@@ -194,6 +227,15 @@ export class TimerScheduler implements Scheduler {
         );
         break;
       }
+      case "multi": {
+        // schedule() expands `multi` into non-multi sub-entries, so an armed
+        // entry should never carry kind "multi". Guard defensively rather
+        // than silently nesting.
+        console.warn(
+          `[scheduler] multi trigger reached #arm for agent ${entry.agentId.value} — should have been expanded by schedule()`,
+        );
+        break;
+      }
     }
   }
 
@@ -245,7 +287,10 @@ export class TimerScheduler implements Scheduler {
           kind: "scheduled",
           cronExpression: expression,
         });
-        if (this.#running && this.#entries.get(entry.agentId.value) === entry) {
+        // Re-arm only if this exact entry is still scheduled. Keyed by
+        // entry.key (not agentId.value) so multi sub-entries re-arm
+        // independently rather than clobbering each other.
+        if (this.#running && this.#entries.get(entry.key) === entry) {
           this.#armCron(entry);
         }
       })();

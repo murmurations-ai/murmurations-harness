@@ -273,6 +273,10 @@ const wakeScheduleSchema = z
     /** IANA timezone for the cron expression (e.g. "America/Vancouver").
      *  If absent, cron fires in UTC. Only meaningful when `cron` is set. */
     tz: z.string().min(1).optional(),
+    /** Optional human label for this trigger — surfaced in logs/telemetry.
+     *  Useful to distinguish the entries of a multi-schedule (harness#420),
+     *  e.g. `setup` vs `summary`. Ignored by the scheduler itself. */
+    label: z.string().min(1).optional(),
   })
   .refine(
     (s) =>
@@ -282,6 +286,17 @@ const wakeScheduleSchema = z
       (s.events !== undefined && s.events.length > 0),
     { message: "wake_schedule must declare at least one trigger" },
   );
+
+/**
+ * A role may declare a single wake trigger (object) OR several (harness#420):
+ * an array of trigger objects whose wakes are unioned — e.g. a facilitator
+ * that runs a setup pass before its circle and a summary pass after. The
+ * single-object form is unchanged; the array form is new.
+ */
+const wakeScheduleFieldSchema = z.union([
+  wakeScheduleSchema,
+  z.array(wakeScheduleSchema).min(1, "wake_schedule list must declare at least one trigger"),
+]);
 
 // ---------------------------------------------------------------------------
 // ADR-0016 extensions — llm, signals, github, prompt, budget, secrets
@@ -429,7 +444,7 @@ export const roleFrontmatterSchema = z.object({
 
   // legacy compat (Phase 1B)
   model_tier: modelTierSchema,
-  wake_schedule: wakeScheduleSchema.optional(),
+  wake_schedule: wakeScheduleFieldSchema.optional(),
   group_memberships: z.array(identifierSchema).default([]),
   // Default 2 minutes. A single LLM wake with a few tool calls takes
   // 30–90s on Sonnet/GPT-class models; the prior 15s default killed
