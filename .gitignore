@@ -150,3 +150,7 @@ vite.config.ts.timestamp-*
 # Local Claude Code settings (operator machine)
 .claude/
 
+# Local scratch / nested operator checkouts (never part of the harness)
+.playwright-mcp/
+ep-work/
+
