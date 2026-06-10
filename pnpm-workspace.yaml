@@ -1,2 +1,12 @@
 packages:
-  - 'packages/*'
+  - "packages/*"
+
+# pnpm 11 ignores dependency build scripts by default (supply-chain
+# hardening) and requires explicit per-package approval. These two were
+# built automatically under pnpm 10; allow them so the install runs their
+# scripts instead of failing with ERR_PNPM_IGNORED_BUILDS:
+#   - koffi      — native FFI used by @mariozechner/pi-tui (dashboard-tui)
+#   - protobufjs — postinstall via @grpc/proto-loader (OpenTelemetry, llm)
+allowBuilds:
+  koffi: true
+  protobufjs: true
