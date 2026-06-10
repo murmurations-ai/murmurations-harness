@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
-**Signal-bundle hygiene + daemon orphan-schedule + Trojan Source hardening.** Operator-visible diagnostics for the silent failure mode that bites every long-running murmuration: stale GitHub issues that bloat every watching agent's per-wake context, and agent directories that quietly wake on the default-agent template after their `role.md` was removed.
+**Signal-bundle hygiene + daemon orphan-schedule + tombstone reconciliation + Trojan Source hardening.** Operator-visible diagnostics for the silent failure mode that bites every long-running murmuration: stale GitHub issues that bloat every watching agent's per-wake context, and agent directories that quietly wake on the default-agent template after their `role.md` was removed — plus reconciliation of the state.json records those removed agents leave behind.
 
 ### Added
 
@@ -19,6 +19,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Daemon orphan-schedule warning** ([#380](https://github.com/murmurations-ai/murmurations-harness/issues/380)). Boot now detects when an agent's `role.md` is missing entirely and refuses to register the cron entry — silent waking via the default-agent template was the silent-drift class EP#874 surfaced. Multi-agent boot warns + skips (`daemon.warn.orphaned-schedule`); single-agent boot (`--agent <id>`) hard-fails with `BootError(kind: "agent-missing-role")`. Predicate `isOrphanedSchedule(loaded)` exported from `@murmurations-ai/core` (type guard).
 - **Trojan Source / Unicode bidi hardening** (review followup to [#380](https://github.com/murmurations-ai/murmurations-harness/issues/380)). `sanitizeForTerminal` now strips C1 controls (incl. 8-bit CSI `\x9b`), Unicode bidi overrides + isolates (U+202A-U+202E, U+2066-U+2069 — CVE-2021-42574), zero-width chars (U+200B-U+200F, U+FEFF), and line separators (U+2028-U+2029). Closes a class of operator-log spoofing via maliciously-named agent directories. Pre-existing surface, but the recent work made the sanitizer flow operator-reachable through several new emission points.
 - **Shared `stale-issues.ts` module** in `@murmurations-ai/cli` ([#402](https://github.com/murmurations-ai/murmurations-harness/pull/402)). `classifyStaleIssues`, `partitionByReason`, `fetchOpenIssues` consolidated from the two original copies that #399 and #401 each shipped independently. `dotenv.ts` extracted the second time the dedupe was needed.
+- **`AgentStateStore` tombstone reconciliation** ([#405](https://github.com/murmurations-ai/murmurations-harness/issues/405), [#415](https://github.com/murmurations-ai/murmurations-harness/pull/415)). New `"orphaned"` member on `AgentLifecycleState` and `markOrphaned()` on the store. At boot, any `state.json` record not backed by a live `agents/<id>/role.md` — the records #380's orphan-schedule warning leaves behind — is marked orphaned with a `daemon.agent.stale-record` warning (previousState / registeredAt / lastWokenAt / totalWakes). If the operator restores the role.md, `register()` resurrects the slot: circuit-breaker counters and last-life status (`consecutiveFailures`, `idleSkipStreak`, `lastOutcome`, `lastWokenAt`, `lastFiredContextHash`) reset so the new role doesn't inherit a tripped breaker or stale "failed" badge, while historical totals (`totalWakes`, `totalArtifacts`, `idleWakes`, `registeredAt`) are preserved as audit signal. The dashboard activity feed filters wakes belonging to orphaned agents.
+
+### Changed
+
+- **Signal-aggregator comment cap default: 20 → 5** ([#398](https://github.com/murmurations-ai/murmurations-harness/pull/398)). Observable default-behavior change riding the new `AggregatorCaps.commentsPerIssue` knob above — chatty issue threads contribute at most 5 comments per issue to each wake's signal bundle unless the operator raises the cap.
+- **Daemon boot refuses orphaned schedules** ([#380](https://github.com/murmurations-ai/murmurations-harness/issues/380)). Behavior change riding the orphan-schedule warning above: multi-agent boot skips cron registration for agent dirs missing `role.md` (previously they woke on the default-agent template); single-agent `--agent <id>` boot now hard-fails with `BootError(kind: "agent-missing-role")`.
+- **Subscription-CLI `permissionMode` auto-derives from `branch_commits`** ([#392](https://github.com/murmurations-ai/murmurations-harness/issues/392), [#412](https://github.com/murmurations-ai/murmurations-harness/pull/412)). When a subscription-CLI agent declares non-empty `branch_commits` paths but leaves `llm.permissionMode` unset, the daemon now elevates it to `trusted` so headless `-p` wakes can actually write the files the operator declared intent to commit (claude `--dangerously-skip-permissions` / codex `--dangerously-bypass-approvals-and-sandbox` / gemini `--yolo`). Closes the silent class where declared writes no-op'd for 6+ wakes before agents filed tensions. The operator's explicit setting always wins — at **both** role.md and harness.yaml granularity — and a `daemon.agent.permission-mode.auto-elevated` warning records each elevation. The per-agent run-artifact audit context records the **effective** mode, so run artifacts never misreport an auto-elevated wake as sandboxed.
+
+### Fixed
+
+- **Spirit reporting test fixtures were a CI time-bomb** ([#415](https://github.com/murmurations-ai/murmurations-harness/pull/415)). `spirit-meta-fixture.test.ts` and `reports.test.ts` pinned synthetic wakes/observations to hardcoded April 2026 dates while `fetchMetrics` windows to `[now − 30d, now]` — the data aged out of the window (~May 31) and every PR's CI failed on no code change. Fixtures are now anchored to relative time.
+- **Spirit MCP-config sweep raced concurrent attaches** ([#362](https://github.com/murmurations-ai/murmurations-harness/issues/362), [#414](https://github.com/murmurations-ai/murmurations-harness/pull/414)). The orphaned-config sweep ran on every attach, so two attaches starting within the same sub-second window could delete each other's still-live ephemeral MCP config. The sweep now runs once at daemon start — after pidfile acquisition and gated on `!once`, so a `start --now/--once` immediate wake can't delete a live attach's config either — and the per-attach path is write-only.
+- **Plugin-error name lost in fatal stderr** ([#360](https://github.com/murmurations-ai/murmurations-harness/issues/360), [#413](https://github.com/murmurations-ai/murmurations-harness/pull/413)). The `bin.ts` fatal catch flattened typed plugin errors to a bare message, dropping the `error.name` discriminator operators grep for. A new `formatFatalError` helper preserves the `[ErrorName]` prefix for typed errors while leaving generic `Error` and non-`Error` throws byte-identical.
 
 ### Internals
 
@@ -28,7 +41,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Filed for follow-up
 
-- [#405](https://github.com/murmurations-ai/murmurations-harness/issues/405) — `AgentStateStore` tombstone drift: orphaned agents' state.json records persist forever; needs reconciliation pass.
 - [#406](https://github.com/murmurations-ai/murmurations-harness/issues/406) — privilege amplification via operator-supplied permissive `default-agent/role.md` template.
 
 ## [0.8.0] - 2026-05-19
