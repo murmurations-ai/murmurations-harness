@@ -14,6 +14,7 @@ import {
   makeGroupId,
   makeWakeId,
   parseWakeActions,
+  pathMatchesGlob,
   type AgentResult,
   type CostBudget,
   type ResolvedModel,
@@ -1100,6 +1101,63 @@ describe("validateWake", () => {
     const v = validateWake(mkCtx(), emptyResult, []);
     expect(v.obligationStatus).toBeUndefined();
     expect(v.unmetRequiredOutputs).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pathMatchesGlob — per-segment glob semantics (harness#376)
+// ---------------------------------------------------------------------------
+
+describe("pathMatchesGlob", () => {
+  it("single * stays within one segment", () => {
+    expect(pathMatchesGlob("foo.md", "*.md")).toBe(true);
+    expect(pathMatchesGlob("agents/x/role.md", "agents/*/role.md")).toBe(true);
+    // The v0.8.0 over-match this fix targets: single * must NOT cross `/`.
+    expect(pathMatchesGlob("agents/x/y/role.md", "agents/*/role.md")).toBe(false);
+    expect(pathMatchesGlob("foo/bar.md", "*.md")).toBe(false);
+  });
+
+  it("** crosses segments, including zero segments", () => {
+    expect(pathMatchesGlob("drafts/bar.md", "drafts/**/*.md")).toBe(true); // zero mid segments
+    expect(pathMatchesGlob("drafts/foo/bar.md", "drafts/**/*.md")).toBe(true);
+    expect(pathMatchesGlob("drafts/a/b/c/bar.md", "drafts/**/*.md")).toBe(true);
+    expect(pathMatchesGlob("docs/legal/refund.md", "drafts/**/*.md")).toBe(false);
+  });
+
+  it("trailing ** matches everything beneath the prefix", () => {
+    expect(pathMatchesGlob("drafts/foo/bar.md", "drafts/**")).toBe(true);
+    expect(pathMatchesGlob("drafts/foo", "drafts/**")).toBe(true);
+    expect(pathMatchesGlob("docs/foo", "drafts/**")).toBe(false);
+  });
+
+  it("leading **/ matches at any depth", () => {
+    expect(pathMatchesGlob("foo.md", "**/*.md")).toBe(true);
+    expect(pathMatchesGlob("a/b/foo.md", "**/*.md")).toBe(true);
+  });
+
+  it("? matches a single non-slash character", () => {
+    expect(pathMatchesGlob("v1.md", "v?.md")).toBe(true);
+    expect(pathMatchesGlob("v12.md", "v?.md")).toBe(false);
+    expect(pathMatchesGlob("v/.md", "v?.md")).toBe(false);
+  });
+
+  it("character classes match one segment character; [!...] negates", () => {
+    expect(pathMatchesGlob("v1.md", "v[0-9].md")).toBe(true);
+    expect(pathMatchesGlob("va.md", "v[0-9].md")).toBe(false);
+    expect(pathMatchesGlob("va.md", "v[!0-9].md")).toBe(true);
+    // Negated class still cannot bridge a segment boundary.
+    expect(pathMatchesGlob("v/.md", "v[!0-9].md")).toBe(false);
+  });
+
+  it("exact match with no wildcards, and dots are literal", () => {
+    expect(pathMatchesGlob("harness.yaml", "harness.yaml")).toBe(true);
+    expect(pathMatchesGlob("harnessXyaml", "harness.yaml")).toBe(false); // `.` is literal, not any-char
+  });
+
+  it("a malformed pattern reports no match rather than throwing", () => {
+    expect(() => pathMatchesGlob("a/b.md", "a/[b.md")).not.toThrow();
+    // unterminated `[` is treated as a literal `[`, so it simply won't match
+    expect(pathMatchesGlob("a/b.md", "a/[b.md")).toBe(false);
   });
 });
 

@@ -859,27 +859,107 @@ const extractGithubBlobPaths = (text: string): readonly string[] => {
 };
 
 /**
- * Prefix + suffix glob matcher.
+ * Translate a glob to the source of an anchored regular expression with
+ * conventional, segment-aware path semantics. Internal helper for
+ * {@link pathMatchesGlob}.
  *
- *   - The literal text before the first `*` is the required prefix.
- *   - The literal text after the last `*` is the required suffix.
- *   - Anything between matches arbitrary path content.
- *   - A glob with no `*` matches only via exact equality.
+ *   - `*`     matches a run of characters within a single path segment
+ *             (never crosses a slash).
+ *   - `**`    matches across segments. A double-star followed by a slash
+ *             consumes zero or more leading segments (so `a/(**)/b` matches
+ *             `a/b`, `a/x/b`, `a/x/y/b`); a trailing/standalone double-star
+ *             matches everything beneath, including slashes.
+ *   - `?`     matches a single non-slash character.
+ *   - `[...]` is a character class over a single character, never `/`;
+ *             `[!...]` / `[^...]` negate. A literal `]` may lead the class.
+ *   - everything else matches literally (regex metacharacters escaped).
+ */
+const globToRegExpSource = (glob: string): string => {
+  let out = "^";
+  let i = 0;
+  const n = glob.length;
+  while (i < n) {
+    const c = glob[i] ?? "";
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        if (glob[i + 2] === "/") {
+          // `**/` → zero or more whole leading segments.
+          out += "(?:[^/]+/)*";
+          i += 3;
+        } else {
+          // trailing/standalone `**` → anything, including `/`.
+          out += ".*";
+          i += 2;
+        }
+      } else {
+        // single `*` → any run within one segment.
+        out += "[^/]*";
+        i += 1;
+      }
+    } else if (c === "?") {
+      out += "[^/]";
+      i += 1;
+    } else if (c === "[") {
+      let j = i + 1;
+      let negate = false;
+      if (glob[j] === "!" || glob[j] === "^") {
+        negate = true;
+        j += 1;
+      }
+      let cls = "";
+      // A `]` immediately after `[`/`[!` is a literal member, not the close.
+      if (glob[j] === "]") {
+        cls += "\\]";
+        j += 1;
+      }
+      while (j < n && glob[j] !== "]") {
+        const cc = glob[j] ?? "";
+        cls += /[\\\]^]/.test(cc) ? "\\" + cc : cc;
+        j += 1;
+      }
+      if (j >= n) {
+        // Unterminated class — treat the `[` as a literal.
+        out += "\\[";
+        i += 1;
+      } else {
+        // Always exclude `/` so a class can't bridge a segment boundary.
+        out += "[" + (negate ? "^/" : "") + cls + "]";
+        i = j + 1;
+      }
+    } else {
+      out += /[.+^${}()|\\]/.test(c) ? "\\" + c : c;
+      i += 1;
+    }
+  }
+  return out + "$";
+};
+
+/**
+ * Per-segment glob matcher (harness#376 — v0.8.1 glob semantics).
+ *
+ * Replaces the v0.8.0 prefix+suffix matcher, which treated the text after
+ * the last `*` as a required suffix and therefore over-matched across
+ * segment boundaries: under the old matcher `agents/*\/role.md` matched
+ * `agents/x/y/role.md` because the `/role.md` suffix ignored intervening
+ * segments. The new matcher distinguishes single-segment `*` from
+ * multi-segment `**` (see {@link globToRegExpSource}).
  *
  * Examples:
- *   `drafts/**\/*.md` → prefix `drafts/`, suffix `.md`  → matches `drafts/foo/bar.md`
- *   `agents/*\/role.md` → prefix `agents/`, suffix `/role.md` → matches `agents/x/role.md`
- *   `*.md` → prefix ``, suffix `.md` → matches `foo.md`
+ *   `drafts/**\/*.md`   → matches `drafts/bar.md`, `drafts/foo/bar.md`
+ *   `agents/*\/role.md` → matches `agents/x/role.md`, NOT `agents/x/y/role.md`
+ *   `*.md`              → matches `foo.md`, NOT `foo/bar.md`
  */
-const pathMatchesGlob = (actual: string, glob: string): boolean => {
+export const pathMatchesGlob = (actual: string, glob: string): boolean => {
   if (glob === actual) return true;
-  const firstStar = glob.indexOf("*");
-  if (firstStar === -1) return false;
-  const prefix = glob.slice(0, firstStar);
-  if (!actual.startsWith(prefix)) return false;
-  const lastStar = glob.lastIndexOf("*");
-  const suffix = glob.slice(lastStar + 1);
-  return suffix.length === 0 || actual.endsWith(suffix);
+  let re: RegExp;
+  try {
+    re = new RegExp(globToRegExpSource(glob));
+  } catch {
+    // Defensive: a malformed pattern must not throw during validation.
+    // Exact-equality was already checked above, so report no match.
+    return false;
+  }
+  return re.test(actual);
 };
 
 /**
