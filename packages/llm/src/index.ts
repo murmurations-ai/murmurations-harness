@@ -64,7 +64,7 @@ export {
   LLMValidationError,
 } from "./errors.js";
 export type { LLMClientErrorCode, RateLimitScope } from "./errors.js";
-export { formatLLMError } from "./errors.js";
+export { formatLLMError, isResumeSessionMissing } from "./errors.js";
 
 // Subscription-CLI provider family (ADR-0034)
 export {
