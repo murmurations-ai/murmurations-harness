@@ -305,6 +305,33 @@ const providerForbiddenHints = (provider: string): readonly string[] => {
 };
 
 /**
+ * Pattern the claude CLI prints to stderr when `--resume <id>` targets a
+ * session that no longer exists in its local store (daemon restart, session
+ * GC, or a different machine). The trailing UUID varies, so match the stable
+ * prefix case-insensitively.
+ */
+const RESUME_SESSION_MISSING_RE = /no conversation found with session id/i;
+
+/**
+ * True when an LLM error indicates a subscription-CLI resume target is gone
+ * (harness#424). A caller that passed a `sessionId` (and therefore a
+ * `--resume` flag) can use this to drop the stale id and retry with a fresh
+ * session. Checks both the error message and its `cause` (the typed
+ * `SubprocessError` carries the scrubbed stderr). Callers SHOULD gate the
+ * retry on having actually passed a sessionId, so an unrelated non-zero exit
+ * that happens to contain this text can't clear a still-valid session.
+ */
+export const isResumeSessionMissing = (error: LLMClientError): boolean => {
+  if (RESUME_SESSION_MISSING_RE.test(error.message)) return true;
+  const cause: unknown = error.cause;
+  const causeMessage =
+    typeof cause === "object" && cause !== null
+      ? (cause as { message?: unknown }).message
+      : undefined;
+  return typeof causeMessage === "string" && RESUME_SESSION_MISSING_RE.test(causeMessage);
+};
+
+/**
  * Best-effort scrub of the raw token from a cause's message. Primary
  * defense is that the token never enters any error path we construct;
  * this is belt-and-suspenders for fetch implementations that somehow

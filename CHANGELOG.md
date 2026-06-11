@@ -13,6 +13,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - **Minimum Node.js raised to 22.** Node 20 reached end-of-life (April 2026) and pnpm 11 — required for OIDC trusted publishing (below) — drops Node < 22.13. The published packages now declare `engines.node >= 22.0.0`; the CI build/test matrix runs Node 22.x only; the dev/build toolchain (root `engines.node`) requires `>= 22.13.0` (pnpm 11's floor).
 
+### Fixed
+
+- **Spirit no longer hard-fails on a stale resume session** ([#424](https://github.com/murmurations-ai/murmurations-harness/issues/424)). After a daemon restart (or on a fresh machine), the Spirit replayed a persisted subscription-CLI `sessionId` as `claude --resume <id>`; when that CLI session no longer existed it failed with `No conversation found with session ID` and surfaced a raw `internal` error. The Spirit client now detects that case (new `isResumeSessionMissing` helper in `@murmurations-ai/llm`), drops the stale id, and retries **once** without `--resume` — a fresh session that gets the full history — then persists the new id. Gated on having actually passed a session id (so unrelated failures never clear a valid session) and capped at one retry.
+
 ### Internals
 
 - **CI: pnpm bumped 10.33.0 → 11.5.3** so `release.yml` can actually perform npm OIDC Trusted Publishing. pnpm 10.x delegated `pnpm publish` to the npm CLI and never ran the OIDC token exchange itself (the v0.9.0 publish failed with `ENEEDAUTH`); the native exchange landed in pnpm 11.0.7 and the setup-node empty-token fix in 11.1.3. Pinned in lockstep across `package.json` `packageManager`, `ci.yml`, and `release.yml`. `pnpm-workspace.yaml` now allows the `koffi` and `protobufjs` build scripts (pnpm 11 ignores dependency build scripts by default). `pnpm-lock.yaml` is unchanged (`lockfileVersion 9.0`). Operator step still required before the next tag: confirm the per-package Trusted Publisher bindings on npmjs.com.

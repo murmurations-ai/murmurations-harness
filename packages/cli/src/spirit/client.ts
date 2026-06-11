@@ -23,6 +23,7 @@ import {
   createLLMClient,
   createSubscriptionCliClient,
   formatLLMError,
+  isResumeSessionMissing,
   ProviderRegistry,
   type LLMClient,
   type LLMClientConfig,
@@ -88,6 +89,13 @@ export interface SpiritTurnResult {
 export interface SpiritInitOptions {
   readonly rootDir: string;
   readonly send: Send;
+  /**
+   * Test seam: inject a pre-built {@link LLMClient} to bypass real
+   * provider/token/MCP construction. Production callers never set this; the
+   * provider is still read from harness.yaml so the resume/tool behavior
+   * matches what the injected client would see in production.
+   */
+  readonly llmClient?: LLMClient;
 }
 
 export class SpiritUnavailableError extends Error {
@@ -198,7 +206,13 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
   // written at attach time; called in close() on clean detach.
   let mcpConfigCleanup: (() => void) | undefined;
 
-  if (harness.llm.provider === "subscription-cli") {
+  if (opts.llmClient !== undefined) {
+    // Test seam: use the injected client; still honor the configured provider
+    // so subscription-cli resume behavior (sessionId → `--resume`) is exercised.
+    client = opts.llmClient;
+    model = harness.llm.model ?? DEFAULT_CLI_MODEL[harness.llm.cli ?? "claude"];
+    useApiTools = harness.llm.provider !== "subscription-cli";
+  } else if (harness.llm.provider === "subscription-cli") {
     const cli: SubscriptionCli = harness.llm.cli ?? "claude";
     model = harness.llm.model ?? DEFAULT_CLI_MODEL[cli];
 
@@ -285,24 +299,41 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
     await store.append({ role: "user", content: message, ts: userTs });
 
     const maxSteps = harness.spirit.maxSteps;
-    // When sessionId is present, the subscription-CLI adapter uses
-    // `--resume <id>` and only the latest user message is the
-    // material new context (the rest lives in the CLI's session
-    // cache). Send the trailing user message only, in that case;
-    // first turn sends full history. Direct API path ignores
-    // sessionId and gets the full history regardless.
-    const lastMessage = history[history.length - 1];
-    const messages: readonly LLMMessage[] =
-      sessionId !== undefined && lastMessage ? [lastMessage] : history;
-    const result = await client.complete({
-      model,
-      messages,
-      systemPromptOverride: systemPrompt,
-      maxOutputTokens: 4096,
-      temperature: 0.2,
-      ...(sessionId !== undefined ? { sessionId } : {}),
-      ...(tools ? { tools, maxSteps } : {}),
-    });
+    // One completion attempt against the CURRENT sessionId. When sessionId
+    // is present, the subscription-CLI adapter uses `--resume <id>` and only
+    // the latest user message is the material new context (the rest lives in
+    // the CLI's session cache); first turn / fresh session sends the full
+    // history. The direct API path ignores sessionId and gets full history.
+    const runComplete = (): ReturnType<typeof client.complete> => {
+      const lastMessage = history[history.length - 1];
+      const messages: readonly LLMMessage[] =
+        sessionId !== undefined && lastMessage ? [lastMessage] : history;
+      return client.complete({
+        model,
+        messages,
+        systemPromptOverride: systemPrompt,
+        maxOutputTokens: 4096,
+        temperature: 0.2,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        ...(tools ? { tools, maxSteps } : {}),
+      });
+    };
+
+    let result = await runComplete();
+
+    // harness#424: a persisted CLI session can vanish (daemon restart, claude
+    // session GC, different machine), so `--resume <id>` fails hard with "No
+    // conversation found with session ID". Recover instead of surfacing a raw
+    // internal error: drop the stale id and retry ONCE without `--resume` —
+    // now a fresh session that gets the full history (sessionId is cleared, so
+    // runComplete() sends `history`, not just the trailing message). Gated on
+    // having actually passed a sessionId so an unrelated failure can't clear a
+    // valid session; capped at one retry so a genuinely broken CLI can't loop.
+    if (!result.ok && sessionId !== undefined && isResumeSessionMissing(result.error)) {
+      sessionId = undefined;
+      await store.setSessionId(undefined);
+      result = await runComplete();
+    }
 
     if (!result.ok) {
       history.pop();

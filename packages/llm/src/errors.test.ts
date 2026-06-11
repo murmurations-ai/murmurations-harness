@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 
 import {
   formatLLMError,
+  isResumeSessionMissing,
   LLMForbiddenError,
+  LLMInternalError,
   LLMRateLimitError,
   LLMUnauthorizedError,
 } from "./errors.js";
@@ -48,5 +50,47 @@ describe("formatLLMError", () => {
     const err = new LLMForbiddenError("openai", "nope", { requestUrl: "x" });
     const out = formatLLMError(err);
     expect(out).toMatch(/^LLM call failed\n/);
+  });
+});
+
+describe("isResumeSessionMissing (harness#424)", () => {
+  const internal = (message: string, cause?: unknown): LLMInternalError =>
+    new LLMInternalError("claude-cli", message, {
+      requestUrl: "subprocess://claude",
+      ...(cause !== undefined ? { cause } : {}),
+    });
+
+  it("matches the claude resume-missing stderr on the error message", () => {
+    expect(
+      isResumeSessionMissing(
+        internal("No conversation found with session ID: 44f95226-4fee-4bbe-bea0-dfada5e9d77c"),
+      ),
+    ).toBe(true);
+  });
+
+  it("is case-insensitive and ignores the trailing id", () => {
+    expect(isResumeSessionMissing(internal("no conversation found with session id: abc"))).toBe(
+      true,
+    );
+  });
+
+  it("matches when the text is on the cause, not the top-level message", () => {
+    const err = internal("in-process runner threw", {
+      message: "No conversation found with session ID: deadbeef",
+      kind: "spawn-error",
+    });
+    expect(isResumeSessionMissing(err)).toBe(true);
+  });
+
+  it("does NOT match unrelated failures (auth, rate limit, generic exit 1)", () => {
+    expect(isResumeSessionMissing(internal("invalid API key"))).toBe(false);
+    expect(isResumeSessionMissing(internal("claude exited with code 1"))).toBe(false);
+    expect(
+      isResumeSessionMissing(new LLMUnauthorizedError("anthropic", "bad key", { requestUrl: "x" })),
+    ).toBe(false);
+  });
+
+  it("does not throw on a non-object cause", () => {
+    expect(isResumeSessionMissing(internal("boom", "a string cause"))).toBe(false);
   });
 });
