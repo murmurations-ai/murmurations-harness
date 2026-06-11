@@ -270,10 +270,15 @@ export const initSpiritSession = async (opts: SpiritInitOptions): Promise<Spirit
   const systemPrompt = await buildSpiritSystemPrompt(rootDir);
   const tools = useApiTools ? buildSpiritTools({ rootDir, send }) : undefined;
 
-  // v0.7.0 [N]: per-murmuration Spirit conversation persistence.
-  // Same ConversationStore the daemon uses for J2 (agent wake-to-wake
-  // resume); reused at the REPL boundary so re-attach picks up where
-  // the prior attach left off. Files live at:
+  // v0.7.0 [N]: per-murmuration Spirit conversation persistence. The
+  // ConversationStore (in @murmurations-ai/core) was designed for daemon
+  // wake-to-wake session resume (J2), but that is NOT wired into the agent
+  // wake path today — the runner rebuilds full context from signals each
+  // wake and never passes a sessionId. The store's only live consumer is
+  // this REPL boundary, so re-attach picks up where the prior attach left
+  // off. (If J2 is ever connected, reuse isResumeSessionMissing() for the
+  // same stale-session recovery this client does — see harness#424/#426.)
+  // Files live at:
   //   <root>/.murmuration/spirit/conversation.jsonl  — turn log
   //   <root>/.murmuration/spirit/session.json        — captured sessionId
   const spiritDir = join(rootDir, ".murmuration", "spirit");
