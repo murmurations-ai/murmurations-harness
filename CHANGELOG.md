@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - **Multiple cron wake schedules per agent** ([#420](https://github.com/murmurations-ai/murmurations-harness/issues/420)). `wake_schedule` in `role.md` now accepts an array of trigger objects in addition to the single-object form, so an agent can wake on more than one schedule — e.g. a facilitator that runs a `setup` pass before its circle's domain agents and a `summary` pass after. Each entry takes an optional `label` (surfaced in logs). The scheduler gains a `multi` `WakeTrigger` that fans out into one independently-armed, independently-re-arming timer per sub-trigger; `unschedule` clears them all. Single-object `wake_schedule` is unchanged.
 
+### Changed
+
+- **Minimum Node.js raised to 22.** Node 20 reached end-of-life (April 2026) and pnpm 11 — required for OIDC trusted publishing (below) — drops Node < 22.13. The published packages now declare `engines.node >= 22.0.0`; the CI build/test matrix runs Node 22.x only; the dev/build toolchain (root `engines.node`) requires `>= 22.13.0` (pnpm 11's floor).
+
+### Internals
+
+- **CI: pnpm bumped 10.33.0 → 11.5.3** so `release.yml` can actually perform npm OIDC Trusted Publishing. pnpm 10.x delegated `pnpm publish` to the npm CLI and never ran the OIDC token exchange itself (the v0.9.0 publish failed with `ENEEDAUTH`); the native exchange landed in pnpm 11.0.7 and the setup-node empty-token fix in 11.1.3. Pinned in lockstep across `package.json` `packageManager`, `ci.yml`, and `release.yml`. `pnpm-workspace.yaml` now allows the `koffi` and `protobufjs` build scripts (pnpm 11 ignores dependency build scripts by default). `pnpm-lock.yaml` is unchanged (`lockfileVersion 9.0`). Operator step still required before the next tag: confirm the per-package Trusted Publisher bindings on npmjs.com.
+
 ## [0.9.0] - 2026-06-10
 
 **Operational hygiene, agent-lifecycle reconciliation, and contract-validation hardening.** A cycle of operator-visible diagnostics and correctness fixes for the silent failure modes that bite long-running murmurations: stale GitHub issues that bloat every watching agent's per-wake context, agent directories that wake on the default-agent template after their `role.md` was removed (and the `state.json` tombstones they leave behind), subscription-CLI agents whose declared file writes silently no-op'd in headless mode, and contract obligations that could be satisfied by a path the operator never declared. Behavioral validation remains warning-only — its promotion to hard-fail, and the `verifiedActions` evidence channel it depends on, are deferred to the next release ([#376](https://github.com/murmurations-ai/murmurations-harness/issues/376)).

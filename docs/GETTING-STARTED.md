@@ -8,7 +8,7 @@ This guide walks you from zero to a running meeting in under 10 minutes. No prio
 
 ## Prerequisites
 
-- **Node.js 20+** (`node --version`)
+- **Node.js 22+** (`node --version`)
 - **npm** (ships with Node)
 - **An LLM**, one of:
   - **A subscription CLI you're already paying for** (recommended for new operators) — Claude Code, OpenAI Codex, or Gemini CLI. `murmuration init` auto-detects them. Skip the API-key step entirely. $0 marginal cost.
