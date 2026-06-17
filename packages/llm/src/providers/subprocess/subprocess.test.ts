@@ -26,9 +26,12 @@ const minimalRequest = (overrides: Partial<LLMRequest> = {}): LLMRequest => ({
 describe("ClaudeCliAdapter.buildFlags", () => {
   const adapter = new ClaudeCliAdapter();
 
-  it("defaults to restricted mode and omits --dangerously-skip-permissions", () => {
+  it("defaults to restricted mode, requests stream-json, omits --dangerously-skip-permissions", () => {
     const flags = adapter.buildFlags(minimalRequest());
-    expect(flags).toEqual(["-p", "--output-format", "json"]);
+    // stream-json (+ required --verbose) so tool_use/tool_result events are
+    // emitted; plain `json` returns only the final result (harness#430).
+    expect(flags).toEqual(["-p", "--output-format", "stream-json", "--verbose"]);
+    expect(flags).not.toContain("--dangerously-skip-permissions");
   });
 
   it("emits --dangerously-skip-permissions only in trusted mode", () => {
@@ -114,6 +117,89 @@ describe("ClaudeCliAdapter — session resume (harness#293)", () => {
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.value.sessionId).toBeUndefined();
+  });
+});
+
+describe("ClaudeCliAdapter — tool-call capture (harness#430)", () => {
+  const adapter = new ClaudeCliAdapter();
+
+  // A realistic stream-json transcript: assistant emits a tool_use, the next
+  // user event carries the tool_result, then the final result event. Shapes
+  // match the live `claude -p --output-format stream-json --verbose` probe.
+  const toolStream = (isError: boolean): string =>
+    [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "s1" }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          model: "claude-sonnet-4-6",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_1",
+              name: "mcp__murmuration__create_issue_comment",
+              input: { issueNumber: 42, body: "ack" },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_1",
+              is_error: isError,
+              content: isError ? "permission denied" : "comment posted",
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        result: "done",
+        session_id: "s1",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      }),
+    ].join("\n");
+
+  it("captures a tool_use and marks it ok when its tool_result is not an error", () => {
+    const out = adapter.parseOutput(toolStream(false));
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.value.toolCalls).toHaveLength(1);
+    const call = out.value.toolCalls?.[0];
+    expect(call?.name).toBe("mcp__murmuration__create_issue_comment");
+    expect(call?.args).toMatchObject({ issueNumber: 42 });
+    expect(call?.ok).toBe(true);
+  });
+
+  it("marks the tool call ok=false when its tool_result is an error", () => {
+    const out = adapter.parseOutput(toolStream(true));
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.value.toolCalls?.[0]?.ok).toBe(false);
+  });
+
+  it("leaves ok undefined when a tool_use has no matching tool_result", () => {
+    const stream = [
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id: "toolu_x", name: "read_issue", input: {} }] },
+      }),
+      JSON.stringify({
+        type: "result",
+        result: "ok",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    ].join("\n");
+    const out = adapter.parseOutput(stream);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.value.toolCalls?.[0]?.name).toBe("read_issue");
+    expect(out.value.toolCalls?.[0]?.ok).toBeUndefined();
   });
 });
 

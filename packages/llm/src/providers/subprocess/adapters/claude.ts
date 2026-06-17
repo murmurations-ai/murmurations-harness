@@ -4,8 +4,12 @@
  * Subscription auth via Claude Pro/Max OAuth (`claude /login`).
  * ADR-0034 reference adapter — the spike target.
  *
- * Open items (BU-1, BU-2 from ADR-0034):
- *   - BU-1: tool-use blocks in --output-format json output
+ * Runs with `--output-format stream-json --verbose`: the CLI emits an NDJSON
+ * event stream (system / assistant / user / result) rather than a single
+ * result object, which is what makes `tool_use` + `tool_result` blocks visible
+ * (harness#430 — `--output-format json` emits none of those events).
+ *
+ * Open item (BU-2 from ADR-0034):
  *   - BU-2: exact failure mode when not authenticated (exit code? stdin prompt?)
  */
 
@@ -14,7 +18,7 @@ import { promisify } from "node:util";
 
 import { scrubValuePatterns } from "@murmurations-ai/core";
 
-import type { LLMRequest, LLMResponse, Result } from "../../../types.js";
+import type { LLMRequest, LLMResponse, Result, ToolCallResult } from "../../../types.js";
 
 import type {
   AuthError,
@@ -27,17 +31,19 @@ import type {
 const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
-// Claude CLI JSON event shapes (--output-format json)
+// Claude CLI event shapes (--output-format stream-json --verbose)
 // ---------------------------------------------------------------------------
 //
-// Claude CLI emits one JSON object per event, newline-separated:
+// Claude CLI emits one JSON object per event, newline-separated (NDJSON):
 //
 //   {"type":"system","subtype":"init","session_id":"...","tools":[...]}
-//   {"type":"assistant","message":{"content":[{"type":"text","text":"..."}],...}}
+//   {"type":"assistant","message":{"content":[{"type":"tool_use","id":"...","name":"...","input":{...}}],...}}
+//   {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"...","is_error":false,"content":...}]}}
 //   {"type":"result","subtype":"success","result":"...","cost_usd":...,"usage":{...}}
 //
-// We scan for `type:"result"` (final answer + tokens + cost) and the most
-// recent `type:"assistant"` (model id + tool-use content blocks).
+// We scan for `type:"result"` (final answer + tokens + cost), the most recent
+// `type:"assistant"` (model id + tool_use blocks), and `type:"user"` events'
+// tool_result blocks (matched to their tool_use by `tool_use_id`).
 
 interface ClaudeUsage {
   readonly input_tokens?: number;
@@ -49,9 +55,13 @@ interface ClaudeUsage {
 interface ClaudeContentBlock {
   readonly type: "text" | "tool_use" | "tool_result";
   readonly text?: string;
-  readonly id?: string;
+  readonly id?: string; // tool_use: the call id (referenced by a later tool_result)
   readonly name?: string;
   readonly input?: unknown;
+  // tool_result blocks (carried on `user` events in the agentic loop):
+  readonly tool_use_id?: string; // links back to the tool_use `id`
+  readonly is_error?: boolean; // true when the tool call failed
+  readonly content?: unknown; // the tool's returned content
 }
 
 interface ClaudeJsonEvent {
@@ -134,14 +144,19 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
   }
 
   /**
-   * Build CLI argv for `claude -p --output-format json …`.
+   * Build CLI argv for `claude -p --output-format stream-json --verbose …`.
    * ADR-0034 D1: never includes prompt content; prompt is delivered via stdin.
    *
    * v0.7.0 (harness#293): when `req.sessionId` is set, emits
    * `--resume <id>` so the CLI keeps prompt cache warm across turns.
    */
   public buildFlags(req: LLMRequest): readonly string[] {
-    const flags: string[] = ["-p", "--output-format", "json"];
+    // stream-json (NDJSON) — not plain `json`, which returns ONLY the final
+    // result object and emits no `assistant`/`tool_use`/`user`/`tool_result`
+    // events. We need those events for tool-call visibility (harness#430) and
+    // verifiedActions. The CLI requires `--verbose` alongside stream-json in
+    // `-p` mode. parseOutput already consumes the NDJSON stream.
+    const flags: string[] = ["-p", "--output-format", "stream-json", "--verbose"];
     if (this.#permissionMode === "trusted") {
       flags.push("--dangerously-skip-permissions");
     }
@@ -222,29 +237,45 @@ export class ClaudeCliAdapter implements SubprocessLLMAdapter {
       };
     }
 
+    // tool_result blocks ride on `user` events in the agentic loop and
+    // reference the originating call via `tool_use_id`. Collect outcomes first
+    // (success = !is_error) so each tool_use can be annotated with whether it
+    // actually landed — the signal verifiedActions (#364B) needs.
+    const outcomeById = new Map<string, { ok: boolean; content: unknown }>();
+    for (const e of events) {
+      for (const block of e.message?.content ?? []) {
+        if (block.type === "tool_result" && typeof block.tool_use_id === "string") {
+          outcomeById.set(block.tool_use_id, {
+            ok: block.is_error !== true,
+            content: block.content ?? null,
+          });
+        }
+      }
+    }
+
     // Accumulate tool_use blocks from ALL assistant events — not just the last.
     // In multi-turn agentic sessions claude-cli emits one assistant event per
     // turn; tool calls in early turns would be invisible if we only scanned
-    // lastAssistant (harness#295).
+    // lastAssistant (harness#295). Each is matched to its tool_result outcome.
     let lastAssistant: ClaudeJsonEvent | undefined;
-    const toolCalls: { name: string; args: Record<string, unknown>; result: unknown }[] = [];
+    const toolCalls: ToolCallResult[] = [];
     let assistantEventCount = 0;
     for (const e of events) {
       if (e.type === "assistant") {
         lastAssistant = e;
         assistantEventCount++;
-        if (e.message?.content) {
-          for (const block of e.message.content) {
-            if (block.type === "tool_use" && typeof block.name === "string") {
-              toolCalls.push({
-                name: block.name,
-                args:
-                  typeof block.input === "object" && block.input !== null
-                    ? (block.input as Record<string, unknown>)
-                    : {},
-                result: null,
-              });
-            }
+        for (const block of e.message?.content ?? []) {
+          if (block.type === "tool_use" && typeof block.name === "string") {
+            const outcome = typeof block.id === "string" ? outcomeById.get(block.id) : undefined;
+            toolCalls.push({
+              name: block.name,
+              args:
+                typeof block.input === "object" && block.input !== null
+                  ? (block.input as Record<string, unknown>)
+                  : {},
+              result: outcome?.content ?? null,
+              ...(outcome !== undefined ? { ok: outcome.ok } : {}),
+            });
           }
         }
       }
