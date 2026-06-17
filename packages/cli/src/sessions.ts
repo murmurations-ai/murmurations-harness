@@ -8,7 +8,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve, join } from "node:path";
+import { basename, resolve, join } from "node:path";
 
 import { findRunningSessionByName, listRunningSessionNamesSync } from "./running-sessions.js";
 
@@ -142,18 +142,71 @@ export const listSessions = async (): Promise<void> => {
   }
 };
 
+/** Daemon bin name (npm global) and dev entrypoints (`node …/bin.js start`). */
+const isDaemonBin = (token: string): boolean => {
+  const b = basename(token);
+  return b === "murmuration" || /^bin\.(c?js|mjs|ts)$/.test(b);
+};
+
 /**
- * Scan the OS process table for `murmuration start --root <X>`
- * processes whose root isn't in `knownRoots`. Used to surface orphan
- * daemons in `murmuration list`. Best-effort — returns an empty list
- * if `ps` is unavailable or its output can't be parsed.
+ * Parse `ps` output (one `<pid> <args>` per line) into the murmuration
+ * daemon processes it contains. Exported for unit tests.
  *
- * Captured `--root` values are read from another process's command
- * line, which any local user can populate with arbitrary bytes —
- * including ANSI escape sequences that would inject controls into the
- * operator's terminal when the row is printed. We reject any captured
- * root that contains control characters and prefer `args=` (POSIX)
- * over `command=` (BSD-only) when both are available.
+ * The match is deliberately narrow (harness#422): a daemon is the process
+ * that actually *runs* the CLI — `murmuration start …` or `node …/murmuration
+ * start …` (or a dev `node …/bin.js start …`). It is NOT a shell wrapper
+ * (`zsh -c "murmuration start …"`), the `tee` writing to a path that contains
+ * `/.murmuration/start-console.log`, or any other process whose argv merely
+ * contains the words. The previous substring matcher (`murmuration … start`)
+ * flagged all of those, including coding-agent commands and the daemon's own
+ * `tee`/wrapper — surfacing phantom "orphans" with unexpanded roots like
+ * `…/$CW`.
+ *
+ * `--root` values come from another process's command line, which any local
+ * user can populate with arbitrary bytes. Roots containing control bytes
+ * (terminal-injection) or an unexpanded shell token (`$`/backtick) are
+ * rejected. `currentPid` is excluded so the scanner never reports itself.
+ */
+export const parseDaemonProcesses = (
+  psStdout: string,
+  currentPid: number,
+): readonly { readonly pid: number; readonly root: string }[] => {
+  const out: { pid: number; root: string }[] = [];
+  // The `=`-suffix `ps` form has no header; the fallback `-o pid,args` form
+  // has one. Any line whose first token isn't a digit is skipped, so the
+  // header is ignored either way.
+  for (const line of psStdout.split("\n")) {
+    const m = /^\s*(\d+)\s+(.+)$/.exec(line);
+    if (m === null) continue;
+    const pid = Number(m[1] ?? "");
+    if (Number.isNaN(pid) || pid === currentPid) continue;
+    const cmd = m[2] ?? "";
+    const tokens = cmd.split(/\s+/).filter((t) => t.length > 0);
+    const exe = tokens[0] ?? "";
+    const isDaemon =
+      // Direct: `murmuration start …`
+      (isDaemonBin(exe) && tokens[1] === "start") ||
+      // Via node: `node …/murmuration start …`
+      (/^node(\.exe)?$/.test(basename(exe)) &&
+        isDaemonBin(tokens[1] ?? "") &&
+        tokens[2] === "start");
+    if (!isDaemon) continue;
+    const captured = /--root\s+(\S+)/.exec(cmd)?.[1];
+    if (captured === undefined || captured.length === 0) continue;
+    // Reject control bytes (terminal-injection) and unexpanded shell tokens
+    // (a real path never contains `$` or a backtick).
+    if (CONTROL_CHAR_RE.test(captured) || /[$`]/.test(captured)) continue;
+    out.push({ pid, root: resolve(captured) });
+  }
+  return out;
+};
+
+/**
+ * Scan the OS process table for murmuration daemon processes whose root
+ * isn't in `knownRoots`. Used to surface orphan daemons in `murmuration
+ * list`. Best-effort — returns an empty list if `ps` is unavailable or its
+ * output can't be parsed. Parsing + the narrow daemon match live in
+ * {@link parseDaemonProcesses}.
  */
 const findOrphanDaemons = async (
   knownRoots: readonly string[],
@@ -161,8 +214,7 @@ const findOrphanDaemons = async (
   const { spawnSync } = await import("node:child_process");
   // POSIX-portable selector. Some non-GNU `ps` implementations reject the
   // `=`-suffix shorthand; we fall back to plain header output if needed.
-  const psArgs = ["-A", "-o", "pid=,args="];
-  let result = spawnSync("ps", psArgs, { encoding: "utf8" });
+  let result = spawnSync("ps", ["-A", "-o", "pid=,args="], { encoding: "utf8" });
   if (result.status !== 0) {
     result = spawnSync("ps", ["-A", "-o", "pid,args"], { encoding: "utf8" });
   }
@@ -170,32 +222,8 @@ const findOrphanDaemons = async (
   const stdoutRaw = typeof result.stdout === "string" ? result.stdout : "";
   if (stdoutRaw.length === 0) return [];
 
-  const myPid = process.pid;
   const known = new Set(knownRoots.map((r) => resolve(r)));
-  const orphans: { pid: number; root: string }[] = [];
-  // First line of the fallback (`-o pid,args` without `=`) is the header.
-  // The `=`-suffix form has no header. Defensively treat any line whose
-  // first token isn't a digit as a header and skip it.
-  for (const line of stdoutRaw.split("\n")) {
-    const m = /^\s*(\d+)\s+(.+)$/.exec(line);
-    if (m === null) continue;
-    const pidStr = m[1] ?? "";
-    const cmd = m[2] ?? "";
-    const pid = Number(pidStr);
-    if (Number.isNaN(pid) || pid === myPid) continue;
-    if (!/\bmurmuration\b.*\bstart\b/.test(cmd)) continue;
-    const rootMatch = /--root\s+(\S+)/.exec(cmd);
-    if (rootMatch === null) continue;
-    const captured = rootMatch[1];
-    if (captured === undefined || captured.length === 0) continue;
-    // Reject anything with control bytes (ANSI escape, CR, LF, etc.) so a
-    // malicious process can't terminal-inject via its --root argv.
-    if (CONTROL_CHAR_RE.test(captured)) continue;
-    const root = resolve(captured);
-    if (known.has(root)) continue;
-    orphans.push({ pid, root });
-  }
-  return orphans;
+  return parseDaemonProcesses(stdoutRaw, process.pid).filter((d) => !known.has(d.root));
 };
 
 /** Update heartbeat for a running daemon. Called periodically by the daemon. */
