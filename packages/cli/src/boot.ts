@@ -2350,13 +2350,19 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
   // Shared status builder for socket + HTTP
   // buildStatus is now in DaemonCommandExecutor
 
-  const daemonSocket = new DaemonSocket(socketPath, (method, params) => {
-    if (method === "status") return executor.buildStatus();
-    return executor.execute(method, params);
-  });
-  if (!once) {
-    daemonSocket.start();
-  }
+  // A one-shot (`--once`/`--now`) wake shares the root — and therefore the
+  // socket + pidfile paths — with any running daemon, but never registers or
+  // binds them (every guard above is `!once`, and `--now` deliberately
+  // coexists with a live daemon). So it must not construct, bind, or clean up
+  // the control socket at all: otherwise its exit handler unlinks the live
+  // co-rooted daemon's socket + pidfile and orphans it (#432).
+  const daemonSocket = once
+    ? undefined
+    : new DaemonSocket(socketPath, (method, params) => {
+        if (method === "status") return executor.buildStatus();
+        return executor.execute(method, params);
+      });
+  daemonSocket?.start();
 
   // Start HTTP server for web dashboard (SSE events + REST API).
   // Mint a per-daemon auth token and persist to .murmuration/dashboard.token
@@ -2398,14 +2404,18 @@ export const bootDaemon = async (options: BootDaemonOptions = {}): Promise<void>
     );
   }
 
-  // Clean up pidfile + socket + http on exit
+  // Clean up pidfile + socket + http on exit. Skip entirely for one-shot
+  // (`once`) runs: they own neither the pidfile nor the socket (both writes
+  // are `!once`-gated above), so deleting the shared files here would orphan a
+  // co-rooted running daemon — leaving it firing wakes but unreachable (#432).
   const cleanupPid = (): void => {
+    if (once) return;
     try {
       unlinkSync(pidfilePath);
     } catch {
       /* best effort */
     }
-    daemonSocket.stop();
+    daemonSocket?.stop();
     daemonHttp?.stop();
   };
   process.on("exit", cleanupPid);
