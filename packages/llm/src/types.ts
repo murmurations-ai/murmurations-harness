@@ -45,6 +45,14 @@ export interface ToolCallResult {
   readonly name: string;
   readonly args: Record<string, unknown>;
   readonly result: unknown;
+  /**
+   * Whether the tool call succeeded, when the provider surfaces a result
+   * (subscription-CLI stream-json `tool_result.is_error`). `undefined` when
+   * no result was captured (no matching `tool_result`, or a provider that
+   * doesn't report outcomes). Downstream evidence (e.g. verifiedActions)
+   * should treat only `ok === true` as confirmed.
+   */
+  readonly ok?: boolean;
 }
 
 /** Input to {@link LLMClient.complete}. */
