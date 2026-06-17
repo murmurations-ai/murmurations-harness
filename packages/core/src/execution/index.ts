@@ -699,6 +699,94 @@ export interface WakeActionReceipt {
   readonly issueNumber?: number;
 }
 
+/**
+ * A side-effect a subscription-CLI agent performed *inside* its subprocess
+ * (via an MCP/CLI tool call) that the harness can vouch for — the tool ran
+ * and returned without error (#364B). Unlike a {@link WakeActionReceipt},
+ * which records an action the *daemon* executed from a parsed `wake_actions`
+ * block, a VerifiedAction is structured evidence of a tool the agent invoked
+ * itself. It exists because subscription-CLI agents post comments / commit via
+ * tool calls that never reach `result.actions`, so the validator otherwise
+ * falls back to scraping (forgeable) URLs from the wake summary (#369/#379).
+ */
+export interface VerifiedAction {
+  readonly kind: WakeAction["kind"];
+  readonly issueNumber?: number;
+  readonly filePath?: string;
+  /** Originating tool name (e.g. `mcp__murmuration__create_issue_comment`), for audit. */
+  readonly toolName: string;
+}
+
+/** Last `__`-delimited segment of an MCP tool name (`mcp__server__tool` → `tool`). */
+const baseToolName = (name: string): string => name.split("__").pop() ?? name;
+
+const firstNumber = (
+  args: Record<string, unknown>,
+  keys: readonly string[],
+): number | undefined => {
+  for (const k of keys) {
+    const v = args[k];
+    if (typeof v === "number" && Number.isInteger(v)) return v;
+  }
+  return undefined;
+};
+
+/**
+ * Map an agent's confirmed (`ok === true`) tool calls to {@link VerifiedAction}s.
+ *
+ * v1 (#364B) recognizes the issue-comment tool — the one github write tool the
+ * harness exposes (`create_issue_comment`) and the common external-MCP names
+ * (`add_issue_comment`, `create_comment`, …). The base name is matched after
+ * stripping any `mcp__server__` prefix, so it works whatever the bridge server
+ * is called. Commits still flow through the daemon-executed `wake_actions`
+ * path (which produces real receipts), so there's no commit tool to map yet.
+ * Tool calls without `ok === true`, or that don't match a known write tool,
+ * are ignored.
+ */
+export const deriveVerifiedActions = (toolCalls: readonly unknown[]): readonly VerifiedAction[] => {
+  const out: VerifiedAction[] = [];
+  for (const raw of toolCalls) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const call = raw as { name?: unknown; args?: unknown; ok?: unknown };
+    // Only confirmed (non-error) tool calls count as evidence.
+    if (call.ok !== true || typeof call.name !== "string") continue;
+    const args: Record<string, unknown> =
+      typeof call.args === "object" && call.args !== null
+        ? (call.args as Record<string, unknown>)
+        : {};
+    const base = baseToolName(call.name).toLowerCase();
+    if (base.includes("comment") && /create|add|post|reply/.test(base)) {
+      const issueNumber = firstNumber(args, ["number", "issueNumber", "issue_number", "issue"]);
+      out.push({
+        kind: "comment-issue",
+        toolName: call.name,
+        ...(issueNumber !== undefined ? { issueNumber } : {}),
+      });
+    }
+  }
+  return out;
+};
+
+/**
+ * Convert {@link VerifiedAction}s into synthetic successful
+ * {@link WakeActionReceipt}s so they merge into the receipt set
+ * {@link validateWake} already checks — no change to the validator's logic.
+ * The daemon concatenates these with the receipts from harness-executed
+ * actions when validating a wake.
+ */
+export const verifiedActionsToReceipts = (
+  verifiedActions: readonly VerifiedAction[],
+): readonly WakeActionReceipt[] =>
+  verifiedActions.map((va) => ({
+    action: {
+      kind: va.kind,
+      ...(va.issueNumber !== undefined ? { issueNumber: va.issueNumber } : {}),
+      ...(va.filePath !== undefined ? { filePath: va.filePath } : {}),
+    },
+    success: true,
+    ...(va.issueNumber !== undefined ? { issueNumber: va.issueNumber } : {}),
+  }));
+
 // ---------------------------------------------------------------------------
 // Wake validation — post-wake check on whether the agent did real work
 // ---------------------------------------------------------------------------
@@ -1575,6 +1663,15 @@ export interface AgentResult {
   readonly actions: readonly WakeAction[];
   /** Execution receipts — one per action attempted. Empty until the daemon executes. */
   readonly actionReceipts: readonly WakeActionReceipt[];
+  /**
+   * Side effects the agent performed via in-subprocess tool calls that the
+   * harness can vouch for (#364B). Derived from the LLM response's confirmed
+   * tool calls. The daemon folds these into the evidence `validateWake` sees,
+   * so a subscription-CLI agent that comments via a tool call is no longer
+   * mistaken for an idle/narrative-only wake. Optional + defaults to empty for
+   * executors/providers that surface no tool calls.
+   */
+  readonly verifiedActions?: readonly VerifiedAction[];
   readonly startedAt: Date;
   readonly finishedAt: Date;
 }

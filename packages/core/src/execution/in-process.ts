@@ -37,6 +37,7 @@ import {
   type CostActuals,
   type EmittedGovernanceEvent,
   type ExecutorCapabilities,
+  type VerifiedAction,
   type WakeAction,
 } from "./index.js";
 
@@ -60,6 +61,8 @@ export interface AgentRunnerResult {
   readonly governanceEvents?: readonly EmittedGovernanceEvent[];
   /** Structured actions for the harness to execute after the wake. Optional. */
   readonly actions?: readonly WakeAction[];
+  /** Confirmed in-subprocess tool calls, for validation evidence (#364B). Optional. */
+  readonly verifiedActions?: readonly VerifiedAction[];
 }
 
 /**
@@ -292,6 +295,9 @@ export class InProcessExecutor<Clients = unknown> implements AgentExecutor {
           governanceEvents: terminal.result.governanceEvents ?? [],
           actions: terminal.result.actions ?? [],
           actionReceipts: [],
+          ...(terminal.result.verifiedActions !== undefined
+            ? { verifiedActions: terminal.result.verifiedActions }
+            : {}),
           cost,
           costRecord,
           wakeSummary: terminal.result.wakeSummary,

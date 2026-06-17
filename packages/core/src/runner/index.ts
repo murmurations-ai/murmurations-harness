@@ -17,11 +17,16 @@
 
 import { resolve, dirname } from "node:path";
 
-import { parseSelfReflection, parseWakeActions } from "../execution/index.js";
+import {
+  deriveVerifiedActions,
+  parseSelfReflection,
+  parseWakeActions,
+} from "../execution/index.js";
 import type {
   AgentOutputArtifact,
   AgentSpawnContext,
   EmittedGovernanceEvent,
+  VerifiedAction,
   WakeAction,
 } from "../execution/index.js";
 import { PromptAssembler } from "../runtime/prompt-assembler.js";
@@ -162,6 +167,8 @@ export interface DefaultRunnerResult {
   readonly outputs?: readonly AgentOutputArtifact[];
   readonly governanceEvents?: readonly EmittedGovernanceEvent[];
   readonly actions?: readonly WakeAction[];
+  /** Confirmed in-subprocess tool calls, derived from the LLM response (#364B). */
+  readonly verifiedActions?: readonly VerifiedAction[];
 }
 
 // ---------------------------------------------------------------------------
@@ -447,11 +454,17 @@ export function createDefaultRunner(
       }
     }
 
+    // #364B: surface the agent's confirmed in-subprocess tool calls (e.g. a
+    // `create_issue_comment`) so the daemon can credit them as real evidence
+    // instead of treating a tool-driven comment as a narrative-only wake.
+    const verifiedActions = deriveVerifiedActions(result.value.toolCalls ?? []);
+
     return {
       wakeSummary: [...summaryLines, "", "---", "", content].join("\n"),
       ...(outputs.length > 0 ? { outputs } : {}),
       ...(governanceEvents.length > 0 ? { governanceEvents } : {}),
       ...(wakeActions.length > 0 ? { actions: wakeActions } : {}),
+      ...(verifiedActions.length > 0 ? { verifiedActions } : {}),
     };
   };
 }
