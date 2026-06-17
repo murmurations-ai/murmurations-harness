@@ -39,6 +39,7 @@ import {
   type ResolvedModel,
   type SignalBundle,
   validateWake,
+  verifiedActionsToReceipts,
   amendWakeSummaryWithValidation,
 } from "../execution/index.js";
 import type { LoadedAgentIdentity } from "../identity/index.js";
@@ -905,6 +906,14 @@ export class Daemon {
         }
       }
 
+      // #364B: credit the agent's confirmed in-subprocess tool calls (e.g. a
+      // `create_issue_comment`) as real evidence. They merge into the receipt
+      // set ONLY for validation — the daemon.wake.actions log above still
+      // counts just the harness-executed actions.
+      const verifiedReceipts = isCompleted(result)
+        ? verifiedActionsToReceipts(result.verifiedActions ?? [])
+        : [];
+
       // Post-wake validation — "Did Work" tracking
       const validation = isCompleted(result)
         ? validateWake(
@@ -918,7 +927,7 @@ export class Daemon {
               ...(context.contract !== undefined ? { contract: context.contract } : {}),
             },
             result,
-            actionReceipts,
+            [...actionReceipts, ...verifiedReceipts],
           )
         : {
             productive: false,

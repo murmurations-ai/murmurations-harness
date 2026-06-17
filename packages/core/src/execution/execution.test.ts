@@ -15,6 +15,8 @@ import {
   makeWakeId,
   parseWakeActions,
   pathMatchesGlob,
+  deriveVerifiedActions,
+  verifiedActionsToReceipts,
   type AgentResult,
   type CostBudget,
   type ResolvedModel,
@@ -398,6 +400,24 @@ describe("validateWake", () => {
       mkCtx({ signals: [directive], agentId: "architecture-agent" }),
       emptyResult,
       receipts,
+    );
+    expect(v.directivesUnaddressed).toEqual([]);
+    expect(v.productive).toBe(true);
+  });
+
+  it("counts a directive as addressed via a verifiedAction (subprocess tool comment) — the #364 case", () => {
+    // engineering-agent posted its CONSENT on #845 via the create_issue_comment
+    // MCP tool (subscription-CLI), leaving no harness receipt. Before #364B the
+    // validator fell back to prose and flagged narrative-only-claim. Now the
+    // confirmed tool call → verifiedAction → synthetic receipt addresses it.
+    const directive = makeIssueSignal(845, ["source-directive", "assigned:engineering-agent"]);
+    const verified = deriveVerifiedActions([
+      { name: "mcp__murmuration__create_issue_comment", args: { number: 845 }, ok: true },
+    ]);
+    const v = validateWake(
+      mkCtx({ signals: [directive], agentId: "engineering-agent" }),
+      emptyResult,
+      verifiedActionsToReceipts(verified),
     );
     expect(v.directivesUnaddressed).toEqual([]);
     expect(v.productive).toBe(true);
@@ -1560,5 +1580,84 @@ describe("validateWake — behaviorWarnings integration (warning-only)", () => {
     };
     const v = validateWake(ctx, result, []);
     expect(v.behaviorWarnings).toBeUndefined();
+  });
+});
+
+describe("deriveVerifiedActions (#364B)", () => {
+  it("maps a confirmed create_issue_comment to a comment-issue verified action", () => {
+    const vas = deriveVerifiedActions([
+      { name: "create_issue_comment", args: { repo: "o/r", number: 42, body: "hi" }, ok: true },
+    ]);
+    expect(vas).toEqual([
+      { kind: "comment-issue", issueNumber: 42, toolName: "create_issue_comment" },
+    ]);
+  });
+
+  it("strips an mcp__server__ prefix to match the base tool name", () => {
+    const vas = deriveVerifiedActions([
+      { name: "mcp__murmuration__create_issue_comment", args: { number: 7 }, ok: true },
+    ]);
+    expect(vas[0]).toMatchObject({ kind: "comment-issue", issueNumber: 7 });
+  });
+
+  it("accepts alternate issue-number arg keys and external-MCP comment names", () => {
+    expect(
+      deriveVerifiedActions([
+        { name: "add_issue_comment", args: { issue_number: 9 }, ok: true },
+      ])[0],
+    ).toMatchObject({
+      kind: "comment-issue",
+      issueNumber: 9,
+    });
+  });
+
+  it("omits issueNumber when the args carry none (kind-only evidence)", () => {
+    const vas = deriveVerifiedActions([{ name: "create_comment", args: {}, ok: true }]);
+    expect(vas).toEqual([{ kind: "comment-issue", toolName: "create_comment" }]);
+  });
+
+  it("ignores tool calls that did not succeed (ok !== true)", () => {
+    expect(
+      deriveVerifiedActions([{ name: "create_issue_comment", args: { number: 1 }, ok: false }]),
+    ).toEqual([]);
+    expect(deriveVerifiedActions([{ name: "create_issue_comment", args: { number: 1 } }])).toEqual(
+      [],
+    );
+  });
+
+  it("ignores non-write / read tools", () => {
+    expect(deriveVerifiedActions([{ name: "read_issue", args: { number: 1 }, ok: true }])).toEqual(
+      [],
+    );
+    expect(deriveVerifiedActions([{ name: "list_issue_comments", args: {}, ok: true }])).toEqual(
+      [],
+    );
+  });
+
+  it("is robust to malformed entries (non-object, null, missing name)", () => {
+    expect(() => deriveVerifiedActions([null, 42, "x", {}, { ok: true }])).not.toThrow();
+    expect(deriveVerifiedActions([null, 42, "x", {}, { ok: true }])).toEqual([]);
+  });
+});
+
+describe("verifiedActionsToReceipts (#364B)", () => {
+  it("converts a verified action into a synthetic successful receipt", () => {
+    const receipts = verifiedActionsToReceipts([
+      { kind: "comment-issue", issueNumber: 845, toolName: "create_issue_comment" },
+    ]);
+    expect(receipts).toEqual([
+      {
+        action: { kind: "comment-issue", issueNumber: 845 },
+        success: true,
+        issueNumber: 845,
+      },
+    ]);
+  });
+
+  it("omits issueNumber from the receipt when the verified action has none", () => {
+    const receipts = verifiedActionsToReceipts([
+      { kind: "comment-issue", toolName: "create_comment" },
+    ]);
+    expect(receipts[0]).toEqual({ action: { kind: "comment-issue" }, success: true });
   });
 });
