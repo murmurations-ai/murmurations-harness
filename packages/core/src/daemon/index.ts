@@ -535,6 +535,15 @@ export class Daemon {
   readonly #agents: readonly RegisteredAgent[];
   readonly #logger: DaemonLogger;
   readonly #inFlight = new Set<Promise<void>>();
+  /**
+   * Agents with a wake currently in flight, keyed by `agentId`. Guards against
+   * a `multi` wake_schedule (#420) firing two coincident scheduled sub-triggers
+   * into concurrent `#runWake`s for the same agent. The id is added
+   * synchronously before the run's first `await` (so a same-tick second fire
+   * observes it) and removed in the run's `finally`. Manual `--now` triggers
+   * bypass it — see `#handleWake`.
+   */
+  readonly #wakingAgents = new Set<string>();
   readonly #heartbeatMs: number;
   readonly #secrets:
     | { readonly provider: SecretsProvider; readonly declaration: SecretDeclaration }
@@ -768,6 +777,24 @@ export class Daemon {
       return;
     }
 
+    // Per-agent in-flight guard. A `multi` wake_schedule (#420) fans out into
+    // independently-armed timers; two cron/interval sub-triggers that elapse at
+    // the same instant would otherwise drive two concurrent `#runWake`s for the
+    // same agent — racing the agent state store and the `runs/<agent>` writer
+    // (Engineering Std #3: single owner per state file) and risking duplicate
+    // GitHub mutations. Skip a coincident scheduled wake while one is already in
+    // flight; the running wake covers the same context. Manual `--now` triggers
+    // always fire — operators expect the override to run (this mirrors the
+    // idle-skip exemption in #runWake).
+    if (event.wakeReason.kind !== "manual" && this.#wakingAgents.has(agent.agentId)) {
+      this.#logger.info("daemon.wake.skipped", {
+        agentId: agent.agentId,
+        wakeId: event.wakeId.value,
+        reason: "in-flight",
+      });
+      return;
+    }
+
     // Circuit breaker: skip wakes for agents that have failed too many times in a row.
     if (this.#agentStateStore) {
       const record = this.#agentStateStore.getAgent(agent.agentId);
@@ -782,8 +809,12 @@ export class Daemon {
       }
     }
 
+    // Mark in-flight synchronously, before #runWake reaches its first await, so
+    // a same-tick coincident fire sees it; release in the finally.
+    this.#wakingAgents.add(agent.agentId);
     const p = this.#runWake(agent, event).finally(() => {
       this.#inFlight.delete(p);
+      this.#wakingAgents.delete(agent.agentId);
     });
     this.#inFlight.add(p);
     await p;

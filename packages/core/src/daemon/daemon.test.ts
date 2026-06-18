@@ -38,6 +38,21 @@ const makeCapturingLogger = (): { logger: DaemonLogger; logs: CapturedLog[] } =>
   return { logger, logs };
 };
 
+/**
+ * Executor whose every wake sleeps `sleepMs` before completing, so a test can
+ * hold an agent "in flight" long enough for a coincident wake to arrive.
+ */
+const makeSlowExecutor = (sleepMs: number): SubprocessExecutor =>
+  new SubprocessExecutor({
+    resolveCommand: () => ({
+      command: "node",
+      args: [
+        "-e",
+        `setTimeout(() => { process.stdout.write('::wake-summary:: slow wake done\\n'); process.exit(0); }, ${String(sleepMs)});`,
+      ],
+    }),
+  });
+
 const helloWorldId = makeAgentId("hello-world");
 const engineeringGroupId = makeGroupId("engineering");
 
@@ -539,6 +554,94 @@ describe("Daemon", () => {
     const recordAfterSkip = stateStore.getAgent("hello-world");
     expect(recordAfterSkip?.lastFiredContextHash).toBe(recordAfterFire?.lastFiredContextHash);
     expect(recordAfterSkip?.idleSkipStreak).toBeGreaterThanOrEqual(1);
+
+    await daemon.stop();
+  });
+
+  // -------------------------------------------------------------------
+  // Per-agent in-flight guard (#420 multi-schedule self-overlap race)
+  // -------------------------------------------------------------------
+
+  it("serializes coincident scheduled wakes for one agent — the second is skipped in-flight", async () => {
+    // A `multi` wake_schedule whose two sub-triggers fire on the same tick.
+    // The first wake holds the agent for ~500ms, so the coincident second must
+    // be skipped rather than run concurrently (which would race the state store
+    // and the runs/<agent> writer).
+    const raceAgent: RegisteredAgent = {
+      ...helloWorld,
+      trigger: {
+        kind: "multi",
+        triggers: [
+          { kind: "interval", intervalMs: 50 },
+          { kind: "interval", intervalMs: 50 },
+        ],
+      },
+    };
+
+    const { logger, logs } = makeCapturingLogger();
+    const daemon = new Daemon({
+      executor: makeSlowExecutor(500),
+      agents: [raceAgent],
+      logger,
+      heartbeatMs: 60_000,
+    });
+
+    daemon.start();
+    await waitFor(
+      () => logs.some((l) => l.event === "daemon.wake.skipped" && l.data.reason === "in-flight"),
+      2000,
+    );
+
+    // Exactly one wake proceeded; the coincident one was guarded out. Without
+    // the guard both would fire and there would be no in-flight skip at all.
+    const firesWhenSkipped = logs.filter((l) => l.event === "daemon.wake.fire").length;
+    expect(firesWhenSkipped).toBe(1);
+    const skip = logs.find(
+      (l) => l.event === "daemon.wake.skipped" && l.data.reason === "in-flight",
+    );
+    expect(skip?.data.agentId).toBe("hello-world");
+
+    await daemon.stop();
+  });
+
+  it("manual wakes bypass the in-flight guard while a scheduled wake runs", async () => {
+    // interval = scheduled (occupies the agent ~500ms); delay-once = manual
+    // (`scheduler:delay-once`) firing mid-flight. The manual wake must NOT be
+    // skipped — operators expect `--now` to run even over an active wake.
+    const mixedAgent: RegisteredAgent = {
+      ...helloWorld,
+      trigger: {
+        kind: "multi",
+        triggers: [
+          { kind: "interval", intervalMs: 50 },
+          { kind: "delay-once", delayMs: 120 },
+        ],
+      },
+    };
+
+    const { logger, logs } = makeCapturingLogger();
+    const daemon = new Daemon({
+      executor: makeSlowExecutor(500),
+      agents: [mixedAgent],
+      logger,
+      heartbeatMs: 60_000,
+    });
+
+    const isDelayOnceFire = (l: CapturedLog): boolean =>
+      l.event === "daemon.wake.fire" &&
+      (l.data.wakeReason as { invokedBy?: string } | undefined)?.invokedBy ===
+        "scheduler:delay-once";
+
+    daemon.start();
+    await waitFor(() => logs.some(isDelayOnceFire), 2000);
+
+    // The manual wake fired despite a scheduled wake being in flight...
+    expect(logs.some(isDelayOnceFire)).toBe(true);
+    // ...and a coincident scheduled wake WAS being guarded at the same time,
+    // proving the manual exemption — not an absent guard — is what let it run.
+    expect(
+      logs.some((l) => l.event === "daemon.wake.skipped" && l.data.reason === "in-flight"),
+    ).toBe(true);
 
     await daemon.stop();
   });
