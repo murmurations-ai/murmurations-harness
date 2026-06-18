@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-18
+
+**Trustworthy subscription-CLI agent actions, multi-schedule wakes, and daemon reliability.** The headline closes a validation blind spot in two steps: the claude subscription-CLI adapter now runs in `stream-json` mode so an agent's tool calls are actually visible (#430), and the validator consumes those confirmed calls as `verifiedActions` (#364B) — so an agent that posts a comment through its MCP bridge is no longer mistaken for an idle, narrative-only wake. Agents can wake on multiple cron schedules (#420); the daemon serializes the coincident same-agent wakes that multi-schedule made reachable (#435); Spirit recovers from stale resume sessions (#424); and `murmuration list` stops reporting phantom orphan daemons (#422). The toolchain moves to a Node 22 floor and pnpm 11 so npm OIDC Trusted Publishing works end to end.
+
 ### Added
 
 - **`verifiedActions` — confirmed in-subprocess tool calls as validation evidence** ([#364](https://github.com/murmurations-ai/murmurations-harness/issues/364) Part B). Subscription-CLI agents post comments via in-subprocess tool calls (e.g. `create_issue_comment` through the MCP bridge) that never reach `result.actions`, so the validator fell back to scraping forgeable URLs from the wake summary (#369/#379). Now the runner derives `verifiedActions` from the agent's **confirmed** (`ok === true`) tool calls — surfaced by the stream-json adapter (#430) — and the daemon folds them into the evidence `validateWake` sees (as synthetic successful receipts; the validator itself is unchanged). A subscription-CLI agent that comments via a tool call is no longer mistaken for an idle/narrative-only wake. v1 recognizes the issue-comment tool (`create_issue_comment` and common external-MCP aliases); commits already produce real receipts via the `wake_actions` path. New exports: `VerifiedAction`, `deriveVerifiedActions`, `verifiedActionsToReceipts`; new optional `AgentResult.verifiedActions`.
